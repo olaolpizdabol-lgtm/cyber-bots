@@ -281,15 +281,23 @@ class TikTokStreakService:
                         await nav_msg.click()
                         await page.wait_for_timeout(3000)
 
-                    # Шукаємо контакт в списку чатів по нікнейму або імені
-                    # TikTok показує display name або @username в списку
-                    contact_row = page.locator(f'a[href*="/{username}"], [data-e2e="conversation-item"]:has-text("{username}")')
-                    if await contact_row.count() == 0:
-                        # Fallback — шукаємо по першому рядку тексту в кожному чаті
-                        contact_row = page.locator(f'div:has-text("@{username}")').first
-                    if await contact_row.count() == 0:
-                        logger.warning(f"Контакт @{username} не знайдений у списку Messages. Спробуємо через профіль...")
-                        # Fallback — профіль
+                    # Шукаємо контакт через пошукове поле Messages
+                    found_via_search = False
+                    search_box = page.locator('input[placeholder*="Search"], input[placeholder*="Пошук"]')
+                    if await search_box.count() > 0:
+                        await search_box.first.click()
+                        await page.wait_for_timeout(500)
+                        await search_box.first.fill(username)
+                        await page.wait_for_timeout(2000)
+                        # Клікаємо на перший результат пошуку
+                        search_result = page.locator(f'[data-e2e="conversation-item"], div[class*="conversation"], div[class*="message-item"]').first
+                        if await search_result.count() > 0:
+                            await search_result.click()
+                            await page.wait_for_timeout(3000)
+                            found_via_search = True
+
+                    if not found_via_search:
+                        logger.warning(f"Контакт @{username} не знайдений через search. Спробуємо через профіль...")
                         await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="domcontentloaded")
                         await page.wait_for_timeout(5000)
                         message_btn = page.locator('button[data-e2e="message-button"], button:has-text("Message")')
@@ -297,9 +305,6 @@ class TikTokStreakService:
                             return False, f"⚠️ @{username} не знайдений ні в Messages inbox, ні на профілі"
                         await message_btn.first.click()
                         await page.wait_for_timeout(4000)
-                    else:
-                        await contact_row.first.click()
-                        await page.wait_for_timeout(3000)
 
                     # Шукаємо поле вводу (TikTok DM chat input)
                     await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
