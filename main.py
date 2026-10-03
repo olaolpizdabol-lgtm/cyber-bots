@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
+    from core.railway_sync import restore_sessions_from_env
+    restore_sessions_from_env()
+
     logger.info("Ініціалізація бази даних та модулів для Бота Канал Автоматизація...")
     init_db()
 

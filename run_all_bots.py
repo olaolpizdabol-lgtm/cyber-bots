@@ -30,6 +30,9 @@ logger = logging.getLogger("multi_bot_runner")
 
 
 async def run_both():
+    from core.railway_sync import restore_sessions_from_env
+    restore_sessions_from_env()
+
     ch_token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
     rz_token = CYBER_RIZHYI_BOT_TOKEN
     tk_token = CYBER_TURIKOV_BOT_TOKEN
