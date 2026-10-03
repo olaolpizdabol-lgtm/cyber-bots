@@ -1281,10 +1281,12 @@ class CyberRizhyiService:
                 parts = chunks
             elif len(reply) > 35 and "," in reply:
                 comma_chunks = [clean_bot_reply(s) for s in reply.split(",") if len(clean_bot_reply(s)) > 3]
-                if len(comma_chunks) >= 2:
-                    parts = comma_chunks
-                else:
-                    parts = [reply]
+            else:
+                parts = [reply]
+
+        if not parts:
+            parts = [reply]
+
         r = random.random()
         if r < 0.65:
             max_burst = 1
@@ -1299,9 +1301,11 @@ class CyberRizhyiService:
                 return [combined]
             return [parts[0]] if parts else [reply]
         elif max_burst == 2:
-            return [p for p in parts[:2] if p]
+            res = [p for p in parts[:2] if p]
+            return res if res else [reply]
         else:
-            return [p for p in parts[:3] if p]
+            res = [p for p in parts[:3] if p]
+            return res if res else [reply]
 
     def generate_spontaneous_shout(self, chat_id: int) -> Tuple[List[str], Optional[str]]:
         """

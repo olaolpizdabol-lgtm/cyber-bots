@@ -530,12 +530,12 @@ class CyberTurikovService:
             chunks = [clean_bot_reply(s) for s in re.split(r'(?<=[.!?])\s+|\s*,\s*(?=ти|йди|шо|нахуй|закрий|краще|чуй|на свою|на свій|не|як|бо|але|давай|сиди|зніми)', raw_reply) if clean_bot_reply(s)]
             if len(chunks) >= 2:
                 parts = chunks
-            elif len(raw_reply) > 35 and "," in raw_reply:
-                comma_chunks = [clean_bot_reply(s) for s in raw_reply.split(",") if len(clean_bot_reply(s)) > 3]
-                if len(comma_chunks) >= 2:
-                    parts = comma_chunks
-                else:
-                    parts = [raw_reply]
+            else:
+                parts = [raw_reply]
+
+        if not parts:
+            parts = [raw_reply]
+
         r = random.random()
         if r < 0.65:
             max_burst = 1
@@ -550,9 +550,11 @@ class CyberTurikovService:
             else:
                 bursts = [parts[0]] if parts else [raw_reply]
         elif max_burst == 2:
-            bursts = [p for p in parts[:2] if p]
+            res = [p for p in parts[:2] if p]
+            bursts = res if res else [raw_reply]
         else:
-            bursts = [p for p in parts[:3] if p]
+            res = [p for p in parts[:3] if p]
+            bursts = res if res else [raw_reply]
         
         sticker_file_id = None
         animation_file_id = None
