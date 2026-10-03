@@ -9,3 +9,4 @@ credentials/*
 data/*
 !data/.gitkeep
 .DS_Store
+temp/

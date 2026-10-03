@@ -381,6 +381,19 @@ async def handle_text(message: Message, bot: Bot):
             reply_to_name=target_name,
             reply_to_msg_text=reply_to_text
         )
+        if is_group and is_message_addressed_to_bot(message, "rizhyi"):
+            enqueue_cyber_bot_event(
+                chat_id=message.chat.id,
+                from_bot="user_relay",
+                to_bot="rizhyi",
+                message_id=message.message_id,
+                text=text,
+                consecutive_count=0,
+                sender_user_id=message.from_user.id,
+                sender_username=message.from_user.username,
+                sender_first_name=message.from_user.first_name,
+                reply_to_name="Саня Рижий"
+            )
         return
 
     _handled_group_msg_ids.add(message.message_id)
@@ -404,6 +417,24 @@ async def handle_text(message: Message, bot: Bot):
         reply_to_text=reply_to_text
     )
     await send_reply_package(message, bot, pkg)
+
+    # Якщо це спільна група і повідомлення від людини — передаємо подію Рижому, щоб він ТАКОЖ включився в розмову!
+    if is_group and message.from_user and not message.from_user.is_bot:
+        try:
+            enqueue_cyber_bot_event(
+                chat_id=message.chat.id,
+                from_bot="user_relay",
+                to_bot="rizhyi",
+                message_id=message.message_id,
+                text=text,
+                consecutive_count=0,
+                sender_user_id=message.from_user.id,
+                sender_username=message.from_user.username,
+                sender_first_name=message.from_user.first_name,
+                reply_to_name=target_name
+            )
+        except Exception as e:
+            logger.debug(f"Помилка relay до Рижого: {e}")
 
     # 40% шанс поставити реакцію разом із текстом
     if random.random() < 0.40:
@@ -527,6 +558,20 @@ async def inter_bot_bridge_worker(bot: Bot):
                     sender_uname = ev.get("sender_username")
                     sender_name = ev.get("sender_first_name") or "Кент"
 
+                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітос" in sender_name.lower()
+                    if is_vitos:
+                        relay_instruction = (
+                            "Це пише Вітя (@zelenskiy404)! Твій бро Рижий уже осадив його, тепер ТИ включайся і підсилюй наїзд! "
+                            "Підйобуй за його згенеровану аватарку клоуна, осади за його базар, закрий йому ротяку! "
+                            "Розбий на 2-3 короткі повідомлення через '|||'. Без '!' і СТРОГО без @ тегів!"
+                        )
+                    else:
+                        relay_instruction = (
+                            f"Твій бро Рижий щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
+                            "підтримай тему або підколи співрозмовника як справжній напарник! "
+                            "Розбий на 2 короткі репліки через '|||'. Без '!' і без @ тегів!"
+                        )
+
                     pkg = cyber_turikov_service.generate_reply_package(
                         chat_id=chat_id,
                         chat_type="supergroup",
@@ -536,7 +581,7 @@ async def inter_bot_bridge_worker(bot: Bot):
                         message_text=text,
                         reply_to_user_id=sender_uid,
                         reply_to_name=sender_name,
-                        custom_instruction=f"Тобі написав {sender_name} у групі. Відповідай дуже коротко (1-4 слова) по-пацанськи як Саня Туріков."
+                        custom_instruction=relay_instruction
                     )
                     replies = pkg.get("text_replies") or []
                     for idx, rep in enumerate(replies):

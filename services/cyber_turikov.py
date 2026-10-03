@@ -34,6 +34,7 @@ from core.database import (
 )
 from services.gemini_ai import gemini_service, sanitize_typography
 from services.cyber_routing import get_temporal_context
+from services.cyber_rizhyi import is_ai_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -398,15 +399,9 @@ class CyberTurikovService:
         tag_str = f" -> {reply_to_name}" if reply_to_name else ""
         
         gang_context = (
-            "УЧАСНИКИ ЧАТУ (можеш тегати в тему): "
-            "@davvidka1 (Давід, бізнес на шортсах/роблокс), "
-            "@Mxsdt (Мишко, карате), "
-            "@CHERNIVTSIZOV1958 (Коля, карате), "
-            "@Vad1mk4k (Хомяк, танки), "
-            "@bodya_qq (Бодя — підколюй 'богдан банан'), "
-            "@twdht (Діма), "
-            "@invicible11 (Тімур, кейсери), "
-            "@cyber_red_head_bot (Кібер Рижий — він сам відповість, не тегай його!)"
+            "УЧАСНИКИ ЧАТУ: Давід (шортси/роблокс), Мишко (карате), Коля (карате), "
+            "Хомяк (танки), Бодя, Діма, Тімур, Вітя (ШІ аватарка клоуна). "
+            "СТРОГО ЗАБОРОНЕНО ТЕГАТИ КЕНТІВ ЧЕРЕЗ @ БЕЗ НАГАЛЬНОЇ ПОТРЕБИ! Пиши просто імена."
         )
         
         if reply_to_text:
@@ -421,28 +416,26 @@ class CyberTurikovService:
             f"{gang_context}"
         )
 
-        is_bohdan = (
-            u_clean == "bodya_qq"
-            or "бодя" in sender_name.lower()
-            or "богдан" in sender_name.lower()
-            or (reply_to_name and any(b in reply_to_name.lower() for b in ["бодя", "богдан", "bodya"]))
-        )
-        if is_bohdan:
-            current_prompt += "\n[БОДЯ В ЧАТІ: підколи його 'богдан банан ха ха ха' або 'привіт пупсик'!]"
+        is_insult = any(bad in (message_text or "").lower() for bad in [
+            "блядот", "підор", "пидор", "хуйл", "дебіл", "дебил", "даун", "лох",
+            "чмо", "довбойоб", "долбоеб", "єбал", "ебал", "завали", "рот закрий",
+            "гондон", "гандон", "шмар", "сука", "попущен", "педик", "пітух", "урод",
+            "нах", "нахуй", "соси", "хуй", "шльондр", "гнид", "виродок", "тварь",
+            "пси", "пес", "псяра", "собак", "гавка", "чорт", "свин", "клоун"
+        ])
 
-        has_pc_cs = any(w in message_text.lower() for w in ["комп", "кс", "cs", "cs2", "лагає", "ноут", "fps", "фпс", "вінда"])
-        if has_pc_cs:
-            current_prompt += "\n[У ТЕБЕ НЕМА КОМПА — ти з телефона на вулиці!]"
-
-        if has_video and video_path:
-            video_desc = gemini_service.analyze_video(video_path)
-            logger.info(f"Gemini опис відео для Турікова: '{video_desc}'")
-            if video_desc:
-                current_prompt += f"\n[ТИ БАЧИШ ЦЕ ВІДЕО В ЧАТІ: {video_desc}. Відреагуй як Саня Туріков (1-4 слова), без '!']"
-            else:
-                current_prompt += "\n[ТИ БАЧИШ ВІДЕО В ЧАТІ. Відреагуй як Саня Туріков (1-4 слова), без '!']"
-
-        if reply_to_name == "Саня Туріков":
+        is_vitos = u_clean == "zelenskiy404" or "вітя" in sender_name.lower() or "вітос" in sender_name.lower() or "zelenskiy404" in (message_text or "").lower()
+        if is_vitos:
+            current_prompt += (
+                "\n[ЦЕ ВІТОС (@zelenskiy404)! ВІН ОБЗИВАЄТЬСЯ ЧИ НАЇЖДЖАЄ! "
+                "ЖОРСТКО ТРАВИ ЙОГО РАЗОМ З РИЖИМ: "
+                "1. Підйобуй за його клоунську ШІ аватарку ('нахуя ти клоуна на аву начепив', 'циркач єбаний'). "
+                "2. Якщо він гавкає або обзивається псом/чортом/свинею — осади його, скажи щоб сидів на уроці тихо і ротяку стулив. "
+                "3. Пиши 2-3 короткі репліки через '|||', наприклад: 'вітос ти берега попутав ||| зніми клоуна з ави не позорся ||| і сиди тихо на уроці'. Без '!']"
+            )
+        elif is_insult:
+            current_prompt += "\n[УВАГА: тебе щойно обізвали в чаті! ЖОРСТКО ОСАДИ В СТИЛІ ТУРІКОВА! Розбий на 2 короткі репліки через '|||'. Без вибачень, без знаків '!']"
+        elif reply_to_name == "Саня Туріков":
             current_prompt += f"\n[ДО ТЕБЕ звертається {sender_name}! Відповідай конкретно на те що написали!]"
         elif sender_name in ("Саня Рижий", "Кібер Рижий") or u_clean in ("cyber_red_head_bot",):
             current_prompt += "\n[РИЖИЙ ПИШЕ: підколи або відповідай по-пацанськи!]"
@@ -458,11 +451,32 @@ class CyberTurikovService:
 
         # 2. Якщо обидва AI недоступні — ультра-короткий нейтральний fallback (не рандом!)
         if not reply:
-            fallback_shorts = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
-            recent_low = [r.lower() for r in self._recent_replies_cache.get(chat_id, [])]
-            reply = next((s for s in fallback_shorts if s not in recent_low), fallback_shorts[0])
+            if is_vitos:
+                vitos_roasts = [
+                    "вітос ти берега попутав ||| зніми клоуна з ави не позорся ||| і сиди тихо на уроці",
+                    "на кого ти гавкаєш клоун єбаний ||| пасть закрий і в будку залізь",
+                    "вітос єбало стули ||| на свою аву глянь циркач ||| хто тобі взагалі слово давав"
+                ]
+                reply = random.choice(vitos_roasts)
+            elif is_insult:
+                insult_roasts = [
+                    "єбало стули ||| ротяку закрий і не гавкай",
+                    "ти на кого батони крошиш ||| пасть стягни",
+                    "хто тебе з будки випустив ||| сиди тихо і не відсвічуй"
+                ]
+                reply = random.choice(insult_roasts)
+            else:
+                fallback_shorts = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
+                recent_low = [r.lower() for r in self._recent_replies_cache.get(chat_id, [])]
+                reply = next((s for s in fallback_shorts if s not in recent_low), fallback_shorts[0])
 
         reply = sanitize_typography(reply.strip()).replace("!", "")
+        reply = re.sub(r'^(Саня Туріков|Саня Рижий|Туріков|Рижий|Саня):\s*', '', reply, flags=re.IGNORECASE)
+
+        # ЗАХИСТ ВІД СПАМ-ТЕГІВ: прибираємо @ собачки з імен кентів
+        for tag, name in [("@CHERNIVTSIZOV1958", "коля"), ("@davvidka1", "давід"), ("@Vad1mk4k", "хомяк"), ("@Mxsdt", "міша"), ("@twdht", "діма"), ("@bodya_qq", "бодя"), ("@invicible11", "тімур"), ("@HzShoPusati", "танєвський")]:
+            if tag.lower() in reply.lower():
+                reply = re.sub(re.escape(tag), name, reply, flags=re.IGNORECASE)
 
         # Захист від заборонених слів (дозволяємо 'клоун' якщо обговорюємо авку)
         if "ава" not in reply.lower() and "фото" not in reply.lower():
@@ -514,34 +528,12 @@ class CyberTurikovService:
         messages = [{"role": "system", "content": CYBER_TURIKOV_SYSTEM_PROMPT}]
         messages.extend(history[-8:])
         msg_line = current_input.split("\n")[0][:120]
-        kent_list = [
-            ("@Vad1mk4k", "Хомяк", "танки World of Tanks"),
-            ("@Mxsdt", "Міша", "карате"),
-            ("@CHERNIVTSIZOV1958", "Коля", "карате"),
-            ("@bodya_qq", "Бодя", "банан, пупсик"),
-            ("@invicible11", "Тімур", "кейси"),
-            ("@twdht", "Діма", "запізнюється"),
-            ("@davvidka1", "Давід", "шортси"),
-            ("@zelenskiy404", "Вітя", "ШІ згенерована аватарка клоун"),
-        ]
-        random.shuffle(kent_list)
-
-        recent_tags = self._recent_tags_cache.get(chat_id, [])
-        avoid_tags = list(dict.fromkeys(recent_tags[-3:]))
-        avoid_str = f"ЗАБОРОНЕНО тегати (їх нещодавно вже тегали): {', '.join(avoid_tags)}! " if avoid_tags else ""
-
-        kent_info = " | ".join(f"{tag} ({name}: {desc})" for tag, name, desc in kent_list if tag not in avoid_tags)
         directive = (
             f"\n[ВІДПОВІДАЙ САМЕ НА: «{msg_line}». "
-            f"{avoid_str}"
-            f"ДОВІДКА ДЛЯ ТЕГІВ: {kent_info}. "
-            "ПРАВИЛО ТЕГІВ: тегай людину ТІЛЬКИ якщо репліка реально стосується її теми. "
-            "Якщо тема не про них - ВЗАГАЛІ НЕ ТЕГАЙ нікого! "
-            "ЗАБОРОНЕНО писати будь-які знаки перед @ (НІЯКИХ '=@', тільки '@'). "
-            "ЗАБОРОНЕНО тегати одного й того ж двічі поспіль! "
-            "ЗАБОРОНЕНО: @turikov_bot, @cyber_red_head_bot. "
-            "СТРОГО ЗАБОРОНЕНО односкладові відмовки: 'ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок', 'спс'! ЗАВЖДИ ЗАХОДЬ У ДІАЛОГ І РОЗВИВАЙ ЙОГО: запитуй, підколюй, сперечайся, розвивай тему! "
-            "1-6 слів. Без '!'.]"
+            "ПРАВИЛО ТЕГІВ: СТРОГО ЗАБОРОНЕНО ТЕГАТИ КЕНТІВ ЧЕРЕЗ @! НІЯКИХ ТЕГІВ! "
+            "Відповідай без @ тегів, тільки жива пацанська розмова. "
+            "СТРОГО ЗАБОРОНЕНО односкладові відмовки: 'ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок', 'спс'! "
+            "РОЗБИВАЙ ВІДПОВІДЬ НА 2-3 КОРОТКІ ПОВІДОМЛЕННЯ ЧЕРЕЗ '|||' (як черга в телеграмі). 1-8 слів у кожному. Без '!'.]"
         )
         messages.append({"role": "user", "content": f"{current_input}{directive}"})
 
@@ -651,7 +643,24 @@ class CyberTurikovService:
             reply_to_name=reply_to_name,
             reply_to_text=reply_to_text
         )
-        bursts = [b.strip() for b in raw_reply.split("|||") if b.strip()] if "|||" in raw_reply else [raw_reply]
+        parts = []
+        if "|||" in raw_reply:
+            parts = [p.strip() for p in raw_reply.split("|||") if p.strip()]
+        elif "\n" in raw_reply:
+            parts = [line.strip() for line in raw_reply.split("\n") if line.strip()]
+        else:
+            chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\s*,\s*(?=ти|йди|шо|нахуй|закрий|краще|чуй|на свою|на свій|не|як|бо|але|давай|сиди|зніми)', raw_reply) if s.strip()]
+            if len(chunks) >= 2:
+                parts = chunks
+            elif len(raw_reply) > 35 and "," in raw_reply:
+                comma_chunks = [s.strip() for s in raw_reply.split(",") if len(s.strip()) > 3]
+                if len(comma_chunks) >= 2:
+                    parts = comma_chunks
+                else:
+                    parts = [raw_reply]
+            else:
+                parts = [raw_reply]
+        bursts = parts[:3] if parts else [raw_reply]
         
         sticker_file_id = None
         animation_file_id = None
@@ -723,14 +732,22 @@ class CyberTurikovService:
         if target_tag.lower() in ("@turikov_bot", "@cyber_turikov_bot") or "туріков" in target_tag.lower():
             target_tag = "@cyber_red_head_bot"
 
+        tag_to_name = {
+            "@twdht": "діма", "@Smo1zi": "смолзі", "@Vad1mk4k": "хомяк",
+            "@CHERNIVTSIZOV1958": "коля", "@Mxsdt": "міша", "@davvidka1": "давід",
+            "@zelenskiy404": "вітя", "@For4iK333": "ілюха", "@bodya_qq": "бодя",
+            "@invicible11": "тімур"
+        }
+        target_name = tag_to_name.get(target_tag, target_tag.lstrip("@"))
+
         options = [
-            [f"{target_tag} привіт пупсик"],
-            [f"{target_tag} скажи газ"],
+            [f"{target_name} привіт пупсик"],
+            [f"{target_name} скажи газ"],
             ["будеш сьгодні гуляти"],
             ["а хто буде гулять?"],
             ["на площадці якраз в карти пограємо"],
-            [f"{target_tag} я 5 мин и выхожу"],
-            [f"{target_tag} ти де"],
+            [f"{target_name} я 5 мин и выхожу"],
+            [f"{target_name} ти де"],
             ["лежу на кроваті"],
             ["тут пише Роналду гей"],
             # Адресні підколи для Сані Рижого (без тегу - він чує через реплай)
@@ -743,45 +760,40 @@ class CyberTurikovService:
             ["шо там твій комп досі лагає?", "в мене компа нема і не лагає"],
             ["в мене компа нема нахуй він нада"],
             ["комп для задротів, го в карти на площадки"],
-            # Адресні теги кентів
-            ["@bodya_qq богдан банан ха ха ха"],
-            ["@bodya_qq богдан банан"],
-            ["@bodya_qq бодя банан"],
-            ["@bodya_qq привіт пупсик"],
-            ["@bodya_qq скажи газ"],
-            ["@bodya_qq тут пише Роналду гей"],
-            ["@bodya_qq пйока бадя"],
-            ["@bodya_qq бодя скажи будь ласка яка адреса шо шо біля парку Шевченка"],
-            ["@twdht діма ти трубку візьмеш чи шо"],
-            ["@twdht діма буде в 4-5"],
-            ["@twdht дімас здаров"],
-            ["@Vad1mk4k хомяк ти де"],
-            ["@Vad1mk4k хомяк виходь"],
-            ["@Vad1mk4k хомяк ти виходиш?"],
-            ["@CHERNIVTSIZOV1958 шахов шо ти"],
-            ["@CHERNIVTSIZOV1958 коля здаров"],
-            ["@Mxsdt мишко ти йдеш гуляти?"],
-            ["@davvidka1 давід виходь"],
-            ["@zelenskiy404 вітя шо за хуйня згенерована у тебе стоїть на аві клоун 🤡😂"],
-            ["@zelenskiy404 вітос ти де"],
-            ["@For4iK333 ілюха виходь"],
+            # Адресні репліки кентів (БЕЗ @ ТЕГІВ!)
+            ["богдан банан ха ха ха"],
+            ["скажи газ"],
+            ["бодя скажи будь ласка яка адреса шо шо біля парку Шевченка"],
+            ["діма ти трубку візьмеш чи шо"],
+            ["діма буде в 4-5"],
+            ["дімас здаров"],
+            ["хомяк ти де"],
+            ["хомяк виходь"],
+            ["хомяк ти виходиш?"],
+            ["шахов шо ти"],
+            ["коля здаров"],
+            ["мишко ти йдеш гуляти?"],
+            ["давід виходь"],
+            ["вітя шо за хуйня згенерована у тебе стоїть на аві клоун 🤡😂"],
+            ["вітос ти де"],
+            ["ілюха виходь"],
             ["здаров хлопці"],
             # Нові адресні топіки: бізнес Давіда
-            ["@davvidka1 давід ти ще виклав шортс на фейсбук?"],
-            ["@davvidka1 давід скільки вже заробив на шортсах?"],
-            ["@davvidka1 давід ти шо в роблокс граєш?"],
-            ["@davvidka1 давід як там бізнес на ютубі іде?"],
+            ["давід ти ще виклав шортс на фейсбук?"],
+            ["давід скільки вже заробив на шортсах?"],
+            ["давід ти шо в роблокс граєш?"],
+            ["давід як там бізнес на ютубі іде?"],
             # Нові адресні топіки: карате Міші і Колі
-            ["@Mxsdt міша ти в якій ваговій категорії в каратє?"],
-            ["@Mxsdt міша чого ти так часто на каратє ходиш?"],
-            ["@CHERNIVTSIZOV1958 коля ти з мішею в одній секції каратє?"],
-            ["@CHERNIVTSIZOV1958 коля в якій ваговій категорії б'єшся?"],
+            ["міша ти в якій ваговій категорії в каратє?"],
+            ["міша чого ти так часто на каратє ходиш?"],
+            ["коля ти з мішею в одній секції каратє?"],
+            ["коля в якій ваговій категорії б'єшся?"],
             # Нові адресні топіки: Вадим і танки
-            ["@Vad1mk4k хомяк ти в танки граєш чи шо?"],
-            ["@Vad1mk4k хомяк яка твоя любима карта в танках?"],
+            ["хомяк ти в танки граєш чи шо?"],
+            ["хомяк яка твоя любима карта в танках?"],
             # Нові адресні топіки: Тімур і дроп в кейсах
-            ["@invicible11 чуй ти шо в кейсери дропнув?"],
-            ["@invicible11 тімур шо дропнув в кейсах чи знов пусто?"],
+            ["тімур чуй ти шо в кейсери дропнув?"],
+            ["тімур шо дропнув в кейсах чи знов пусто?"],
         ]
         recent_tags = self._recent_tags_cache.get(chat_id, [])
         valid_options = []

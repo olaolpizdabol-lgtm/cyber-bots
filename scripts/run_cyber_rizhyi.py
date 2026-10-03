@@ -66,6 +66,7 @@ logging.basicConfig(
 logger = logging.getLogger("cyber_rizhyi")
 
 router = Router()
+_handled_group_msg_ids: set[int] = set()
 
 
 @router.message(CommandStart())
@@ -500,7 +501,26 @@ async def handle_text(message: Message, bot: Bot):
         reply_to_name=target_name,
         reply_to_text=reply_to_text
     )
+    _handled_group_msg_ids.add(message.message_id)
     await send_reply_package(message, bot, pkg)
+
+    # Якщо це спільна група і повідомлення від людини — передаємо подію Турікову, щоб він ТАКОЖ включився в розмову!
+    if is_group and message.from_user and not message.from_user.is_bot:
+        try:
+            enqueue_cyber_bot_event(
+                chat_id=message.chat.id,
+                from_bot="user_relay",
+                to_bot="turikov",
+                message_id=message.message_id,
+                text=text,
+                consecutive_count=0,
+                sender_user_id=message.from_user.id,
+                sender_username=message.from_user.username,
+                sender_first_name=message.from_user.first_name,
+                reply_to_name=target_name
+            )
+        except Exception as e:
+            logger.debug(f"User relay to turikov error: {e}")
 
     # 40% шанс поставити реакцію разом із текстом
     if random.random() < 0.40:
@@ -614,6 +634,75 @@ async def inter_bot_bridge_worker(bot: Bot):
                 chat_id = ev["chat_id"]
                 if chat_id > 0:
                     continue
+
+                from_bot = ev.get("from_bot")
+                target_msg_id = ev.get("message_id")
+                text = ev["text"]
+
+                # А) Звернення людини до Рижого (relay з Турікова для обходу Group Privacy)
+                if from_bot == "user_relay":
+                    if target_msg_id and target_msg_id in _handled_group_msg_ids:
+                        continue
+                    if target_msg_id:
+                        _handled_group_msg_ids.add(target_msg_id)
+                        if len(_handled_group_msg_ids) > 500:
+                            _handled_group_msg_ids.clear()
+
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                    try:
+                        await bot.send_chat_action(chat_id=chat_id, action="typing")
+                        await asyncio.sleep(random.uniform(1.0, 2.0))
+                    except Exception:
+                        pass
+
+                    sender_uid = ev.get("sender_user_id") or 1
+                    sender_uname = ev.get("sender_username")
+                    sender_name = ev.get("sender_first_name") or "Кент"
+
+                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітос" in sender_name.lower()
+                    if is_vitos:
+                        relay_instruction = (
+                            "Це пише Вітя (@zelenskiy404)! Твій бро Туріков уже осадив його, тепер ТИ включайся і добивай! "
+                            "Підйобуй за його згенеровану аватарку клоуна, осади за його базар ('пси' тощо), закрий йому ротяку! "
+                            "Розбий на 2-3 короткі повідомлення через '|||'. Без '!' і СТРОГО без @ тегів!"
+                        )
+                    else:
+                        relay_instruction = (
+                            f"Твій бро Туріков щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
+                            "підтримай тему або підколи співрозмовника як справжній напарник! "
+                            "Розбий на 2 короткі репліки через '|||'. Без '!' і без @ тегів!"
+                        )
+
+                    pkg = cyber_rizhyi_service.generate_reply_package(
+                        chat_id=chat_id,
+                        chat_type="supergroup",
+                        user_id=sender_uid,
+                        username=sender_uname,
+                        first_name=sender_name,
+                        message_text=text,
+                        reply_to_user_id=sender_uid,
+                        reply_to_name=sender_name,
+                        custom_instruction=relay_instruction
+                    )
+                    replies = pkg.get("text_replies") or []
+                    for idx, rep in enumerate(replies):
+                        if idx == 0:
+                            try:
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=rep,
+                                    reply_to_message_id=target_msg_id
+                                )
+                            except Exception:
+                                tagged_rep = rep if rep.startswith("@") else f"{sender_name}, {rep}"
+                                await bot.send_message(chat_id=chat_id, text=tagged_rep)
+                        else:
+                            await asyncio.sleep(random.uniform(0.5, 1.0))
+                            await bot.send_message(chat_id=chat_id, text=rep)
+
+                    continue
+
+                # Б) Діалог з Санею Туріковим (@turikov_bot)
                 consecutive = ev.get("consecutive_count", 0)
 
                 # Підтримуємо діалог між ботами до 10-12 реплік
@@ -621,7 +710,6 @@ async def inter_bot_bridge_worker(bot: Bot):
                     logger.info(f"Міжботовий міст (Рижий): ліміт діалогу ({consecutive}), пауза до репліки людей")
                     continue
 
-                text = ev["text"]
                 text_low = text.lower()
 
                 # Активний діалог: якщо Туріков звертається до Рижого або це активний ланцюжок
