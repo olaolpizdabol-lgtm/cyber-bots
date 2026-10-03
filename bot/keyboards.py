@@ -184,6 +184,9 @@ def get_streak_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⏰ Час розкладу", callback_data="streak_schedule")
         ],
         [
+            InlineKeyboardButton(text="🔑 Окремий акаунт для вогників (SessionID)", callback_data="streak_set_session")
+        ],
+        [
             InlineKeyboardButton(text="◀️ Назад до головного меню", callback_data="menu_back")
         ]
     ]

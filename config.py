@@ -67,8 +67,20 @@ INSTAGRAM_SESSION_FILE = os.getenv(
     str(CREDENTIALS_DIR / "instagram_session.json")
 )
 
-# TikTok Settings
-TIKTOK_SESSION_ID = os.getenv("TIKTOK_SESSION_ID", "").strip()
+# TikTok Settings (Розділені канали: Залив відео vs Вогники)
+# 🎬 Канал 1: Відео та контент (куди заливаються відео)
+TIKTOK_UPLOAD_SESSION_ID = (
+    os.getenv("TIKTOK_UPLOAD_SESSION_ID", "").strip()
+    or os.getenv("TIKTOK_SESSION_ID", "").strip()
+)
+TIKTOK_SESSION_ID = TIKTOK_UPLOAD_SESSION_ID  # Зворотна сумісність
+
+# 🔥 Канал 2: Особистий акаунт для вогників (TikTok Streaks & Сердечка)
+TIKTOK_STREAKS_SESSION_ID = (
+    os.getenv("TIKTOK_STREAKS_SESSION_ID", "").strip()
+    or os.getenv("TIKTOK_PERSONAL_SESSION_ID", "").strip()
+)
+TIKTOK_STREAKS_ACCOUNT_NAME = os.getenv("TIKTOK_STREAKS_ACCOUNT_NAME", "Особистий акаунт").strip()
 TIKTOK_STREAKS_ENABLED = os.getenv("TIKTOK_STREAKS_ENABLED", "true").lower() in ("true", "1", "yes")
 TIKTOK_GIRLFRIEND_USERNAME = os.getenv("TIKTOK_GIRLFRIEND_USERNAME", "").strip().lstrip("@")
 TIKTOK_STREAK_SCHEDULE_TIME = os.getenv("TIKTOK_STREAK_SCHEDULE_TIME", "10:00").strip()

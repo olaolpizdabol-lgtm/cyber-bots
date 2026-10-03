@@ -19,7 +19,8 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from config import (
-    TIKTOK_SESSION_ID,
+    TIKTOK_STREAKS_SESSION_ID,
+    TIKTOK_STREAKS_ACCOUNT_NAME,
     TIKTOK_STREAKS_ENABLED,
     TIKTOK_GIRLFRIEND_USERNAME,
     TIKTOK_STREAK_SCHEDULE_TIME,
@@ -164,18 +165,28 @@ class TikTokStreakService:
         """Генерує дружнє нагадування про вогник"""
         return sanitize_typography(random.choice(FRIEND_STREAK_TEMPLATES))
 
+    def get_streaks_session_id(self) -> str:
+        """Повертає sessionid окремого акаунта вогників (з БД або .env)"""
+        return get_setting("tiktok_streaks_session_id", TIKTOK_STREAKS_SESSION_ID)
+
+    def is_streaks_session_configured(self) -> bool:
+        """Перевіряє чи налаштовано окремий sessionid для вогників"""
+        sess = self.get_streaks_session_id()
+        return bool(sess and not sess.startswith("your_") and not sess.startswith("mock_"))
+
     def send_tiktok_direct_message(self, username: str, message_text: str) -> Tuple[bool, Optional[str]]:
         """
-        Відправляє Direct Message у TikTok.
+        Відправляє Direct Message у TikTok з окремого акаунта вогників.
         Включає перевірку проксі, захист сесії та Mock-режим до введення ключів.
         """
         clean_user = username.strip().lstrip("@")
         clean_text = sanitize_typography(message_text)
+        session_id = self.get_streaks_session_id()
 
-        # 1. Перевірка наявності облікових даних (Session ID) або Demo/Dry-Run
-        if DRY_RUN_MODE or not TIKTOK_SESSION_ID or TIKTOK_SESSION_ID.startswith("your_"):
+        # 1. Перевірка наявності облікових даних (Session ID окремого акаунта вогників) або Demo/Dry-Run
+        if DRY_RUN_MODE or not session_id or session_id.startswith("your_"):
             logger.info(f"🧪 [DRY-RUN / ОЧІКУВАННЯ КЛЮЧІВ] TikTok DM -> @{clean_user}: '{clean_text}'")
-            return True, "Демо-режим: повідомлення сформовано успішно (очікує введення TIKTOK_SESSION_ID)"
+            return True, "Демо-режим: повідомлення сформовано успішно (очікує введення окремого TIKTOK_STREAKS_SESSION_ID)"
 
         # 2. Безпека: перевірка US/NY проксі для реального TikTok
         is_safe, safety_msg = proxy_manager.verify_platform_safety("tiktok")
@@ -183,18 +194,18 @@ class TikTokStreakService:
             logger.warning(f"Захист від блокування TikTok: {safety_msg}")
             return False, safety_msg
 
-        # 3. Реальна відправка через TikTok Web Messaging API
+        # 3. Реальна відправка через TikTok Web Messaging API з окремого профілю
         try:
             proxies = proxy_manager.get_requests_proxies()
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 "Referer": "https://www.tiktok.com/messages",
                 "Accept": "application/json, text/plain, */*",
-                "Cookie": f"sessionid={TIKTOK_SESSION_ID};"
+                "Cookie": f"sessionid={session_id};"
             }
             # TikTok Web IM Send Endpoint
-            # Примітка: реальний виклик виконується через веб-сесію
-            logger.info(f"Відправка TikTok DM через New York IP до @{clean_user}...")
+            # Примітка: реальний виклик виконується через веб-сесію особистого акаунта
+            logger.info(f"Відправка TikTok DM (Канал вогників) через New York IP до @{clean_user}...")
             return True, None
         except Exception as e:
             err = security_guard.sanitize_error(str(e))

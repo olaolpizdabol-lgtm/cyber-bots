@@ -1,5 +1,6 @@
 import sqlite3
 import json
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from config import DB_PATH, DEFAULT_AI_PROMPT
 from core.content_type import ContentType
@@ -688,6 +689,26 @@ def get_cyber_rizhyi_chat_history(chat_id: int, limit: int = 20, max_age_hours: 
         rows = cursor.fetchall()
         # Повертаємо в хронологічному порядку
         return [dict(r) for r in reversed(rows)]
+
+
+def is_cyber_chat_silent_for_minutes(chat_id: int, minutes: float = 40.0) -> bool:
+    """
+    Перевіряє, чи в чаті дійсно глуха тиша щонайменше вказану кількість хвилин.
+    Захищає від перебивання живого діалогу спонтанними повідомленнями!
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT created_at FROM cyber_rizhyi_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1", (chat_id,))
+        row = cursor.fetchone()
+        if not row or not row["created_at"]:
+            return True
+        created_at_str = row["created_at"]
+        try:
+            dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")) if "T" in created_at_str else datetime.strptime(created_at_str, "%Y-%m-%d %H:%M:%S")
+            diff_m = (datetime.now(timezone.utc) - dt.replace(tzinfo=timezone.utc)).total_seconds() / 60.0
+            return diff_m >= minutes
+        except Exception:
+            return True
 
 
 def save_cyber_media(

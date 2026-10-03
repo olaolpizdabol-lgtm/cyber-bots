@@ -49,6 +49,7 @@ from core.database import (
     get_unprocessed_cyber_bot_events,
     mark_cyber_bot_event_processed,
     get_cyber_rizhyi_chat_history,
+    is_cyber_chat_silent_for_minutes,
 )
 from services.cyber_routing import (
     is_message_addressed_to_bot,
@@ -565,6 +566,10 @@ async def spontaneous_rizhyi_worker(bot: Bot):
             active_chats = get_active_cyber_rizhyi_chats()
             for chat_id in active_chats:
                 try:
+                    # СТРОГИЙ ЗАХИСТ: НЕ перебивати живий діалог у чаті! Тільки якщо глуха тиша 40+ хв!
+                    if not is_cyber_chat_silent_for_minutes(chat_id, minutes=40.0):
+                        continue
+
                     if random.random() < 0.75:
                         # AI-генерація спонтанного повідомлення (не рандомний банк!)
                         service = get_service_for_chat(chat_id)
@@ -659,17 +664,18 @@ async def inter_bot_bridge_worker(bot: Bot):
                     sender_uname = ev.get("sender_username")
                     sender_name = ev.get("sender_first_name") or "Кент"
 
-                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітос" in sender_name.lower()
+                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower()
                     if is_vitos:
                         relay_instruction = (
-                            "Це пише Вітя (@zelenskiy404)! Твій бро Туріков уже осадив його, тепер ТИ включайся і добивай! "
-                            "Підйобуй за його згенеровану аватарку клоуна, осади за його базар ('пси' тощо), закрий йому ротяку! "
+                            "Це пише Вітьок (@zelenskiy404)! Твій бро Туріков уже осадив його, тепер ТИ включайся і добивай! "
+                            "Називай його 'Вітьок' (не Вітос)! Заримуй на нього: 'вітьок з хуйом в тік токє огоньок'! "
+                            "Підйобуй за згенеровану ШІ аватарку клоуна, скажи що він в край ахуєл пес, закрий йому ротяку! "
                             "Розбий на 2-3 короткі повідомлення через '|||'. Без '!' і СТРОГО без @ тегів!"
                         )
                     else:
                         relay_instruction = (
                             f"Твій бро Туріков щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                            "підтримай тему або підколи співрозмовника як справжній напарник! "
+                            f"підтримай тему або заримуй смішну дражнилку на {sender_name} як справжній напарник! "
                             "Розбий на 2 короткі репліки через '|||'. Без '!' і без @ тегів!"
                         )
 

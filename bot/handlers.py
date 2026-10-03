@@ -69,6 +69,7 @@ class BotStates(StatesGroup):
     waiting_for_gf_username = State()
     waiting_for_new_streak_target = State()
     waiting_for_streak_schedule = State()
+    waiting_for_streak_session = State()
     waiting_for_tiktok_reaction_url = State()
     waiting_for_rizhyi_test_input = State()
     waiting_for_rizhyi_photo_test = State()
@@ -952,6 +953,8 @@ async def show_streaks_dashboard(target_msg: Message):
     stats = get_streak_stats()
     gf = get_girlfriend_target()
     schedule_time = get_setting("tiktok_streak_schedule_time", "10:00")
+    is_streaks_sess_active = tiktok_streak_service.is_streaks_session_configured()
+    streaks_sess_badge = "🟢 <i>Окрема сесія підключена</i>" if is_streaks_sess_active else "🧪 <i>Демо-режим (очікує SessionID)</i>"
 
     gf_text = f"<b>@{html.escape(gf['username'])}</b> ({html.escape(gf.get('nickname') or 'Кохана')}) ❤️" if gf else "❌ <i>Не встановлено (натисніть кнопку нижче)</i>"
 
@@ -961,7 +964,9 @@ async def show_streaks_dashboard(target_msg: Message):
         f"👥 <b>Контактів для вогників:</b> {stats['total_targets']} чол.\n"
         f"💌 <b>Надіслано сьогодні:</b> {stats['sent_today']}\n"
         f"🔥 <b>Максимальна серія:</b> {stats['max_streak']} днів\n"
-        f"⏰ <b>Розклад відправки:</b> щодня о <code>{schedule_time}</code>\n\n"
+        f"⏰ <b>Розклад відправки:</b> щодня о <code>{schedule_time}</code>\n"
+        f"🔑 <b>Канал вогників (Особистий):</b> {streaks_sess_badge}\n"
+        f"🎬 <b>Канал заливу відео:</b> <i>повністю окремий акаунт</i>\n\n"
         "<b>Як це працює:</b>\n"
         "• 💖 <b>Для дівчини:</b> Gemini ШІ щодня генерує унікальні романтичні повідомлення з сердечками (❤️, 🥰, 💖) та компліментами!\n"
         "• 🔥 <b>Для інших контактів:</b> надсилаються дружні нагадування з вогником для збереження серії.\n"
@@ -1184,6 +1189,48 @@ async def callback_streak_logs(call: CallbackQuery):
 
     await call.message.answer(text, reply_markup=get_streak_menu_keyboard(), parse_mode="HTML")
     await call.answer()
+
+
+@router.callback_query(F.data == "streak_set_session")
+async def callback_streak_set_session(call: CallbackQuery, state: FSMContext):
+    curr = tiktok_streak_service.get_streaks_session_id()
+    status_text = "🟢 <b>Підключено</b> (окрема сесія активна)" if tiktok_streak_service.is_streaks_session_configured() else "🧪 <b>Демо-режим</b> (ще не встановлено)"
+    masked_sess = (curr[:6] + "..." + curr[-4:]) if len(curr) > 10 else "не налаштовано"
+
+    await state.set_state(BotStates.waiting_for_streak_session)
+    await call.message.answer(
+        f"🔑 <b>Окремий TikTok акаунт для вогників (SessionID)</b>\n\n"
+        f"Поточний статус: {status_text}\n"
+        f"Поточна сесія: <code>{masked_sess}</code>\n\n"
+        "💡 <i>Цей акаунт використовується ВИКЛЮЧНО для щоденних вогників з друзями та сердечок дівчині. "
+        "Він повністю ізольований від каналу, на який заливаються відео!</i>\n\n"
+        "Щоб оновити сесію, надішліть значення кукі <code>sessionid</code> вашого особистого TikTok акаунта "
+        "(або вкажіть <code>TIKTOK_STREAKS_SESSION_ID</code> у файлі <code>.env</code>).\n\n"
+        "<i>Надішліть sessionid у відповідь або напишіть /cancel для скасування:</i>",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_streak_session)
+async def process_streak_session_id(message: Message, state: FSMContext):
+    sess_text = message.text.strip()
+    if sess_text.startswith("/"):
+        await state.clear()
+        await message.answer("❌ Скасовано.", reply_markup=get_streak_menu_keyboard())
+        return
+
+    set_setting("tiktok_streaks_session_id", sess_text)
+    masked = (sess_text[:6] + "..." + sess_text[-4:]) if len(sess_text) > 10 else "збережено"
+    await message.answer(
+        f"✅ <b>Окремий акаунт для вогників успішно налаштовано!</b> 🔥\n"
+        f"SessionID: <code>{masked}</code>\n\n"
+        "Тепер щоденна розсилка вогників та сердечок надсилатиметься з вашого особистого профілю, "
+        "а відео публікуватимуться на ваш окремий контентний канал!",
+        reply_markup=get_streak_menu_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.clear()
 
 
 # ---------------------------------------------------------

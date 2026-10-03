@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List
 import requests
 from services.publishers.base import BasePublisher, PublishResult, StatsResult
 from services.proxy_manager import proxy_manager
-from config import TIKTOK_SESSION_ID, DRY_RUN_MODE
+from config import TIKTOK_UPLOAD_SESSION_ID, TIKTOK_SESSION_ID, DRY_RUN_MODE
 from core.content_type import ContentType
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class TikTokPublisher(BasePublisher):
         media_paths: List[str],
         metadata: Dict[str, Any]
     ) -> PublishResult:
-        """Підтримує Відео та Photo Mode (каруселі фото до 35 штук) у TikTok"""
+        """Підтримує Відео та Photo Mode (каруселі фото до 35 штук) у TikTok (Канал заливу відео)"""
         if content_type == ContentType.TEXT:
             return PublishResult(
                 success=False,
@@ -34,14 +34,15 @@ class TikTokPublisher(BasePublisher):
         if len(caption) > 2000:
             caption = caption[:1996] + "..."
 
-        if DRY_RUN_MODE or not TIKTOK_SESSION_ID or TIKTOK_SESSION_ID.startswith("your_"):
-            logger.info(f"[DRY RUN / NO CREDS] TikTok: Format={content_type.value}, Items={len(media_paths)}")
+        upload_session = TIKTOK_UPLOAD_SESSION_ID or TIKTOK_SESSION_ID
+        if DRY_RUN_MODE or not upload_session or upload_session.startswith("your_"):
+            logger.info(f"[DRY RUN / NO CREDS] TikTok (Канал відео): Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_tt_video_789",
                 url="https://www.tiktok.com/@user/video/mock_tt_video_789",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TIKTOK_SESSION_ID ще не налаштовано)"
+                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TIKTOK_UPLOAD_SESSION_ID для заливу відео ще не налаштовано)"
             )
 
         if not proxy_manager.proxy_url:

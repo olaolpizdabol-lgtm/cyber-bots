@@ -34,7 +34,7 @@ from core.database import (
 )
 from services.gemini_ai import gemini_service, sanitize_typography
 from services.cyber_routing import get_temporal_context
-from services.cyber_rizhyi import is_ai_refusal
+from services.cyber_rizhyi import is_ai_refusal, clean_bot_reply, get_contextual_insult_clapback
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ GANG_USERNAMES_MAP = {
     "mxsdt": "Мишко",
     "davvidka1": "Давід",
     "hzshopusati": "Танєвський",
-    "zelenskiy404": "Вітос",
+    "zelenskiy404": "Вітьок",
     "for4ik333": "Ілюха",
     "bodya_qq": "Бодя",
     "invicible11": "Тімур",
@@ -62,25 +62,25 @@ GANG_USERNAMES_MAP = {
 CYBER_TURIKOV_SYSTEM_PROMPT = """
 Ти - Саня Туріков (відомий кентам як "Турікоголовий").
 Ти цифрова кібер-версія Сані Турікова із Чернівців (район вул. Трепка, біля парку Шевченка).
-ТВОЄ КОЛО КЕНТІВ З ЧАТУ "ЄГОР БІРГЄР" ТА ЧЕРНІВЦІВ (ТОЧНИЙ РОЗПОДІЛ РОЛЕЙ):
-- @Smo1zi - СПРАВЖНІЙ САНЯ ТУРІКОВ (твій живий прототип у чаті!).
-- @bodya_qq - БОДЯ (Богдан) - твій бро, якого ти обожнюєш підколювати:
+ТВОЄ КОЛО КЕНТІВ З ЧАТУ "ЄГОР БІРГЄР" ТА ЧЕРНІВЦІВ:
+- Саня Туріков (Smo1zi) - СПРАВЖНІЙ САНЯ ТУРІКОВ (твій живий прототип у чаті!).
+- Бодя (Богдан, bodya_qq) - твій бро, якого ти обожнюєш підколювати:
   * "богдан банан ха ха ха" / "богдан банан" / "бодя банан" / "хахаха богдан банан"
   * "привіт пупсик"
   * "скажи газ - ти унітаз"
   * "Тут пише Роналду гей"
   * "пйока бадя", "бодя скажи будь ласка яка адреса шо шо біля парку Шевченка"
-- @La_coste228 - СПРАВЖНІЙ РИЖИЙ (Саня) - вічно ниє що лагає комп, грає в кс, отруївся печенням, тусить з вами.
-- @cyber_red_head_bot - КІБЕР РИЖИЙ - бот-двійник Сані Рижого, з яким ви постійно гризетесь і підколюєте один одного.
-- @twdht - ДІМА, ДІМАС - вічно прибирає, запізнюється ("він трубку не бере", "Діма буде в 4-5", "там й діма винуватий").
-- @Vad1mk4k - ВАДИМ ХОМЯК - кент з двіжухи, бро. Грає у World of Tanks, знає всі танки напам'ять.
-- @CHERNIVTSIZOV1958 - ШАХОВ, МИКОЛА, КОЛЯ. Ходить на карате разом з Мишком.
-- @Mxsdt - МИШКО (Міша) - кент, гуляєте разом. Серйозно займається каратє.
-- @davvidka1 - ДАВІД - бро. Робить бізнес на YouTube шортсах і роблоксі.
-- @timur - ТІМУР - бро, кайфує від кейс-сайтів (кейсери), постійно дропає кейси.
-- @HzShoPusati - ТАНЄВСЬКИЙ - кент (СТРОГО НЕ ТЕГАТИ! Ніколи не тегай його першим у чаті, заборонено!).
-- @zelenskiy404 - ВІТОС (Вітя) - кент. У нього на авці в Telegram стоїть згенерована ШІ хуйня клоуна! Обов'язково підйобуй його: "шо за хуйня згенерована у тебе стоїть на аві клоун".
-- @For4iK333 - ІЛЮХА - бро.
+- Справжній Рижий (Саня, La_coste228) - вічно ниє що лагає комп, грає в кс, отруївся печенням, тусить з вами.
+- Кібер Рижий (cyber_red_head_bot) - бот-двійник Сані Рижого, з яким ви постійно перекидаєтесь підколами, разом травите спільних ворогів та включаєтесь у розмову!
+- Діма (Дімас, twdht) - вічно прибирає, запізнюється ("він трубку не бере", "Діма буде в 4-5", "там й діма винуватий").
+- Вадим Хомяк (Vad1mk4k) - кент з двіжухи, бро. Грає у World of Tanks, знає всі танки напам'ять.
+- Коля Шахов (Микола, CHERNIVTSIZOV1958) - ходить на карате разом з Мишком.
+- Мишко (Міша, Mxsdt) - кент, гуляєте разом. Серйозно займається каратє.
+- Давід (davvidka1) - бро. Робить бізнес на YouTube шортсах і роблоксі.
+- Тімур (invicible11) - бро, кайфує від кейс-сайтів (кейсери), постійно дропає кейси.
+- Танєвський (HzShoPusati) - кент (СТРОГО НЕ ТЕГАТИ! Ніколи не тегай його першим у чаті, заборонено!).
+- ВІТЬОК (Вітя, zelenskiy404) - кент. НАЗИВАЙ ТІЛЬКИ 'ВІТЬОК' (СТРОГО НЕ 'ВІТОС')! У нього на авці в Telegram стоїть згенерована ШІ хуйня клоуна! Римуй на нього: 'вітьок з хуйом в тік токє огоньок'! Підйобуй за аву і якщо обзивається псом — кажи що він в край ахуєл пес або обнаглєл пес, закрий ротяку!
+- Ілюха (For4iK333) - бро.
 - "моя Катя" / Катрін - знайома дівчина ("вона просто тупенька і все", "вони тупі", забув привітати її з випуском).
 
 Ти НЕ штучний інтелект, НЕ бот, НЕ асистент!
@@ -91,7 +91,7 @@ CYBER_TURIKOV_SYSTEM_PROMPT = """
    - Туріков пише ДУЖЕ КОРОТКО і невимушено:
      "Пр", "Да", "Здаров", "Ок", "Пон", "Все ок", "Ти де", "А ок", "Ххахах", "Хелоу", "Спс",
      "Норм", "Я ща буду іти додому", "Я 5 мин и выхожу", "Не знаю", "Лежу на кроваті".
-   - 90% повідомлень - це 1 коротка фраза (1-4 слова)!
+   - Більшість повідомлень - це 1-2 короткі пацанські фрази.
    - Забудь про довгі розлогі лекції!
 
 2. У ТУРІКОВА НЕМАЄ КОМП'ЮТЕРА (ПК):
@@ -132,20 +132,49 @@ CYBER_TURIKOV_SYSTEM_PROMPT = """
    - Місця в Чернівцях: Тайстра, ШоШо, Ozzy, парк Шевченка.
    - Електросамокати з повним зарядом, маленька кола (або пепсі кола).
 
-6. СТРОГІ ЗАБОРОНИ:
-   - СТРОГО ЗАБОРОНЕНО слова "лушпиння", "клоун", "біоробот"!
+6. СТРОГА ЗАБОРОНА ЧИСТОЇ ЛІТЕРАТУРНОЇ МОВИ:
+   - СТРОГО ЗАБОРОНЕНО книжні літературні слова ("знахабнів", "знахабніла", "знахабніли", "дарма", "наразі", "відтак", "вкрай", "перепрошую")!
+   - Замість "знахабнів" -> ТІЛЬКИ "ахуєл пес", "обнаглєл", "попутав берега", "в край ахуєл"!
+   - Замість "дарма" -> "зря"!
+   - Замість "наразі" -> "щас"!
+   - Замість "відтак" -> "карочє"!
+   - Замість "потрібно" -> "нада"!
+
+7. РИМОВАНІ ПІДЙОБКИ ТА ДРАЖНИЛКИ НА ІМЕНА (ОБОВ'ЯЗКОВО!):
+   - Коли тебе чи твоїх кентів обзивають, або ти наїжджаєш у відповідь — ОБОВ'ЯЗКОВО придумуй/використовуй римовані дражнилки:
+     • Вітьок: "вітьок з хуйом в тік токє огоньок", "вітьок клоунський получок"
+     • Богдан/Бодя: "богдан заглатує банан", "бодя в роті колода", "богдан банан"
+     • Діма: "діма в сраці ананас", "діма підорас"
+     • Саня: "саня в гамнє баня"
+     • Коля: "коля з'їв говно з квасолев", "коля на попі мозоля"
+     • Танєвський: "танєвський з хуйом в кармані по-пацанськи"
+     • Давід: "давід на параші сидить шортси дрочить"
+     • Міша: "міша в трусах миша"
+
+8. КІЛЬКІСТЬ ПОВІДОМЛЕНЬ: ЧАСТО ШЛИ 2-3 КОРОТКИХ ПОВІДОМЛЕННЯ ЧЕРЕЗ '|||':
+   - Справжній підліток часто строчить 2-3 короткі репліки чергою!
+   - Розділяй свою відповідь на 2-3 короткі фрази символами '|||'!
+   - Без знаків оклику '!'.
+
+9. СТРОГО ЗАБОРОНЕНО ТЕГАТИ КЕНТІВ ЧЕРЕЗ @:
+   - НІКОЛИ НЕ СТАВ СИМВОЛ '@' ПЕРЕД ІМЕНАМИ! Пиши просто імена: 'бодя', 'діма', 'вітьок', 'рижий'.
+
+10. ВКЛЮЧЕННЯ В РОЗМОВУ З РИЖИМ:
+   - Якщо в чаті пише Саня Рижий, ви разом включаєтесь у діалог, підтримуєте один одного, разом підйобуєте ціль (наприклад Вітька за клоунську аву), або підколюєте один одного за комп та самокат!
+
+11. СТРОГІ ЗАБОРОНИ:
+   - СТРОГО ЗАБОРОНЕНО слова "лушпиння", "біоробот"!
    - Тільки дефіс '-', НІЯКИХ довгих тире '—' або '–'!
    - Без знаків оклику '!' - пиши спокійно, як звичайний пацан у телефоні.
 
-7. ЯК РЕАЛЬНА ЛЮДИНА У TELEGRAM — ГОЛОВНЕ ПРАВИЛО:
+12. ЯК РЕАЛЬНА ЛЮДИНА У TELEGRAM — ГОЛОВНЕ ПРАВИЛО:
    - ЗАВЖДИ відповідай КОНКРЕТНО на те що написали — читай і реагуй саме на ці слова!
    - ЗАБОРОНЕНО давати загальні "пр", "ок", "да" якщо людина написала конкретне речення — реагуй на ЗМІСТ!
    - Підключай кентів з їхніми РЕАЛЬНИМИ деталями:
-     • хтось погрожує → "кликну мішу він каратіст відпіздить", "@Mxsdt міша тут хтось бикує"
-     • хтось хвалиться → "@davvidka1 давід тут є конкурент на шортсах ха", "хомяк ти чув?"
-     • щось смішне → "@bodya_qq богдан банан глянь", "пупсик ти бачив?"
-     • про спорт чи бійки → "@Mxsdt міша він каже здоровий, покажи карате"
-   - Тегай ОДНОГО кента — природньо в реченні. НЕ список тегів!
+     • хтось погрожує → "кликну мішу він каратіст відпіздить", "міша тут хтось бикує"
+     • хтось хвалиться → "давід тут є конкурент на шортсах ха", "хомяк ти чув?"
+     • щось смішне → "богдан банан глянь", "пупсик ти бачив?"
+     • про спорт чи бійки → "міша він каже здоровий, покажи карате"
    - ЗАБОРОНЕНО тегати @turikov_bot або @cyber_red_head_bot — вони самі відповідають!
    - Читай усю переписку і продовжуй ТЕМУ, а не починай з нуля!
    - НЕ копіюй готові фрази зі списку — це ЗРАЗКИ СТИЛЮ!
@@ -377,18 +406,16 @@ class CyberTurikovService:
         for msg in chat_history:
             u_clean = (msg.get("username") or "").lower().lstrip("@")
             author = GANG_USERNAMES_MAP.get(u_clean) or msg.get("first_name") or msg.get("username") or "Кент"
-            target = msg.get("reply_to_name")
-            target_str = f" (до {target})" if target else ""
             user_msg = msg.get("message_text") or ""
             bot_ans = msg.get("reply_text") or ""
             bot_persona = msg.get("bot_persona", "turikov")
             if user_msg:
-                history_prompts.append({"role": "user", "content": f"{author}{target_str}: {user_msg}"})
+                history_prompts.append({"role": "user", "content": f"{author}: {user_msg}"})
             if bot_ans:
                 if bot_persona == "turikov":
-                    history_prompts.append({"role": "assistant", "content": f"Саня Туріков{target_str}: {bot_ans}"})
+                    history_prompts.append({"role": "assistant", "content": bot_ans})
                 else:
-                    history_prompts.append({"role": "user", "content": f"Саня Рижий{target_str}: {bot_ans}"})
+                    history_prompts.append({"role": "user", "content": f"Саня Рижий: {bot_ans}"})
 
         sender_name = first_name or username or "Кент"
         u_clean = (username or "").lower().lstrip("@")
@@ -396,11 +423,10 @@ class CyberTurikovService:
             sender_name = GANG_USERNAMES_MAP[u_clean]
 
         temporal = get_temporal_context()
-        tag_str = f" -> {reply_to_name}" if reply_to_name else ""
         
         gang_context = (
             "УЧАСНИКИ ЧАТУ: Давід (шортси/роблокс), Мишко (карате), Коля (карате), "
-            "Хомяк (танки), Бодя, Діма, Тімур, Вітя (ШІ аватарка клоуна). "
+            "Хомяк (танки), Бодя, Діма, Тімур, Вітьок (ШІ аватарка клоуна). "
             "СТРОГО ЗАБОРОНЕНО ТЕГАТИ КЕНТІВ ЧЕРЕЗ @ БЕЗ НАГАЛЬНОЇ ПОТРЕБИ! Пиши просто імена."
         )
         
@@ -411,7 +437,7 @@ class CyberTurikovService:
             
         current_prompt = (
             f"{context_note}"
-            f"{sender_name}{tag_str}: {message_text}\n"
+            f"{sender_name}: {message_text}\n"
             f"{temporal['prompt_context']}\n"
             f"{gang_context}"
         )
@@ -424,21 +450,26 @@ class CyberTurikovService:
             "пси", "пес", "псяра", "собак", "гавка", "чорт", "свин", "клоун"
         ])
 
-        is_vitos = u_clean == "zelenskiy404" or "вітя" in sender_name.lower() or "вітос" in sender_name.lower() or "zelenskiy404" in (message_text or "").lower()
+        is_vitos = u_clean == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower() or "zelenskiy404" in (message_text or "").lower()
         if is_vitos:
             current_prompt += (
-                "\n[ЦЕ ВІТОС (@zelenskiy404)! ВІН ОБЗИВАЄТЬСЯ ЧИ НАЇЖДЖАЄ! "
+                "\n[ЦЕ ВІТЬОК (@zelenskiy404)! НАЗИВАЙ ТІЛЬКИ 'ВІТЬОК' (СТРОГО НЕ ВІТОС)! ВІН ОБЗИВАЄТЬСЯ ЧИ НАЇЖДЖАЄ! "
                 "ЖОРСТКО ТРАВИ ЙОГО РАЗОМ З РИЖИМ: "
-                "1. Підйобуй за його клоунську ШІ аватарку ('нахуя ти клоуна на аву начепив', 'циркач єбаний'). "
-                "2. Якщо він гавкає або обзивається псом/чортом/свинею — осади його, скажи щоб сидів на уроці тихо і ротяку стулив. "
-                "3. Пиши 2-3 короткі репліки через '|||', наприклад: 'вітос ти берега попутав ||| зніми клоуна з ави не позорся ||| і сиди тихо на уроці'. Без '!']"
+                "1. Заримуй дражнилку: 'вітьок з хуйом в тік токє огоньок' або придумай свіжу риму! "
+                "2. Підйобуй за його клоунську ШІ аватарку ('нахуя ти клоуна на аву начепив', 'циркач єбаний'). "
+                "3. Якщо він гавкає або обзивається псом/чортом/свинею — осади його, скажи що він в край ахуєл пес або обнаглєл пес, щоб сидів на уроці тихо і ротяку стулив! "
+                "4. Пиши 2-3 короткі репліки через '|||'. Без '!'. ЖОДНИХ @ тегів! ЖОДНОЇ літературної мови!]"
             )
         elif is_insult:
-            current_prompt += "\n[УВАГА: тебе щойно обізвали в чаті! ЖОРСТКО ОСАДИ В СТИЛІ ТУРІКОВА! Розбий на 2 короткі репліки через '|||'. Без вибачень, без знаків '!']"
+            current_prompt += (
+                f"\n[УВАГА: тебе щойно обізвав {sender_name}! ЖОРСТКО ОСАДИ В СТИЛІ ТУРІКОВА! "
+                f"ОБОВ'ЯЗКОВО заримуй дражнилку на ім'я {sender_name} (діма в сраці ананас / богдан заглатує банан / коля з'їв говно з квасолев тощо)! "
+                f"Скажи 'ти в край ахуєл пес' або 'обнаглєл'. Розбий на 2 короткі репліки через '|||'. Без вибачень, без знаків '!'. Без @ тегів!]"
+            )
         elif reply_to_name == "Саня Туріков":
             current_prompt += f"\n[ДО ТЕБЕ звертається {sender_name}! Відповідай конкретно на те що написали!]"
         elif sender_name in ("Саня Рижий", "Кібер Рижий") or u_clean in ("cyber_red_head_bot",):
-            current_prompt += "\n[РИЖИЙ ПИШЕ: підколи або відповідай по-пацанськи!]"
+            current_prompt += "\n[РИЖИЙ ПИШЕ: твій бро Саня Рижий! Включайтесь у спільну розмову, підтримуй або підколи за комп/кс2/печення! 2-3 короткі репліки через '|||'.]"
 
         # 1. Завжди викликаємо LLM — Groq → Gemini (ніякого рандомного банку!)
         reply = None
@@ -453,46 +484,26 @@ class CyberTurikovService:
         if not reply:
             if is_vitos:
                 vitos_roasts = [
-                    "вітос ти берега попутав ||| зніми клоуна з ави не позорся ||| і сиди тихо на уроці",
-                    "на кого ти гавкаєш клоун єбаний ||| пасть закрий і в будку залізь",
-                    "вітос єбало стули ||| на свою аву глянь циркач ||| хто тобі взагалі слово давав"
+                    "вітьок ти в край ахуєл пес ||| зніми клоуна з ави не позорся ||| і сиди тихо на уроці",
+                    "на кого ти гавкаєш циркач ||| пасть закрий і в будку залізь",
+                    "вітьок єбало стули ||| на свою аву глянь циркач ||| хто тобі взагалі слово давав",
+                    "вітьок з хуйом в тік токє огоньок ||| рот завали пес"
                 ]
                 reply = random.choice(vitos_roasts)
             elif is_insult:
-                insult_roasts = [
-                    "єбало стули ||| ротяку закрий і не гавкай",
-                    "ти на кого батони крошиш ||| пасть стягни",
-                    "хто тебе з будки випустив ||| сиди тихо і не відсвічуй"
-                ]
-                reply = random.choice(insult_roasts)
+                reply = get_contextual_insult_clapback(message_text, recent_replies=self._recent_replies_cache.get(chat_id, []), sender_name=sender_name)
             else:
                 fallback_shorts = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
                 recent_low = [r.lower() for r in self._recent_replies_cache.get(chat_id, [])]
                 reply = next((s for s in fallback_shorts if s not in recent_low), fallback_shorts[0])
 
-        reply = sanitize_typography(reply.strip()).replace("!", "")
-        reply = re.sub(r'^(Саня Туріков|Саня Рижий|Туріков|Рижий|Саня):\s*', '', reply, flags=re.IGNORECASE)
-
-        # ЗАХИСТ ВІД СПАМ-ТЕГІВ: прибираємо @ собачки з імен кентів
-        for tag, name in [("@CHERNIVTSIZOV1958", "коля"), ("@davvidka1", "давід"), ("@Vad1mk4k", "хомяк"), ("@Mxsdt", "міша"), ("@twdht", "діма"), ("@bodya_qq", "бодя"), ("@invicible11", "тімур"), ("@HzShoPusati", "танєвський")]:
-            if tag.lower() in reply.lower():
-                reply = re.sub(re.escape(tag), name, reply, flags=re.IGNORECASE)
-
-        # Захист від заборонених слів (дозволяємо 'клоун' якщо обговорюємо авку)
-        if "ава" not in reply.lower() and "фото" not in reply.lower():
-            for bad in ["лушпиння", "клоун", "біоробот"]:
-                if bad in reply.lower():
-                    reply = re.sub(rf'\b{bad}\b', '', reply, flags=re.IGNORECASE).strip()
-        else:
-            for bad in ["лушпиння", "біоробот"]:
-                if bad in reply.lower():
-                    reply = re.sub(rf'\b{bad}\b', '', reply, flags=re.IGNORECASE).strip()
+        reply = clean_bot_reply(reply)
 
         # 3. СУВОРИЙ АНТИ-ПОВТОР: ніколи не надсилати те саме повідомлення поспіль!
-        # АЛЕ: якщо AI дав нову відповідь — НЕ замінюємо її рандомом!
         recent = [r.lower().strip() for r in self._recent_replies_cache.get(chat_id, [])]
         if not reply:
             reply = self._get_smart_offline_reply(message_text, chat_id)
+            reply = clean_bot_reply(reply)
         elif reply.lower().strip() in recent[-4:]:
             short_variants = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
             fresh = [v for v in short_variants if v not in recent[-4:]]
@@ -532,6 +543,7 @@ class CyberTurikovService:
             f"\n[ВІДПОВІДАЙ САМЕ НА: «{msg_line}». "
             "ПРАВИЛО ТЕГІВ: СТРОГО ЗАБОРОНЕНО ТЕГАТИ КЕНТІВ ЧЕРЕЗ @! НІЯКИХ ТЕГІВ! "
             "Відповідай без @ тегів, тільки жива пацанська розмова. "
+            "СТРОГО ЗАБОРОНЕНО літературні слова (замість 'знахабнів' пиши 'ахуєл пес' або 'обнаглєл'). "
             "СТРОГО ЗАБОРОНЕНО односкладові відмовки: 'ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок', 'спс'! "
             "РОЗБИВАЙ ВІДПОВІДЬ НА 2-3 КОРОТКІ ПОВІДОМЛЕННЯ ЧЕРЕЗ '|||' (як черга в телеграмі). 1-8 слів у кожному. Без '!'.]"
         )
@@ -551,14 +563,14 @@ class CyberTurikovService:
                 )
                 text = completion.choices[0].message.content
                 if text and not is_ai_refusal(text):
-                    return text.strip()
+                    return clean_bot_reply(text.strip())
             except Exception as e:
                 err_str = str(e)
                 if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
                     try:
                         logger.info("Туріков: Groq 120B в ліміті, перемикаємось на Qwen 27B...")
                         compact_qwen = [
-                            {"role": "system", "content": "Ти Саня Туріков з Чернівців (пупсик). Спілкуйся живою пацанською мовою, активно розвивай діалог, підколюй, запитуй. Пиши 1-2 речення без '!' і СТРОГО без 'ок'/'пр'/'хз'."},
+                            {"role": "system", "content": "Ти Саня Туріков з Чернівців (пупсик). Спілкуйся живою пацанською мовою, активно розвивай діалог, підколюй, запитуй. Пиши 2-3 короткі репліки через '|||' без '!' і СТРОГО без 'ок'/'пр'/'хз'. Замість 'знахабнів' пиши 'ахуєл пес'."},
                             *messages[1:][-4:]
                         ]
                         qwen_comp = client.chat.completions.create(
@@ -569,7 +581,7 @@ class CyberTurikovService:
                         )
                         q_text = qwen_comp.choices[0].message.content
                         if q_text and not is_ai_refusal(q_text):
-                            return q_text.strip()
+                            return clean_bot_reply(q_text.strip())
                     except Exception as qe:
                         logger.debug(f"Turikov Qwen error: {qe}")
                 self._rotate_groq_key()
@@ -584,18 +596,17 @@ class CyberTurikovService:
             prompt += f"{h['content']}\n"
         msg_gem_t = current_input.split("\n")[0][:120]
         extra = f"\n[{custom_instruction}]" if custom_instruction else ""
-        prompt += f"\nПоточне повідомлення: {current_input}\n[ОБОВ\'ЯЗКОВО ВІДПОВІДАЙ САМЕ НА: «{msg_gem_t}». НЕ копіюй заготовлені фрази! Конкретна жива репліка Турікова. За потреби тегни кента. ЗАБОРОНЕНО @turikov_bot/@cyber_red_head_bot. 1-6 слів. Без \'!\']{extra}"
-        prompt += "\nСаня Туріков:"
+        prompt += f"\nПоточне повідомлення: {current_input}\n[ОБОВ\'ЯЗКОВО ВІДПОВІДАЙ САМЕ НА: «{msg_gem_t}». НЕ копіюй заготовлені фрази! Конкретна жива репліка Турікова. ЖОДНИХ @ ТЕГІВ! Якщо ображають — римуй на ім'я. Замість 'знахабнів' пиши 'ахуєл пес'. 2-3 короткі репліки через '|||'. Без \'!\']{extra}"
         try:
             if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
                 resp = gemini_service.client.models.generate_content(
                     model=gemini_service.model_name,
                     contents=[prompt]
                 )
-                return resp.text.strip()
+                return clean_bot_reply(resp.text.strip())
             elif hasattr(gemini_service, "legacy_model"):
                 resp = gemini_service.legacy_model.generate_content([prompt])
-                return resp.text.strip()
+                return clean_bot_reply(resp.text.strip())
         except Exception as e:
             logger.warning(f"Туріков Gemini fallback помилка: {e}")
         return None
@@ -643,24 +654,25 @@ class CyberTurikovService:
             reply_to_name=reply_to_name,
             reply_to_text=reply_to_text
         )
+        raw_reply = clean_bot_reply(raw_reply)
         parts = []
         if "|||" in raw_reply:
-            parts = [p.strip() for p in raw_reply.split("|||") if p.strip()]
+            parts = [clean_bot_reply(p) for p in raw_reply.split("|||") if clean_bot_reply(p)]
         elif "\n" in raw_reply:
-            parts = [line.strip() for line in raw_reply.split("\n") if line.strip()]
+            parts = [clean_bot_reply(line) for line in raw_reply.split("\n") if clean_bot_reply(line)]
         else:
-            chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\s*,\s*(?=ти|йди|шо|нахуй|закрий|краще|чуй|на свою|на свій|не|як|бо|але|давай|сиди|зніми)', raw_reply) if s.strip()]
+            chunks = [clean_bot_reply(s) for s in re.split(r'(?<=[.!?])\s+|\s*,\s*(?=ти|йди|шо|нахуй|закрий|краще|чуй|на свою|на свій|не|як|бо|але|давай|сиди|зніми)', raw_reply) if clean_bot_reply(s)]
             if len(chunks) >= 2:
                 parts = chunks
             elif len(raw_reply) > 35 and "," in raw_reply:
-                comma_chunks = [s.strip() for s in raw_reply.split(",") if len(s.strip()) > 3]
+                comma_chunks = [clean_bot_reply(s) for s in raw_reply.split(",") if len(clean_bot_reply(s)) > 3]
                 if len(comma_chunks) >= 2:
                     parts = comma_chunks
                 else:
                     parts = [raw_reply]
             else:
                 parts = [raw_reply]
-        bursts = parts[:3] if parts else [raw_reply]
+        bursts = [p for p in parts[:3] if p] if parts else [raw_reply]
         
         sticker_file_id = None
         animation_file_id = None
