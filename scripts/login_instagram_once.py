@@ -49,19 +49,33 @@ def login_instagram():
             viewport={"width": 1280, "height": 800},
             locale="en-US"
         )
-        page = context.new_page()
+        try:
+            from playwright_stealth import stealth_sync
+            stealth_sync(page)
+            print("🛡️ Stealth-захист активовано")
+        except ImportError:
+            pass
+
+        # Приховуємо ознаки автоматизації
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = { runtime: {} };
+        """)
 
         # Швидка перевірка IP
         try:
             print("🔍 Перевірка IP-адреси браузера...")
-            page.goto("https://api.ipify.org?format=json", timeout=12000)
+            page.goto("https://api.ipify.org?format=json", timeout=12000, wait_until="domcontentloaded")
             ip_info = page.inner_text("body")
             print(f"📍 Поточна IP-адреса браузера: {ip_info}")
         except Exception:
             pass
 
         print("📲 Перехід на сторінку входу Instagram...")
-        page.goto("https://www.instagram.com/accounts/login/", timeout=40000)
+        try:
+            page.goto("https://www.instagram.com/accounts/login/", timeout=45000, wait_until="domcontentloaded")
+        except Exception as ge:
+            print(f"⚠️ Перехід через domcontentloaded: {ge}, сторінка відкрита")
 
         print("\n" + "="*55)
         print("✋ ДІЙ ЗАРАЗ У ВІКНІ БРАУЗЕРА:")
