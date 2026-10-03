@@ -263,61 +263,113 @@ class TikTokStreakService:
                     await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
                     await page.wait_for_timeout(3000)
 
-                    # Перевіряємо авторизацію — якщо редирект на login
+                    # 1. Спершу відкриваємо повноцінний розділ повідомлень TikTok
+                    logger.info(f"Відкриваємо повідомлення TikTok для діалогу з @{username}...")
+                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    await page.wait_for_timeout(3500)
+
                     if "login" in page.url.lower():
                         return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
 
-                    # Явно клікаємо Messages у навбарі щоб відкрити inbox
-                    nav_msg = page.locator('[data-e2e="nav-messages"]')
-                    if await nav_msg.count() > 0:
-                        await nav_msg.click()
+                    # Шукаємо контакт у списку чатів
+                    # Може бути по нікнейму, імені чи посиланню
+                    chat_target = page.locator(
+                        f'[href*="/{username}"], '
+                        f'div:has-text("{username}"), '
+                        f'p:has-text("{username}"), '
+                        f'span:has-text("{username}")'
+                    )
+
+                    # Спеціальний мапінг display name для контактів у списку чатів
+                    KNOWN_DISPLAY_NAMES = {
+                        "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
+                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii"],
+                        "davidka223": ["davidkaaa", "davidka223", "Давід"],
+                        "lesko.new": ["Лесько", "lesko.new", "lesko"],
+                        "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
+                        "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
+                    }
+
+                    if await chat_target.count() == 0 and username.lower() in KNOWN_DISPLAY_NAMES:
+                        for alias in KNOWN_DISPLAY_NAMES[username.lower()]:
+                            loc = page.locator(f'text="{alias}"')
+                            if await loc.count() > 0:
+                                chat_target = loc
+                                break
+
+                    target_found = False
+                    if await chat_target.count() > 0:
+                        logger.info(f"Знайдено контакт @{username} у списку повідомлень, відкриваємо...")
+                        await chat_target.first.click(force=True)
                         await page.wait_for_timeout(3000)
+                        target_found = True
+                    else:
+                        # 2. Якщо контакту немає серед недавніх — переходимо на прямий профіль
+                        logger.info(f"Контакт не знайдено в недавніх чатах, переходимо на профіль @{username}...")
+                        await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="networkidle")
+                        await page.wait_for_timeout(3500)
 
-                    # Шукаємо контакт через пошукове поле Messages
-                    found_via_search = False
-                    search_box = page.locator('input[placeholder*="Search"], input[placeholder*="Пошук"]')
-                    if await search_box.count() > 0:
-                        await search_box.first.click()
-                        await page.wait_for_timeout(500)
-                        await search_box.first.fill(username)
-                        await page.wait_for_timeout(2000)
-                        # Клікаємо на перший результат пошуку
-                        search_result = page.locator(f'[data-e2e="conversation-item"], div[class*="conversation"], div[class*="message-item"]').first
-                        if await search_result.count() > 0:
-                            await search_result.click()
-                            await page.wait_for_timeout(3000)
-                            found_via_search = True
+                        if "login" in page.url.lower():
+                            return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
 
-                    if not found_via_search:
-                        logger.warning(f"Контакт @{username} не знайдений через search. Спробуємо через профіль...")
-                        await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="domcontentloaded")
-                        await page.wait_for_timeout(5000)
-                        message_btn = page.locator('button[data-e2e="message-button"], button:has-text("Message")')
+                        # Закриваємо pop-up сповіщення якщо є
+                        close_btns = page.locator('button[aria-label="Close"], button:has-text("✕"), button[data-e2e="toast-close"]')
+                        for _ in range(await close_btns.count()):
+                            try:
+                                await close_btns.first.click(timeout=1000)
+                            except Exception:
+                                break
+
+                        message_btn = page.locator('button[data-e2e="message-button"], button:has-text("Message"), button:has-text("Повідомлення")')
                         if await message_btn.count() == 0:
-                            return False, f"⚠️ @{username} не знайдений ні в Messages inbox, ні на профілі"
-                        await message_btn.first.click()
-                        await page.wait_for_timeout(4000)
+                            return False, f"⚠️ Кнопку Message не знайдено у @{username} (профіль приватний або закриті DM)"
+                        await message_btn.first.click(force=True)
+                        await page.wait_for_timeout(3500)
 
-                    # Шукаємо поле вводу (TikTok DM chat input)
-                    await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
+                        # Якщо виїхала панель — клікаємо по кнопці розгортання або по контакту
+                        expand_btn = page.locator('button[aria-label*="xpand"], a[href*="/messages"]').first
+                        if await expand_btn.count() > 0:
+                            try:
+                                await expand_btn.click(force=True)
+                                await page.wait_for_timeout(2500)
+                            except Exception:
+                                pass
+
+                        drawer_item = page.locator(f'[href*="/{username}"], div:has-text("{username}")').first
+                        if await drawer_item.count() > 0:
+                            await drawer_item.click(force=True)
+                            await page.wait_for_timeout(2500)
+
+                    # 3. Шукаємо поле вводу (TikTok DM chat input)
                     chat_input = page.locator(
                         '[data-e2e="chat-input"] [contenteditable="true"], '
                         '[contenteditable="true"][role="textbox"], '
-                        'div[contenteditable="true"], '
-                        'textarea[placeholder], '
-                        'textarea'
+                        '[contenteditable="true"]'
                     )
-                    await page.wait_for_timeout(2000)
+
+                    try:
+                        await chat_input.first.wait_for(state="visible", timeout=12000)
+                    except Exception:
+                        pass
+
+                    await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
+
                     if await chat_input.count() == 0:
                         return False, "⚠️ Чат відкрився, але поле вводу тексту не знайдено"
 
                     input_field = chat_input.first
-                    await input_field.click()
-                    await page.wait_for_timeout(600)
-                    await input_field.fill(message_text)
+                    await input_field.click(force=True)
+                    await page.wait_for_timeout(500)
+
+                    # Вводимо повідомлення
+                    try:
+                        await input_field.fill(message_text)
+                    except Exception:
+                        await page.keyboard.type(message_text, delay=30)
                     await page.wait_for_timeout(800)
 
-                    await input_field.press("Enter")
+                    # Натискаємо Enter для відправки
+                    await page.keyboard.press("Enter")
                     await page.wait_for_timeout(3000)
 
                     try:
@@ -327,6 +379,7 @@ class TikTokStreakService:
 
                     logger.info(f"✅ Повідомлення успішно відправлено у TikTok для @{username}!")
                     return True, "✅ Успішно надіслано через браузер TikTok"
+
                 finally:
                     await browser.close()
         except Exception as e:
