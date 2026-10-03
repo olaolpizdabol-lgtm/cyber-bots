@@ -28,25 +28,29 @@ class InstagramPublisher(BasePublisher):
         if self._client:
             return self._client
 
-        if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD or INSTAGRAM_USERNAME.startswith("your_"):
+        session_path = Path(INSTAGRAM_SESSION_FILE)
+        has_session = session_path.exists()
+        has_creds = bool(INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD and not INSTAGRAM_USERNAME.startswith("your_"))
+
+        if not has_session and not has_creds:
             return None
 
         cl = Client()
         if proxy_manager.proxy_url:
             cl.set_proxy(proxy_manager.proxy_url)
 
-        session_path = Path(INSTAGRAM_SESSION_FILE)
         logged_in = False
-
-        if session_path.exists():
+        if has_session:
             try:
                 cl.load_settings(str(session_path))
-                cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                if has_creds:
+                    cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
                 logged_in = True
+                logger.info("Сесію Instagram успішно завантажено з файлу сесії")
             except Exception as e:
                 logger.warning(f"Помилка відновлення сесії Instagram: {e}")
 
-        if not logged_in:
+        if not logged_in and has_creds:
             try:
                 cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
                 cl.dump_settings(str(session_path))
@@ -55,8 +59,10 @@ class InstagramPublisher(BasePublisher):
                 logger.error(f"Помилка входу в Instagram: {e}")
                 return None
 
-        self._client = cl
-        return cl
+        if logged_in:
+            self._client = cl
+            return cl
+        return None
 
     def publish(
         self,

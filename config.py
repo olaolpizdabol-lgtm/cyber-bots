@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # Папки проекту
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 CREDENTIALS_DIR = BASE_DIR / "credentials"
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 TEMP_DIR = BASE_DIR / "temp"
 
 for folder in (DOWNLOADS_DIR, CREDENTIALS_DIR, DATA_DIR, TEMP_DIR):

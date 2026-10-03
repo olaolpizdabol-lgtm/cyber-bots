@@ -468,19 +468,18 @@ async def handle_text(message: Message, bot: Bot):
 
 async def spontaneous_turikov_worker(bot: Bot):
     logger.info("Фоновий воркер Сані Турікова активовано")
-    # Пауза перед першим вигуком після запуску (1-2.5 хвилини)
-    await asyncio.sleep(random.randint(60, 150))
+    await asyncio.sleep(random.randint(20, 50))
     while True:
         try:
             cleanup_cyber_rizhyi_expired_messages(hours=72.0, keep_last=60)
             active_chats = get_active_cyber_rizhyi_chats()
             for chat_id in active_chats:
                 try:
-                    # СТРОГИЙ ЗАХИСТ: НЕ перебивати живий діалог у чаті! Тільки якщо глуха тиша 60+ хв!
-                    if not is_cyber_chat_silent_for_minutes(chat_id, minutes=60.0):
+                    # Якщо в чаті тиша 3+ хв — Туріков вкидає тему чи звертається до Рижого
+                    if not is_cyber_chat_silent_for_minutes(chat_id, minutes=3.0):
                         continue
 
-                    if random.random() < 0.70:
+                    if random.random() < 0.85:
                         ai_msgs = await asyncio.get_event_loop().run_in_executor(
                             None, cyber_turikov_service.generate_ai_spontaneous, chat_id
                         )
@@ -534,8 +533,7 @@ async def spontaneous_turikov_worker(bot: Bot):
                 except Exception as chat_err:
                     logger.debug(f"Пропущено чат {chat_id}: {chat_err}")
 
-            # Пауза між вкидами (3-7 хвилин)
-            await asyncio.sleep(random.randint(180, 420))
+            await asyncio.sleep(random.randint(60, 180))
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -647,19 +645,14 @@ async def inter_bot_bridge_worker(bot: Bot):
                 # Б) Діалог з Санею Рижим (@cyber_red_head_bot)
                 consecutive = ev.get("consecutive_count", 0)
 
-                # Підтримуємо діалог між ботами НЕ більше 1 обміну (щоб не було спаму між ботами!)
-                if consecutive >= 1:
-                    logger.info(f"Міжботовий міст (Туріков): ліміт діалогу ({consecutive}), зупиняємо ланцюжок")
+                # Дозволяємо живий діалог між ботами до 5 реплік
+                if consecutive >= 5:
+                    logger.info(f"Міжботовий міст (Туріков): ліміт діалогу ({consecutive}), пауза")
                     continue
 
                 text_low = text.lower()
 
-                # Відповідаємо Рижому, якщо він звертається до Турікова
-                is_mentioned = any(k in text_low for k in ["туріков", "турік", "пупсик", "@turikov_bot", "саня", "саша", "газ", "роналду", "карти", "шошо", "тайстра", "самокат", "богдан банан"])
-                if consecutive == 0 and not is_mentioned and random.random() > 0.40:
-                    continue
-
-                # Швидка та природна пауза (2.0-3.5 с читає, 1.0-1.8 с друкує)
+                # Швидка та природна пауза (2.5-4.0 с читає, 1.0-1.8 с друкує)
                 await asyncio.sleep(random.uniform(2.5, 4.0))
                 try:
                     await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -678,8 +671,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                     reply_to_name="Саня Рижий",
                     custom_instruction=(
                         "Це репліка твого кента Сані Рижого у спільній групі. "
-                        "Підтримай або підколи його коротко (за CS2, куріла рулета, комп). "
-                        "Пиши ПЕРЕВАЖНО ОДНУ коротку живу фразу! Без '!'. Без уроків і школи."
+                        "Активно підтримай діалог, підколи його за комп чи кс, за рулет або разом підколіть когось із чату. "
+                        "Пиши 1 коротку живу пацанську фразу! Без '!'. Без уроків і школи."
                     )
                 )
 
@@ -699,7 +692,22 @@ async def inter_bot_bridge_worker(bot: Bot):
                     else:
                         await asyncio.sleep(random.uniform(0.5, 1.0))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
-                # Боти НЕ продовжують розмову між собою далі (чекають повідомлень від людей)
+
+                # Продовжуємо бесіду: передаємо хід Рижому
+                if sent_msg and replies and consecutive < 5:
+                    full_text = " ".join(replies)
+                    enqueue_cyber_bot_event(
+                        chat_id=chat_id,
+                        from_bot="turikov",
+                        to_bot="rizhyi",
+                        message_id=sent_msg.message_id,
+                        text=full_text,
+                        consecutive_count=consecutive + 1,
+                        sender_user_id=bot.id,
+                        sender_username="turikov_bot",
+                        sender_first_name="Саня Туріков",
+                        reply_to_name="Саня Рижий"
+                    )
             await asyncio.sleep(0.8)
         except asyncio.CancelledError:
             break
