@@ -160,8 +160,34 @@ class TikTokStreakService:
         return sanitize_typography(chosen)
 
     def generate_friend_streak_message(self) -> str:
-        """Генерує дружнє нагадування про вогник"""
-        return sanitize_typography(random.choice(FRIEND_STREAK_TEMPLATES))
+        """
+        Генерує дружнє повідомлення про вогник з реальною актуальною погодою (Київ/Україна).
+        Використовує Gemini AI для унікальності або перевірені погодні шаблони.
+        """
+        from services.weather_service import get_current_weather, format_friend_weather_streak_message
+        w = get_current_weather()
+        weather_summary = w.get("summary", "+14°C, комфортно 🌤")
+
+        if gemini_service.api_key and not gemini_service.api_key.startswith("AIzaSyYour") and gemini_service.client:
+            prompt = f"""
+Ти - Бодя. Напиши коротке (1-2 речення) повідомлення кенту/другу в TikTok для щоденного вогника (streak).
+ОБОВ'ЯЗКОВО згадай сьогоднішню реальну погоду: {weather_summary}.
+СТИЛЬ:
+1. Жива українська мова, дотепний дружній вайб ("йоу", "бро", "одягайся тепліше", "не мерзни", "тримаєм вогник").
+2. Обов'язково емодзі вогника 🔥.
+3. Тільки дефіс '-', ніяких довгих тире.
+4. Поверни ТІЛЬКИ готовий текст повідомлення без лапок і вступних слів.
+"""
+            try:
+                resp = gemini_service.generate_content([prompt])
+                if resp and getattr(resp, "text", None):
+                    clean = sanitize_typography(resp.text.strip())
+                    if clean:
+                        return clean
+            except Exception as e:
+                logger.debug(f"Помилка Gemini для погоди друзів: {e}")
+
+        return sanitize_typography(format_friend_weather_streak_message())
 
     def get_streaks_session_id(self) -> str:
         """Повертає sessionid окремого акаунта вогників (з БД або .env)"""

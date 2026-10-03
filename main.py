@@ -60,6 +60,21 @@ async def main():
         )
         return
 
+    # Запускаємо Web Uploader для завантаження великих файлів якщо задано PORT (Railway)
+    web_port = int(os.getenv("PORT", 0) or 0)
+    if web_port > 0:
+        try:
+            import aiohttp.web
+            from core.web_uploader import create_web_uploader_app
+            uploader_app = create_web_uploader_app(bot=bot)
+            runner = aiohttp.web.AppRunner(uploader_app)
+            await runner.setup()
+            site = aiohttp.web.TCPSite(runner, "0.0.0.0", web_port)
+            await site.start()
+            logger.info(f"🌐 Web App Uploader успішно запущено на порті {web_port}")
+        except Exception as we:
+            logger.warning(f"Не вдалося запустити Web Uploader: {we}")
+
     logger.info("Запуск Telegram бота (polling) з підтримкою ВСІХ форматів контенту та TikTok вогників...")
     
     # Запускаємо фоновий планувальник вогників
