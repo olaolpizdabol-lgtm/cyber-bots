@@ -18,13 +18,18 @@ import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
+import json
 from config import (
     TIKTOK_STREAKS_SESSION_ID,
     TIKTOK_STREAKS_ACCOUNT_NAME,
     TIKTOK_STREAKS_ENABLED,
     TIKTOK_GIRLFRIEND_USERNAME,
     TIKTOK_STREAK_SCHEDULE_TIME,
-    DRY_RUN_MODE
+    DRY_RUN_MODE,
+    CHANNEL_AUTOMATION_BOT_TOKEN,
+    TELEGRAM_BOT_TOKEN,
+    ALLOWED_USER_IDS,
+    DATA_DIR
 )
 from core.database import (
     get_setting,
@@ -47,6 +52,7 @@ from services.proxy_manager import proxy_manager
 logger = logging.getLogger(__name__)
 
 # Розширені романтичні шаблони для дівчини з урахуванням часу доби
+# Живі, автентичні романтичні повідомлення для дівчини (як пишуть справжні люди в чатах, без ШІ-кліше)
 GIRLFRIEND_HEART_TEMPLATES: List[str] = [
     "Доброго ранку, моє сонечко! ❤️ Нехай день буде чудовим і легким! Люблю тебе безмежно 🥰💖",
     "Ти моє найбільше щастя і натхнення! 💕 Сяй сьогодні та посміхайся, цьомаю міцно! ✨❤️",
@@ -174,16 +180,173 @@ class TikTokStreakService:
         sess = self.get_streaks_session_id()
         return bool(sess and not sess.startswith("your_") and not sess.startswith("mock_"))
 
-    def send_tiktok_direct_message(self, username: str, message_text: str) -> Tuple[bool, Optional[str]]:
+    def _notify_admin_telegram(self, text: str):
+        """Надсилає оперативне сповіщення адміністраторам у Telegram через Bot API"""
+        token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
+        if not token or token.startswith("123456789:") or not ALLOWED_USER_IDS:
+            return
+        import requests
+        for uid in ALLOWED_USER_IDS:
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": uid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+                    timeout=5
+                )
+            except Exception as e:
+                logger.debug(f"Не вдалося надіслати сповіщення вогника в Telegram: {e}")
+
+    async def _send_via_playwright(self, username: str, message_text: str, session_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Автоматизована відправка Direct Message через Playwright Chromium у фоновому браузері.
+        Використовує async_playwright для сумісності з asyncio event loop бота.
+        """
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return False, "Playwright не встановлено у системі (запустіть: pip install playwright && playwright install chromium)"
+
+        try:
+            from playwright_stealth import stealth_async
+            has_stealth = True
+        except ImportError:
+            has_stealth = False
+
+        proxy_cfg = proxy_manager.get_playwright_proxy()
+
+        try:
+            async with async_playwright() as p:
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check"
+                ]
+                browser = await p.chromium.launch(
+                    headless=True,
+                    proxy=proxy_cfg,
+                    args=launch_args
+                )
+                try:
+                    state_file = DATA_DIR / "tiktok_state.json"
+                    cookies_file = DATA_DIR / "tiktok_cookies.json"
+
+                    context_kwargs = {
+                        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        "viewport": {"width": 1280, "height": 800},
+                        "locale": "uk-UA"
+                    }
+                    if state_file.exists():
+                        logger.info(f"Використовуємо збережену сесію: {state_file}")
+                        context_kwargs["storage_state"] = str(state_file)
+
+                    context = await browser.new_context(**context_kwargs)
+
+                    if cookies_file.exists():
+                        try:
+                            with open(cookies_file, "r", encoding="utf-8") as cf:
+                                raw_cookies = json.load(cf)
+                                if isinstance(raw_cookies, list):
+                                    await context.add_cookies(raw_cookies)
+                                    logger.info(f"Завантажено {len(raw_cookies)} cookies з {cookies_file}")
+                        except Exception as ce:
+                            logger.warning(f"Помилка завантаження cookies: {ce}")
+                    elif not state_file.exists() and session_id:
+                        await context.add_cookies([
+                            {"name": "sessionid", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
+                            {"name": "sessionid_ss", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
+                        ])
+
+                    page = await context.new_page()
+                    if has_stealth:
+                        try:
+                            await stealth_async(page)
+                        except Exception:
+                            pass
+
+                    # Йдемо напряму в /messages — TikTok показує список чатів
+                    logger.info(f"Відкриваємо TikTok Messages inbox для пошуку @{username}...")
+                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    await page.wait_for_timeout(3000)
+
+                    # Перевіряємо авторизацію — якщо редирект на login
+                    if "login" in page.url.lower():
+                        return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
+
+                    # Явно клікаємо Messages у навбарі щоб відкрити inbox
+                    nav_msg = page.locator('[data-e2e="nav-messages"]')
+                    if await nav_msg.count() > 0:
+                        await nav_msg.click()
+                        await page.wait_for_timeout(3000)
+
+                    # Шукаємо контакт в списку чатів по нікнейму або імені
+                    # TikTok показує display name або @username в списку
+                    contact_row = page.locator(f'a[href*="/{username}"], [data-e2e="conversation-item"]:has-text("{username}")')
+                    if await contact_row.count() == 0:
+                        # Fallback — шукаємо по першому рядку тексту в кожному чаті
+                        contact_row = page.locator(f'div:has-text("@{username}")').first
+                    if await contact_row.count() == 0:
+                        logger.warning(f"Контакт @{username} не знайдений у списку Messages. Спробуємо через профіль...")
+                        # Fallback — профіль
+                        await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="domcontentloaded")
+                        await page.wait_for_timeout(5000)
+                        message_btn = page.locator('button[data-e2e="message-button"], button:has-text("Message")')
+                        if await message_btn.count() == 0:
+                            return False, f"⚠️ @{username} не знайдений ні в Messages inbox, ні на профілі"
+                        await message_btn.first.click()
+                        await page.wait_for_timeout(4000)
+                    else:
+                        await contact_row.first.click()
+                        await page.wait_for_timeout(3000)
+
+                    # Шукаємо поле вводу (TikTok DM chat input)
+                    await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
+                    chat_input = page.locator(
+                        '[data-e2e="chat-input"] [contenteditable="true"], '
+                        '[contenteditable="true"][role="textbox"], '
+                        'div[contenteditable="true"], '
+                        'textarea[placeholder], '
+                        'textarea'
+                    )
+                    await page.wait_for_timeout(2000)
+                    if await chat_input.count() == 0:
+                        return False, "⚠️ Чат відкрився, але поле вводу тексту не знайдено"
+
+                    input_field = chat_input.first
+                    await input_field.click()
+                    await page.wait_for_timeout(600)
+                    await input_field.fill(message_text)
+                    await page.wait_for_timeout(800)
+
+                    await input_field.press("Enter")
+                    await page.wait_for_timeout(3000)
+
+                    try:
+                        await context.storage_state(path=str(state_file))
+                    except Exception:
+                        pass
+
+                    logger.info(f"✅ Повідомлення успішно відправлено у TikTok для @{username}!")
+                    return True, "✅ Успішно надіслано через браузер TikTok"
+                finally:
+                    await browser.close()
+        except Exception as e:
+            err = security_guard.sanitize_error(str(e))
+            logger.error(f"Помилка Playwright при відправці TikTok DM: {err}")
+            return False, f"Помилка браузера Playwright: {err}"
+
+    async def send_tiktok_direct_message(self, username: str, message_text: str) -> Tuple[bool, Optional[str]]:
         """
         Відправляє Direct Message у TikTok з окремого акаунта вогників.
-        Включає перевірку проксі, захист сесії та Mock-режим до введення ключів.
+        Включає перевірку проксі, захист сесії, Playwright-автоматизацію та Telegram пінг-фолбек.
         """
         clean_user = username.strip().lstrip("@")
         clean_text = sanitize_typography(message_text)
         session_id = self.get_streaks_session_id()
 
-        # 1. Перевірка наявності облікових даних (Session ID окремого акаунта вогників) або Demo/Dry-Run
+        # 1. Перевірка наявності облікових даних або Demo/Dry-Run
         if DRY_RUN_MODE or not session_id or session_id.startswith("your_"):
             logger.info(f"🧪 [DRY-RUN / ОЧІКУВАННЯ КЛЮЧІВ] TikTok DM -> @{clean_user}: '{clean_text}'")
             return True, "Демо-режим: повідомлення сформовано успішно (очікує введення окремого TIKTOK_STREAKS_SESSION_ID)"
@@ -192,27 +355,37 @@ class TikTokStreakService:
         is_safe, safety_msg = proxy_manager.verify_platform_safety("tiktok")
         if not is_safe:
             logger.warning(f"Захист від блокування TikTok: {safety_msg}")
+            self._notify_admin_telegram(
+                f"⛔️ <b>TikTok Вогник заблоковано захистом: @{clean_user}</b>\n"
+                f"Причина: {safety_msg}\n"
+                f"💬 Повідомлення: <code>{clean_text}</code>"
+            )
             return False, safety_msg
 
-        # 3. Реальна відправка через TikTok Web Messaging API з окремого профілю
-        try:
-            proxies = proxy_manager.get_requests_proxies()
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Referer": "https://www.tiktok.com/messages",
-                "Accept": "application/json, text/plain, */*",
-                "Cookie": f"sessionid={session_id};"
-            }
-            # TikTok Web IM Send Endpoint
-            # Примітка: реальний виклик виконується через веб-сесію особистого акаунта
-            logger.info(f"Відправка TikTok DM (Канал вогників) через New York IP до @{clean_user}...")
+        # 3. Реальна відправка через Playwright Chromium
+        logger.info(f"Спроба автоматичної відправки TikTok вогника до @{clean_user} через Playwright...")
+        success, err = await self._send_via_playwright(clean_user, clean_text, session_id)
+
+        if success:
+            logger.info(f"TikTok вогник успішно доставлено до @{clean_user}")
+            self._notify_admin_telegram(
+                f"🔥 <b>TikTok Вогник доставлено!</b>\n"
+                f"👤 Контакт: <b>@{clean_user}</b>\n"
+                f"💬 Повідомлення: <i>«{clean_text}»</i>"
+            )
             return True, None
-        except Exception as e:
-            err = security_guard.sanitize_error(str(e))
-            logger.error(f"Помилка відправки TikTok DM до @{clean_user}: {err}")
+        else:
+            logger.warning(f"Не вдалося доставити вогник автоматично до @{clean_user}: {err}")
+            self._notify_admin_telegram(
+                f"🚨 <b>УВАГА! TikTok Вогник під загрозою: @{clean_user}</b>\n\n"
+                f"⚠️ Причина авто-відправки: {err}\n"
+                f"👉 <a href='https://www.tiktok.com/@{clean_user}'>Відкрити чат @{clean_user} у TikTok</a>\n\n"
+                f"💬 <b>Текст повідомлення (натисніть щоб скопіювати):</b>\n"
+                f"<code>{clean_text}</code>"
+            )
             return False, err
 
-    def run_streaks_dispatch(self, force_all: bool = False) -> Dict[str, Any]:
+    async def run_streaks_dispatch(self, force_all: bool = False) -> Dict[str, Any]:
         """
         Головний цикл щоденної відправки вогників:
         - Знаходить акаунт дівчини та надсилає їй теплі повідомлення з сердечками (❤️).
@@ -253,10 +426,10 @@ class TikTokStreakService:
             # 2. Рандомізована затримка між повідомленнями (Humanized Jitter)
             if idx > 0:
                 jitter = random.uniform(3.0, 6.5)
-                time.sleep(jitter)
+                await asyncio.sleep(jitter)
 
             # 3. Відправка повідомлення
-            success, err = self.send_tiktok_direct_message(user, msg_text)
+            success, err = await self.send_tiktok_direct_message(user, msg_text)
             status_str = "sent" if success and not err else ("dry_run" if success and err and "Демо" in err else "failed")
 
             # 4. Логування в БД

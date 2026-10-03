@@ -198,26 +198,6 @@ async def send_reply_package(message: Message, bot: Bot, pkg: dict):
         sent = await send_burst_replies(message, bot, text_replies)
         sent_msgs.extend(sent)
 
-    # Ставимо подію в міжботовий міст, щоб Саня Рижий чув кожну репліку Турікова в групі і міг вступити в діалог
-    if message.chat.type in ("group", "supergroup") and sent_msgs and text_replies:
-        try:
-            full_reply_text = " ".join(text_replies)
-            last_msg = sent_msgs[-1]
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="turikov",
-                to_bot="rizhyi",
-                message_id=last_msg.message_id,
-                text=full_reply_text,
-                consecutive_count=0,
-                sender_user_id=bot.id,
-                sender_username="turikov_bot",
-                sender_first_name="Саня Туріков",
-                reply_to_name="Саня Рижий"
-            )
-        except Exception as e:
-            logger.debug(f"Міжботовий міст помилка enqueue: {e}")
-
 
 @router.message(Command("spontaneous", "shout", "tag"))
 async def cmd_spontaneous(message: Message, bot: Bot):
@@ -394,19 +374,6 @@ async def handle_text(message: Message, bot: Bot):
             reply_to_name=target_name,
             reply_to_msg_text=reply_to_text
         )
-        if is_group and is_message_addressed_to_bot(message, "rizhyi"):
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="user_relay",
-                to_bot="rizhyi",
-                message_id=message.message_id,
-                text=text,
-                consecutive_count=0,
-                sender_user_id=message.from_user.id,
-                sender_username=message.from_user.username,
-                sender_first_name=message.from_user.first_name,
-                reply_to_name="Саня Рижий"
-            )
         return
 
     _handled_group_msg_ids.add(message.message_id)
@@ -428,12 +395,7 @@ async def handle_text(message: Message, bot: Bot):
 
     custom_instr = None
     if is_vitos:
-        custom_instr = (
-            "Це пише Вітьок (@zelenskiy404)! Підтримай травлю Вітька! "
-            "1. Спитай чо він мовчить чмо або підколи що його навіть власна тупа тьолка кинула. "
-            "2. Угорай з того що він поставив чужу ламбу на аву ('блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. реальні бабки на ламбу є в давіда, він піднявся на фейсбуку', 'чия це ламба спустись на землю'). "
-            "Пиши 1 коротку репліку без '!'. Без школи і уроків."
-        )
+        custom_instr = "Це Вітьок з чужою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-4 слова"
 
     # Фонове (але не блокуюче) отримання аватарки відправника через Gemini Vision (кеш 15 хв)
     sender_avatar_desc = None
@@ -465,23 +427,7 @@ async def handle_text(message: Message, bot: Bot):
     )
     await send_reply_package(message, bot, pkg)
 
-    # Якщо це спільна група і повідомлення від людини — передаємо подію Рижому, щоб він ТАКОЖ включився в розмову!
-    if is_group and message.from_user and not message.from_user.is_bot:
-        try:
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="user_relay",
-                to_bot="rizhyi",
-                message_id=message.message_id,
-                text=text,
-                consecutive_count=0,
-                sender_user_id=message.from_user.id,
-                sender_username=message.from_user.username,
-                sender_first_name=message.from_user.first_name,
-                reply_to_name=target_name
-            )
-        except Exception as e:
-            logger.debug(f"Помилка relay до Рижого: {e}")
+
 
     # 40% шанс поставити реакцію разом із текстом
     if random.random() < 0.40:

@@ -209,26 +209,6 @@ async def send_reply_package(message: Message, bot: Bot, pkg: dict):
         sent = await send_burst_replies(message, bot, text_replies)
         sent_msgs.extend(sent)
 
-    # Ставимо подію в міжботовий міст, щоб Саня Туріков чув кожну репліку Рижого в групі і міг вступити в діалог
-    if message.chat.type in ("group", "supergroup") and sent_msgs and text_replies:
-        try:
-            full_reply_text = " ".join(text_replies)
-            last_msg = sent_msgs[-1]
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="rizhyi",
-                to_bot="turikov",
-                message_id=last_msg.message_id,
-                text=full_reply_text,
-                consecutive_count=0,
-                sender_user_id=bot.id,
-                sender_username="cyber_red_head_bot",
-                sender_first_name="Саня Рижий",
-                reply_to_name="Саня Туріков"
-            )
-        except Exception as e:
-            logger.debug(f"Міжботовий міст помилка enqueue: {e}")
-
 
 @router.message(Command("turikov", "persona_turikov"))
 async def cmd_switch_turikov(message: Message):
@@ -481,21 +461,6 @@ async def handle_text(message: Message, bot: Bot):
             reply_to_name=target_name,
             reply_to_msg_text=reply_to_text
         )
-        # ВАЖЛИВО: Якщо це повідомлення адресоване Сані Турікову (або згадує його),
-        # пересилаємо його Турікову через чергу подій на випадок, якщо в Telegram увімкнено Group Privacy mode!
-        if is_group and is_message_addressed_to_bot(message, "turikov"):
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="user_relay",
-                to_bot="turikov",
-                message_id=message.message_id,
-                text=text,
-                consecutive_count=0,
-                sender_user_id=message.from_user.id,
-                sender_username=message.from_user.username,
-                sender_first_name=message.from_user.first_name,
-                reply_to_name="Саня Туріков"
-            )
         return
 
     # 3. Відповідь активного персонажа (Саня Рижий чи Саня Туріков)
@@ -510,13 +475,7 @@ async def handle_text(message: Message, bot: Bot):
 
     custom_instr = None
     if is_vitos:
-        custom_instr = (
-            "Це пише Вітьок (@zelenskiy404)! Загноби його жорстко: "
-            "1. Якщо він мовчить або відповідає - спитай чо він мовчить чмо або видай панч про тьолку: "
-            "'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'. "
-            "2. Угорай з того що він поставив чужу ламбу на аву ('нахуя чужу ламбу на аву поклав мажор комнатний', 'чия це ламба спустись на землю'). "
-            "Без '!' і без уроків чи школи."
-        )
+        custom_instr = "Це Вітьок з чужою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-5 слів"
 
     service = get_service_for_chat(message.chat.id)
 
@@ -556,23 +515,7 @@ async def handle_text(message: Message, bot: Bot):
     _handled_group_msg_ids.add(message.message_id)
     await send_reply_package(message, bot, pkg)
 
-    # Якщо це спільна група і повідомлення від людини — передаємо подію Турікову, щоб він ТАКОЖ включився в розмову!
-    if is_group and message.from_user and not message.from_user.is_bot:
-        try:
-            enqueue_cyber_bot_event(
-                chat_id=message.chat.id,
-                from_bot="user_relay",
-                to_bot="turikov",
-                message_id=message.message_id,
-                text=text,
-                consecutive_count=0,
-                sender_user_id=message.from_user.id,
-                sender_username=message.from_user.username,
-                sender_first_name=message.from_user.first_name,
-                reply_to_name=target_name
-            )
-        except Exception as e:
-            logger.debug(f"User relay to turikov error: {e}")
+
 
     # 40% шанс поставити реакцію разом із текстом
     if random.random() < 0.40:

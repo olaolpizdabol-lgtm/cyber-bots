@@ -106,7 +106,13 @@ class ProxyManager:
         if not self.proxy_url:
             return None
         parsed = urllib.parse.urlparse(self.proxy_url)
-        scheme = parsed.scheme.replace("socks5h", "socks5")
+        # Chromium не підтримує аутентифікацію для SOCKS5 (Browser does not support socks5 proxy authentication).
+        # Якщо вказано логін/пароль для socks5/socks5h, перемикаємо схему на http (Webshare та більшість проксі підтримують обидва протоколи на тому ж порту).
+        if parsed.username and parsed.scheme.startswith("socks"):
+            scheme = "http"
+        else:
+            scheme = parsed.scheme.replace("socks5h", "socks5")
+
         proxy_config = {
             "server": f"{scheme}://{parsed.hostname}:{parsed.port}"
         }

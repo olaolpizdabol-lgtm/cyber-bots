@@ -1,28 +1,20 @@
 version: '3.8'
 
 services:
-  # 🤖 Бот 1: Канал Автоматизація
-  channel_bot:
+  # 🚀 Усі автоматизації в одному контейнері:
+  # 1. Бот "Канал Автоматизація" (TikTok вогники, автопостинг, планувальник)
+  # 2. Бот "Кібер Рижий"
+  # 3. Бот "Кібер Саня Туріков"
+  automations_master:
     build: .
-    container_name: channel_automations_bot
+    container_name: channel_automations_all
     restart: unless-stopped
-    command: python main.py
+    command: python run_all_bots.py
     env_file:
       - .env
     volumes:
       - ./data:/app/data
       - ./credentials:/app/credentials
       - ./downloads:/app/downloads
+      - ./temp:/app/temp
 
-  # 🤖 Бот 2: Кібер Рижий
-  cyber_rizhyi_bot:
-    build: .
-    container_name: cyber_rizhyi_bot
-    restart: unless-stopped
-    command: python run_cyber_rizhyi.py
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-      - ./credentials:/app/credentials
-      - ./downloads:/app/downloads

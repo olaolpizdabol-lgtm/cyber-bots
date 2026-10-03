@@ -78,7 +78,7 @@ async def main():
 
                 if current_hm == sched_time and last_dispatched_date != today_str:
                     logger.info(f"⏰ Настав час розкладу ({sched_time}): запуск щоденної відправки вогників...")
-                    res = tiktok_streak_service.run_streaks_dispatch()
+                    res = await tiktok_streak_service.run_streaks_dispatch()
                     last_dispatched_date = today_str
                     if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:
                         for uid in ALLOWED_USER_IDS:

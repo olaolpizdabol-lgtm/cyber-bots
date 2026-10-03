@@ -980,7 +980,7 @@ async def callback_streak_run_now(call: CallbackQuery):
     await call.answer("🚀 Запуск щоденної відправки вогників...", show_alert=False)
     status_msg = await call.message.answer("⏳ <b>Відправляємо вогники у TikTok...</b> Зачекайте декілька секунд...")
 
-    res = tiktok_streak_service.run_streaks_dispatch()
+    res = await tiktok_streak_service.run_streaks_dispatch()
 
     if not res.get("details"):
         await status_msg.edit_text(
