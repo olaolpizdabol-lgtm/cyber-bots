@@ -10,3 +10,4 @@ data/*
 !data/.gitkeep
 .DS_Store
 temp/
+railway_env_ready.txt
