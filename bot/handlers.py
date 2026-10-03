@@ -493,6 +493,27 @@ async def handle_text_post(message: Message):
             logger.error(f"Помилка Кібер Рижого у групі: {e}")
             return
 
+    # 2.5. Перевірка: чи надіслано посилання на відео (Google Drive, Dropbox, direct MP4)
+    from services.video_downloader import is_video_url, download_video_from_url
+    if is_video_url(text_content):
+        if not is_user_allowed(message.from_user.id):
+            return
+        status_msg = await message.answer("🌐 <b>Виявлено посилання на відео!</b> Завантажуємо на сервер (без лімітів Telegram)...", parse_mode="HTML")
+        downloaded = download_video_from_url(text_content)
+        if downloaded:
+            await status_msg.edit_text("🧠 <b>Відео завантажено!</b> FFmpeg стискає, Gemini 3.5 створює опис...", parse_mode="HTML")
+            try:
+                data = auto_poster.process_incoming_video(downloaded)
+                await send_prepared_preview(message, status_msg, data)
+                return
+            except Exception as e:
+                logger.error(f"Помилка обробки відео за посиланням: {e}")
+                await status_msg.edit_text(f"❌ <b>Помилка:</b> {html.escape(str(e))}", parse_mode="HTML")
+                return
+        else:
+            await status_msg.edit_text("⚠️ Не вдалося завантажити відео за цим посиланням. Переконайтеся, що посилання публічно доступне (наприклад, доступ 'Усі, хто має посилання' в Google Drive).", parse_mode="HTML")
+            return
+
     # 3. Особистий чат власника - потік підготовки текстового посту до публікації
     if not is_user_allowed(message.from_user.id):
         return
