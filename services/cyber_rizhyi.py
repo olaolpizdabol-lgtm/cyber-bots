@@ -1070,6 +1070,7 @@ class CyberRizhyiService:
             ("@invicible11", "Тімур", "кейси, дроп"),
             ("@twdht", "Діма", "запізнюється, двіж"),
             ("@davvidka1", "Давід", "шортси, роблокс"),
+            ("@zelenskiy404", "Вітя", "ШІ згенерована аватарка клоун"),
         ]
         random.shuffle(kent_list)
 

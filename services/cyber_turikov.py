@@ -517,6 +517,7 @@ class CyberTurikovService:
             ("@invicible11", "Тімур", "кейси"),
             ("@twdht", "Діма", "запізнюється"),
             ("@davvidka1", "Давід", "шортси"),
+            ("@zelenskiy404", "Вітя", "ШІ згенерована аватарка клоун"),
         ]
         random.shuffle(kent_list)
 
