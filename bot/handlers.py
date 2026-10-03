@@ -281,6 +281,21 @@ async def handle_video_upload(message: Message, bot: Bot):
 
     try:
         video_obj = message.video or message.document
+        file_size = getattr(video_obj, "file_size", 0) or 0
+        if file_size > 20 * 1024 * 1024:
+            size_mb = file_size / (1024 * 1024)
+            await status_msg.edit_text(
+                f"⚠️ <b>Відео завелике ({size_mb:.1f} МБ)!</b>\n\n"
+                f"Офіційний ліміт Telegram Bot API на скачування ботом — <b>строго 20 МБ</b>.\n\n"
+                f"💡 <b>Як надіслати:</b>\n"
+                f"1. <b>Надішліть як звичайне «Відео», а не як «Файл/Документ»:</b>\n"
+                f"   При виборі як медіа/відео Telegram сам оптимізує ролик до ~8–12 МБ зі збереженням якості!\n"
+                f"2. Або стисніть/експортуйте відео з бітрейтом до 20 МБ.\n"
+                f"3. Або натисніть <b>«🔄 Взяти останнє відео з бази і запостити»</b>, щоб протестувати публікацію прямо зараз!",
+                parse_mode="HTML"
+            )
+            return
+
         file_id = video_obj.file_id
         file_info = await bot.get_file(file_id)
 

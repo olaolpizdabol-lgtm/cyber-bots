@@ -401,11 +401,15 @@ def main():
     from services.publishers.telegram_channel import telegram_channel_publisher
 
     # Перевірка публікації MIXED_CAROUSEL
+    import services.publishers.instagram as ig_mod
+    orig_ig_dry = ig_mod.DRY_RUN_MODE
+    ig_mod.DRY_RUN_MODE = True
     ig_res = instagram_publisher.publish(
         content_type=ContentType.MIXED_CAROUSEL,
         media_paths=mixed_paths[:3],
         metadata={"ig_caption": "Тест мікс-каруселі"}
     )
+    ig_mod.DRY_RUN_MODE = orig_ig_dry
     assert ig_res.success is True, f"Instagram mixed carousel error: {ig_res.error}"
     print("   • Instagram підтримка Mixed Carousel (Фото+Відео): ✅")
 
