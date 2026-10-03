@@ -796,6 +796,17 @@ async def callback_crosspost_last(call: CallbackQuery):
     await call.answer()
 
     post = get_last_published_post()
+
+    # get_last_published_post може повернути пост з порожнім файлом
+    # якщо відеофайл не існує — шукаємо останній пост з будь-яким файлом
+    import os
+    from core.database import get_recent_posts
+    if not post or not post.get("clean_video_path") or not os.path.exists(post.get("clean_video_path", "")):
+        recent = get_recent_posts(limit=10)
+        post = next(
+            (p for p in recent if p.get("clean_video_path") and os.path.exists(p["clean_video_path"])),
+            None
+        )
     if not post:
         await status_msg.edit_text("❌ Немає збереженого відео в базі. Спочатку надішли відео у чат!")
         return

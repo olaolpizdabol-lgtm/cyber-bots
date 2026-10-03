@@ -81,25 +81,67 @@ class TikTokPublisher(BasePublisher):
                     page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
                     page.wait_for_timeout(4000)
 
+                    # 1. Завантажуємо файл
                     file_input = page.locator('input[type="file"]')
                     if file_input.count() > 0 and media_paths:
                         file_input.first.set_input_files(media_paths[0])
-                        page.wait_for_timeout(6000)
+                        logger.info("TikTok: файл відео передано, чекаємо завершення обробки...")
 
-                    caption_box = page.locator('div[contenteditable="true"], div[data-placeholder], textarea')
-                    if caption_box.count() > 0:
+                        # 2. Чекаємо поки зникне прогрес-бар обробки (до 60 сек)
                         try:
-                            caption_box.first.click()
-                            page.keyboard.type(caption, delay=20)
-                            page.wait_for_timeout(1000)
+                            page.wait_for_selector(
+                                'div[contenteditable="true"][data-placeholder], '
+                                'div[class*="caption"] [contenteditable="true"], '
+                                'div[data-e2e="upload-caption"]',
+                                timeout=60000
+                            )
                         except Exception:
-                            pass
+                            # Якщо не знайшло точного поля — чекаємо 25 сек і пробуємо далі
+                            page.wait_for_timeout(25000)
 
-                    post_btn = page.locator('button:has-text("Post"), button:has-text("Опублікувати")')
+                    # 3. Поле підпису — перебираємо кілька варіантів selectors
+                    caption_selectors = [
+                        'div[data-e2e="upload-caption"] [contenteditable="true"]',
+                        'div[class*="caption"] [contenteditable="true"]',
+                        'div[contenteditable="true"][data-placeholder]',
+                        'div[contenteditable="true"]',
+                    ]
+                    caption_typed = False
+                    for sel in caption_selectors:
+                        cap_loc = page.locator(sel)
+                        if cap_loc.count() > 0:
+                            try:
+                                cap_loc.first.click()
+                                page.wait_for_timeout(500)
+                                # Очищаємо поле і вводимо підпис
+                                page.keyboard.press("Control+a")
+                                page.keyboard.press("Delete")
+                                page.keyboard.type(caption[:2000], delay=15)
+                                page.wait_for_timeout(800)
+                                caption_typed = True
+                                logger.info(f"TikTok: підпис введено через '{sel}'")
+                                break
+                            except Exception:
+                                continue
+
+                    if not caption_typed:
+                        logger.warning("TikTok: не вдалося знайти поле підпису, публікуємо без нього")
+
+                    # 4. Натискаємо кнопку Post
+                    page.wait_for_timeout(1500)
+                    post_btn = page.locator(
+                        'button:has-text("Post"), '
+                        'button:has-text("Опублікувати"), '
+                        'button[data-e2e="post-button"]'
+                    )
                     if post_btn.count() > 0:
                         post_btn.first.click()
-                        page.wait_for_timeout(5000)
+                        logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
+                        page.wait_for_timeout(8000)
+                    else:
+                        logger.warning("TikTok: кнопку Post не знайдено")
 
+                    # 5. Зберігаємо оновлену сесію
                     if state_file.exists():
                         try:
                             context.storage_state(path=str(state_file))
