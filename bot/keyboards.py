@@ -111,6 +111,12 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="🚀 Пост на ВСІ платформи (YT+IG+TT+TG)",
+                callback_data="menu_crosspost"
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="📊 Перегляди останнього відео / поста",
                 callback_data="menu_stats"
             )

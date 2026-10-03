@@ -721,6 +721,171 @@ async def callback_cancel(call: CallbackQuery):
 
 
 # ---------------------------------------------------------
+# CALLBACKS: КРОС-ПОСТИНГ НА ВСІ ПЛАТФОРМИ
+# ---------------------------------------------------------
+
+@router.callback_query(F.data == "menu_crosspost")
+async def callback_crosspost_menu(call: CallbackQuery):
+    """Показує меню крос-постингу з вибором: надіслати відео або взяти останній з бази"""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📤 Надіслати відео у чат - я опублікую на всіх!",
+                callback_data="crosspost_hint"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔄 Взяти останнє відео з бази і запостити",
+                callback_data="crosspost_last"
+            )
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад", callback_data="menu_back")
+        ]
+    ])
+    await call.message.edit_text(
+        "🚀 <b>Крос-постинг короткого відео</b>\n\n"
+        "Я запущу публікацію одночасно на:\n"
+        "🔴 YouTube Shorts (Bohdan AI)\n"
+        "🟣 Instagram Reels (@bohdan.gpt)\n"
+        "⚫️ TikTok (@bohdan.gpt)\n"
+        "💬 Telegram-канал (@bohdan_gpt)\n\n"
+        "Обери варіант:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "crosspost_hint")
+async def callback_crosspost_hint(call: CallbackQuery):
+    await call.message.answer(
+        "📤 <b>Надішли відео у цей чат прямо зараз!</b>\n\n"
+        "Як тільки отримаю відео — автоматично опублікую його на "
+        "YouTube Shorts, Instagram Reels, TikTok та Telegram-канал.\n\n"
+        "🔴 YouTube буде <b>unlisted</b> (доступ за посиланням).\n"
+        "Якщо хочеш публічно — після публікації можна змінити у Studio.",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "crosspost_last")
+async def callback_crosspost_last(call: CallbackQuery):
+    """Бере останнє відео з бази і публікує на всіх платформах"""
+    import asyncio
+    from services.publishers.youtube import youtube_publisher
+    from services.publishers.instagram import instagram_publisher
+    from services.publishers.tiktok import tiktok_publisher
+    from services.publishers.telegram_channel import telegram_channel_publisher
+    from core.content_type import ContentType
+    from core.security_guard import security_guard
+    from core.database import get_last_published_post
+    import time, random
+
+    status_msg = await call.message.answer(
+        "⏳ <b>Запускаю крос-постинг...</b>\n"
+        "🔴 YouTube Shorts...\n"
+        "🟣 Instagram Reels...\n"
+        "⚫️ TikTok...\n"
+        "💬 Telegram-канал...",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+    post = get_last_published_post()
+    if not post:
+        await status_msg.edit_text("❌ Немає збереженого відео в базі. Спочатку надішли відео у чат!")
+        return
+
+    video_path = post.get("clean_video_path")
+    if not video_path or not __import__("os").path.exists(video_path):
+        await status_msg.edit_text(
+            f"❌ Файл відео не знайдено: <code>{video_path}</code>\n"
+            "Надішли нове відео у чат!",
+            parse_mode="HTML"
+        )
+        return
+
+    caption = post.get("ig_caption") or post.get("yt_desc") or "#shorts #ai #automation"
+    title = post.get("yt_title") or "AI Content #shorts"
+    metadata = {
+        "youtube_title": title[:95],
+        "youtube_desc": caption,
+        "ig_caption": caption,
+        "tt_caption": caption,
+    }
+
+    results = []
+
+    # 1. YouTube Shorts
+    try:
+        service = youtube_publisher._get_authenticated_service()
+        if service:
+            from googleapiclient.http import MediaFileUpload
+            body = {
+                "snippet": {"title": title[:95], "description": caption, "tags": ["shorts", "ai"], "categoryId": "22"},
+                "status": {"privacyStatus": "unlisted", "selfDeclaredMadeForKids": False}
+            }
+            media_upload = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
+            resp = service.videos().insert(part="snippet,status", body=body, media_body=media_upload).execute()
+            vid_id = resp.get("id")
+            results.append(("🔴 YouTube Shorts", True, f"https://youtube.com/shorts/{vid_id}"))
+        else:
+            results.append(("🔴 YouTube Shorts", False, "Не авторизовано"))
+    except Exception as e:
+        results.append(("🔴 YouTube Shorts", False, security_guard.sanitize_error(str(e))))
+
+    await asyncio.sleep(random.uniform(2.5, 4.0))
+
+    # 2. Instagram Reels
+    try:
+        ig_client = instagram_publisher._get_client()
+        if ig_client:
+            media = ig_client.clip_upload(path=video_path, caption=caption)
+            code = getattr(media, "code", str(media.pk))
+            results.append(("🟣 Instagram Reels", True, f"https://instagram.com/p/{code}"))
+        else:
+            results.append(("🟣 Instagram Reels", False, "Не авторизовано"))
+    except Exception as e:
+        results.append(("🟣 Instagram Reels", False, security_guard.sanitize_error(str(e))))
+
+    await asyncio.sleep(random.uniform(2.5, 4.0))
+
+    # 3. TikTok
+    try:
+        tt_res = tiktok_publisher.publish(ContentType.VIDEO, [video_path], metadata)
+        results.append(("⚫️ TikTok", tt_res.success, tt_res.url or tt_res.error))
+    except Exception as e:
+        results.append(("⚫️ TikTok", False, security_guard.sanitize_error(str(e))))
+
+    await asyncio.sleep(random.uniform(2.5, 4.0))
+
+    # 4. Telegram Channel
+    try:
+        tg_res = telegram_channel_publisher.publish(ContentType.VIDEO, [video_path], metadata)
+        results.append(("💬 Telegram-канал", tg_res.success, tg_res.url or tg_res.error))
+    except Exception as e:
+        results.append(("💬 Telegram-канал", False, security_guard.sanitize_error(str(e))))
+
+    # Формуємо звіт
+    lines = ["📊 <b>Результати крос-постингу:</b>\n"]
+    for platform, ok, info in results:
+        if ok:
+            lines.append(f"✅ {platform}\n   <a href='{info}'>Відкрити</a>")
+        else:
+            lines.append(f"❌ {platform}\n   <i>{html.escape(str(info or ''))}</i>")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="◀️ Головне меню", callback_data="menu_back")
+    ]])
+    await status_msg.edit_text("\n\n".join(lines), parse_mode="HTML", reply_markup=kb)
+
+
+# ---------------------------------------------------------
 # CALLBACKS: СТАТИСТИКА, ПРОКСІ, БЕЗПЕКА, ГАЙД ТА ПРОМПТ
 # ---------------------------------------------------------
 
