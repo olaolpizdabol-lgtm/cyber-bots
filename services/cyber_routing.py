@@ -238,8 +238,8 @@ def is_message_addressed_to_bot(message: Message, bot_identity: str) -> bool:
     if message.chat.type == "private":
         return True
 
-    # Якщо повідомлення від бота - ігноруємо прямий тригер (працює окремий міст)
-    if message.from_user and (message.from_user.id in (RIZHYI_BOT_ID, TURIKOV_BOT_ID) or (message.from_user.username or "").endswith("bot")):
+    # Ігноруємо тільки НАШИХ двох ботів (захист від лупів). Незалежні боти — відповідаємо!
+    if message.from_user and message.from_user.id in (RIZHYI_BOT_ID, TURIKOV_BOT_ID):
         return False
 
     # НА БУДЬ-ЯКЕ ПОВІДОМЛЕННЯ В ЧАТІ ВІДПОВІДАЮТЬ ОБИДВА БОТИ!
