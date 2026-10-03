@@ -14,21 +14,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from playwright.sync_api import sync_playwright
 from config import DATA_DIR, CREDENTIALS_DIR
+from services.proxy_manager import proxy_manager
 
 INSTA_STATE_FILE = DATA_DIR / "instagram_state.json"
 INSTA_SESSION_FILE = CREDENTIALS_DIR / "instagram_session.json"
 
 
 def login_instagram():
+    # За замовчуванням використовуємо наш надійний US/NY проксі
+    use_proxy = "--direct" not in sys.argv and "--no-proxy" not in sys.argv
+    proxy_cfg = proxy_manager.get_playwright_proxy() if use_proxy else None
+
     print("🚀 Запуск браузера Chrome для авторизації в Instagram...")
-    print("🌐 Режим: пряме з'єднання / системний VPN (без додаткового SOCKS5 проксі)")
-    
+    if proxy_cfg:
+        print(f"🗽 Маршрутизація: через американський US проксі ({proxy_cfg.get('server')})")
+        print("💡 Підказка: щоб запустити без проксі (на твоєму системному VPN), запусти з прапорцем: --direct")
+    else:
+        print("🌐 Маршрутизація: через твоє пряме інтернет-з'єднання / системний VPN на Mac")
+
     CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,
+            proxy=proxy_cfg,
             args=[
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled"
@@ -37,9 +47,20 @@ def login_instagram():
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
-            locale="uk-UA"
+            locale="en-US"
         )
         page = context.new_page()
+
+        # Швидка перевірка IP
+        try:
+            print("🔍 Перевірка IP-адреси браузера...")
+            page.goto("https://api.ipify.org?format=json", timeout=12000)
+            ip_info = page.inner_text("body")
+            print(f"📍 Поточна IP-адреса браузера: {ip_info}")
+        except Exception:
+            pass
+
+        print("📲 Перехід на сторінку входу Instagram...")
         page.goto("https://www.instagram.com/accounts/login/", timeout=40000)
 
         print("\n" + "="*55)
