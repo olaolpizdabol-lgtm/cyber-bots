@@ -528,6 +528,149 @@ class TikTokStreakService:
             "friend": self.generate_friend_streak_message()
         }
 
+    async def check_and_react_to_shared_videos(self) -> List[Dict[str, Any]]:
+        """
+        Перевіряє чати з друзями та коханою у TikTok:
+        - Якщо хтось надіслав/поділився TikTok відео (a[href*="/video/"]):
+        - Перевіряє, чи ми вже не реагували на це відео (по базі).
+        - Завантажує відео, аналізує через Gemini AI (або вайб-шаблони Боді).
+        - Генерує дотепну життєву реакцію у стилі Боді та відправляє її прямо в чат!
+        """
+        try:
+            from playwright.async_api import async_playwright
+            from services.tiktok_reactions import tiktok_reactions_service
+            from core.database import get_recent_tiktok_reactions
+        except ImportError as e:
+            logger.error(f"Не вдалося імпортувати компоненти для реакцій: {e}")
+            return []
+
+        targets = get_streak_targets(active_only=True)
+        if not targets:
+            return []
+
+        # Відомі попередні реакції, щоб не спамити на те саме відео
+        existing_reactions = get_recent_tiktok_reactions(limit=100)
+        responded_urls = {r.get("video_url") for r in existing_reactions if r.get("video_url")}
+
+        proxy_cfg = proxy_manager.get_playwright_proxy()
+        processed = []
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    proxy=proxy_cfg,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+                )
+                try:
+                    context = await browser.new_context(
+                        storage_state=str(DATA_DIR / "tiktok_state.json"),
+                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        viewport={"width": 1280, "height": 800}
+                    )
+                    page = await context.new_page()
+
+                    logger.info("Відкриваємо повідомлення TikTok для перевірки надісланих відео...")
+                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    await page.wait_for_timeout(3500)
+
+                    KNOWN_DISPLAY_NAMES = {
+                        "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
+                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii"],
+                        "davidka223": ["davidkaaa", "davidka223", "Давід"],
+                        "lesko.new": ["Лесько", "lesko.new", "lesko"],
+                        "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
+                        "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
+                    }
+
+                    for target in targets:
+                        user = target["username"].lower()
+                        # Шукаємо контакт у сайдбарі
+                        aliases = KNOWN_DISPLAY_NAMES.get(user, [user])
+                        chat_target = None
+                        for alias in aliases:
+                            loc = page.locator(f'text="{alias}", [href*="/{alias}"]')
+                            if await loc.count() > 0:
+                                chat_target = loc.first
+                                break
+
+                        if not chat_target:
+                            continue
+
+                        await chat_target.click(force=True)
+                        await page.wait_for_timeout(2500)
+
+                        # Шукаємо посилання на відео в поточному чаті
+                        video_links = page.locator('a[href*="/video/"]')
+                        v_cnt = await video_links.count()
+                        if v_cnt == 0:
+                            continue
+
+                        # Беремо останнє відео в розмові
+                        last_link_elem = video_links.last
+                        href = await last_link_elem.get_attribute("href")
+                        if not href:
+                            continue
+
+                        full_url = href if href.startswith("http") else f"https://www.tiktok.com{href}"
+
+                        # Перевіряємо чи це відео вже коментували
+                        if full_url in responded_urls:
+                            continue
+
+                        logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
+
+                        # Генеруємо реакцію
+                        reaction_res = tiktok_reactions_service.process_tiktok_link(full_url)
+                        reaction_text = reaction_res.get("reaction") or "одааа, чисто сігма мув 😎"
+
+                        # Знаходимо поле вводу та надсилаємо реакцію
+                        chat_input = page.locator(
+                            '[data-e2e="chat-input"] [contenteditable="true"], '
+                            '[contenteditable="true"][role="textbox"], '
+                            '[contenteditable="true"]'
+                        )
+                        if await chat_input.count() > 0:
+                            inp = chat_input.first
+                            await inp.click(force=True)
+                            await page.wait_for_timeout(400)
+                            try:
+                                await inp.fill(reaction_text)
+                            except Exception:
+                                await page.keyboard.type(reaction_text, delay=30)
+                            await page.wait_for_timeout(600)
+                            await page.keyboard.press("Enter")
+                            await page.wait_for_timeout(2500)
+
+                            responded_urls.add(full_url)
+                            logger.info(f"✅ Реакцію успішно надіслано до @{user}: «{reaction_text}»")
+
+                            # Сповіщення адміну в Telegram
+                            self._notify_admin_telegram(
+                                f"🎬 <b>Відреагував на TikTok відео!</b>\n"
+                                f"👤 Від: <b>@{user}</b>\n"
+                                f"🔗 Відео: <a href='{full_url}'>Дивитись відео</a>\n"
+                                f"💬 Реакція Боді: <i>«{reaction_text}»</i>"
+                            )
+
+                            processed.append({
+                                "username": user,
+                                "video_url": full_url,
+                                "reaction": reaction_text
+                            })
+
+                    # Оновлюємо стан сесії
+                    try:
+                        await context.storage_state(path=str(DATA_DIR / "tiktok_state.json"))
+                    except Exception:
+                        pass
+                finally:
+                    await browser.close()
+        except Exception as e:
+            logger.error(f"Помилка при перевірці надісланих відео: {e}")
+
+        return processed
+
 
 # Глобальний екземпляр сервісу
 tiktok_streak_service = TikTokStreakService()
