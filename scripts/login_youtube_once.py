@@ -76,7 +76,7 @@ def setup_youtube():
     print("👉 Обери свій Google акаунт з YouTube-каналом та надай доступ.")
 
     try:
-        creds = flow.run_local_server(port=8080, prompt="consent", access_type="offline")
+        creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
     except Exception as e:
         print(f"⚠️ Локальний сервер не відкрився ({e}), перемикаємось на консольний код:")
         creds = flow.run_console()
