@@ -99,8 +99,44 @@ class TikTokPublisher(BasePublisher):
                             # Якщо не знайшло точного поля — чекаємо 25 сек і пробуємо далі
                             page.wait_for_timeout(25000)
 
+                    # 2.5. Закриваємо popup-модалки TikTok (content checks, new features тощо)
+                    # TikTok показує "Turn on automatic content checks?" — треба закрити перед вводом
+                    for _ in range(4):
+                        closed = False
+                        for close_sel in [
+                            'button:has-text("Cancel")',           # "Turn on automatic content checks" → Cancel
+                            'button:has-text("Got it")',           # "New editing features" → Got it
+                            'button[aria-label="Close"]',
+                            '[data-e2e="modal-close-btn"]',
+                            '.TUXModal-overlay ~ * button:has-text("×")',
+                            'div[class*="modal"] button:has-text("×")',
+                        ]:
+                            try:
+                                modal_btn = page.locator(close_sel)
+                                if modal_btn.count() > 0 and modal_btn.first.is_visible():
+                                    modal_btn.first.click(force=True)
+                                    page.wait_for_timeout(800)
+                                    closed = True
+                                    logger.info(f"TikTok: закрито модалку через '{close_sel}'")
+                                    break
+                            except Exception:
+                                continue
+                        # Також пробуємо Escape
+                        try:
+                            overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
+                            if overlay.count() > 0:
+                                page.keyboard.press("Escape")
+                                page.wait_for_timeout(600)
+                        except Exception:
+                            pass
+                        if not closed:
+                            break
+
+                    page.wait_for_timeout(1000)
                     # 3. Поле підпису — перебираємо кілька варіантів selectors
+                    # На step3 скрінші видно: div[role="combobox"][contenteditable="true"] (Draft.js)
                     caption_selectors = [
+                        'div[role="combobox"][contenteditable="true"]',          # Draft.js editor (реальний TikTok)
                         'div[data-e2e="upload-caption"] [contenteditable="true"]',
                         'div[class*="caption"] [contenteditable="true"]',
                         'div[contenteditable="true"][data-placeholder]',
@@ -111,12 +147,16 @@ class TikTokPublisher(BasePublisher):
                         cap_loc = page.locator(sel)
                         if cap_loc.count() > 0:
                             try:
-                                cap_loc.first.click()
+                                # force=True щоб обійти залишки overlay
+                                cap_loc.first.click(force=True)
                                 page.wait_for_timeout(500)
                                 # Очищаємо поле і вводимо підпис
+                                page.keyboard.press("Meta+a")
                                 page.keyboard.press("Control+a")
-                                page.keyboard.press("Delete")
+                                page.keyboard.press("Backspace")
                                 page.keyboard.type(caption[:2000], delay=15)
+                                page.wait_for_timeout(500)
+                                page.keyboard.press("Space")
                                 page.wait_for_timeout(800)
                                 caption_typed = True
                                 logger.info(f"TikTok: підпис введено через '{sel}'")
@@ -135,7 +175,7 @@ class TikTokPublisher(BasePublisher):
                         'button[data-e2e="post-button"]'
                     )
                     if post_btn.count() > 0:
-                        post_btn.first.click()
+                        post_btn.first.click(force=True)
                         logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
                         page.wait_for_timeout(8000)
                     else:
