@@ -109,8 +109,12 @@ class InstagramPublisher(BasePublisher):
         for attempt in range(max_retries + 1):
             try:
                 if content_type == ContentType.VIDEO:
-                    # Відео публікується у Reels
-                    media = client.clip_upload(path=media_paths[0], caption=caption)
+                    # Відео публікується у Reels з авто-поширенням на прив'язаний Facebook
+                    try:
+                        media = client.clip_upload(path=media_paths[0], caption=caption, share_to_facebook=True)
+                    except Exception as fb_err:
+                        logger.warning(f"Спроба з share_to_facebook не вдалася ({fb_err}), публікуємо звичайний Reels...")
+                        media = client.clip_upload(path=media_paths[0], caption=caption)
                 elif content_type in (ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
                     # Карусель з кількох фото/відео (до 20 слайдів)
                     media = client.album_upload(paths=[Path(p) for p in media_paths], caption=caption)
