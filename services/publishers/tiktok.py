@@ -47,7 +47,7 @@ class TikTokPublisher(BasePublisher):
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_tt_video_789",
-                url="https://www.tiktok.com/@bohdan.agi/video/mock_tt_video_789",
+                url="https://www.tiktok.com/@bohdan.gpt/video/mock_tt_video_789",
                 error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TIKTOK_UPLOAD_SESSION_ID для заливу відео ще не налаштовано)"
             )
 
