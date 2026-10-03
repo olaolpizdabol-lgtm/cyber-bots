@@ -1,6 +1,18 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from typing import List, Optional
 from core.content_type import ContentType, FORMAT_SUPPORTED_PLATFORMS
+
+def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Постійна клавіатура з великими кнопками внизу екрана (завжди видима)"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🚀 Пост на ВСІ платформи (YT+IG+TT+TG)")],
+            [KeyboardButton(text="🔥 TikTok Вогники"), KeyboardButton(text="📊 Перегляди / Статистика")],
+            [KeyboardButton(text="🤖 Головне меню"), KeyboardButton(text="🌐 Перевірити Проксі")]
+        ],
+        resize_keyboard=True,
+        persistent=True
+    )
 
 PLATFORM_EMOJIS = {
     "youtube": "🔴 Shorts",
@@ -179,7 +191,8 @@ def get_streak_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💖 Тест повідомлення для неї", callback_data="streak_preview_gf")
         ],
         [
-            InlineKeyboardButton(text="🎬 Реакція на їхній TikTok", callback_data="streak_tiktok_react")
+            InlineKeyboardButton(text="⚡️ Відповісти на скинуті TikTok відео (Gemini)", callback_data="streak_check_incoming_videos"),
+            InlineKeyboardButton(text="🎬 Реакція по лінку", callback_data="streak_tiktok_react")
         ],
         [
             InlineKeyboardButton(text="👥 Список контактів", callback_data="streak_list_targets"),

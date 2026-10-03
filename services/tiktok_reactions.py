@@ -203,36 +203,49 @@ class TikTokReactionsService:
         self,
         video_path: Optional[str] = None,
         video_meta: Optional[Dict[str, Any]] = None,
-        custom_note: Optional[str] = None
+        custom_note: Optional[str] = None,
+        is_girlfriend: bool = False
     ) -> str:
         """
-        Генерує реакцію в стилі Боді через Gemini AI з відео або метаданими.
+        Генерує реакцію в стилі Боді (або для дівчини) через Gemini AI з відео або метаданими.
         """
         meta = video_meta or {}
         title = meta.get("title", "")
         uploader = meta.get("uploader", "")
         desc = meta.get("description", "")
 
-        context_prompt = BOHDAN_REACTION_PROMPT
+        context_prompt = BOHDAN_GIRLFRIEND_REACTION_PROMPT if is_girlfriend else BOHDAN_REACTION_PROMPT
         user_content = f"""
 Контекст TikTok відео:
 - Автор: @{uploader or 'невідомий'}
 - Заголовок/опис: {title or desc or 'Без опису'}
 {f'- Додаткова нотатка: {custom_note}' if custom_note else ''}
 
-Напиши твою коротку фірмову реакцію на це відео (1-2 речення, тільки дефіс '-', стиль Боді):
+Напиши твою коротку фірмову реакцію на це відео (1-2 речення, тільки дефіс '-', {'стиль для коханої дівчини з сердечками' if is_girlfriend else 'стиль Боді'}):
 """
 
         # Спроба генерації через Gemini
+        uploaded_file = None
         if gemini_service.api_key and not gemini_service.api_key.startswith("AIzaSyYour"):
             try:
                 # Якщо є файл відео і новий SDK
-                uploaded_file = None
                 if video_path and os.path.exists(video_path) and getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
                     try:
                         f_res = gemini_service.client.files.upload(file=video_path)
-                        uploaded_file = f_res.name
-                    except Exception:
+                        # Очікуємо готовності обробки відео (стан ACTIVE)
+                        import time
+                        for _ in range(12):
+                            f_info = gemini_service.client.files.get(name=f_res.name)
+                            f_st = getattr(f_info, "state", None)
+                            if not f_st or str(f_st).upper().endswith("ACTIVE"):
+                                uploaded_file = f_res.name
+                                break
+                            elif f_st and "FAILED" in str(f_st).upper():
+                                uploaded_file = None
+                                break
+                            time.sleep(1.0)
+                    except Exception as fe:
+                        logger.warning(f"Помилка завантаження відео в Gemini Files API: {fe}")
                         uploaded_file = None
 
                 contents = [context_prompt, user_content]
@@ -240,23 +253,41 @@ class TikTokReactionsService:
                     contents.append(gemini_service.client.files.get(name=uploaded_file))
 
                 resp = gemini_service.generate_content(contents)
-                if resp:
+                if resp and getattr(resp, "text", None):
                     clean_res = sanitize_typography(resp.text.strip())
                     if clean_res:
                         return clean_res
             except Exception as e:
                 logger.error(f"Помилка Gemini при генерації реакції на TikTok: {e}")
+            finally:
+                if uploaded_file and gemini_service.client:
+                    try:
+                        gemini_service.client.files.delete(name=uploaded_file)
+                    except Exception:
+                        pass
 
-        # Демо / Fallback реакція в стилі Боді
+        # Демо / Fallback реакція в стилі Боді або для дівчини
         import random
+        if is_girlfriend:
+            return sanitize_typography(random.choice(GIRLFRIEND_OFFLINE_REACTIONS))
         return sanitize_typography(random.choice(BOHDAN_OFFLINE_REACTIONS))
 
-    def process_tiktok_link(self, url: str, custom_note: Optional[str] = None) -> Dict[str, Any]:
+    def process_tiktok_link(
+        self,
+        url: str,
+        custom_note: Optional[str] = None,
+        is_girlfriend: bool = False
+    ) -> Dict[str, Any]:
         """
         Повний цикл: завантаження -> Gemini аналіз -> реакція -> лог
         """
         video_path, meta = self.download_tiktok_video(url)
-        reaction_text = self.generate_reaction(video_path, meta, custom_note)
+        reaction_text = self.generate_reaction(
+            video_path=video_path,
+            video_meta=meta,
+            custom_note=custom_note,
+            is_girlfriend=is_girlfriend
+        )
 
         # Зберігаємо в БД
         save_tiktok_reaction_log(

@@ -532,9 +532,11 @@ class TikTokStreakService:
         """
         Перевіряє чати з друзями та коханою у TikTok:
         - Якщо хтось надіслав/поділився TikTok відео (a[href*="/video/"]):
-        - Перевіряє, чи ми вже не реагували на це відео (по базі).
-        - Завантажує відео, аналізує через Gemini AI (або вайб-шаблони Боді).
-        - Генерує дотепну життєву реакцію у стилі Боді та відправляє її прямо в чат!
+        - Перевіряє, що це саме вхідне відео від співрозмовника (а не надіслане нами).
+        - Перевіряє, чи ми вже не реагували на це відео (по базі SQLite).
+        - Завантажує відео та аналізує його через Gemini AI (ураховуючи дівчина чи бро).
+        - Відправляє автентичну згенеровану реакцію прямо в чат TikTok!
+        - Надсилає сповіщення зі звітом адміністратору в Telegram.
         """
         try:
             from playwright.async_api import async_playwright
@@ -546,10 +548,14 @@ class TikTokStreakService:
 
         targets = get_streak_targets(active_only=True)
         if not targets:
+            self._ensure_girlfriend_initialized()
+            targets = get_streak_targets(active_only=True)
+
+        if not targets:
             return []
 
-        # Відомі попередні реакції, щоб не спамити на те саме відео
-        existing_reactions = get_recent_tiktok_reactions(limit=100)
+        # Відомі попередні реакції, щоб не коментувати повторно одне й те саме відео
+        existing_reactions = get_recent_tiktok_reactions(limit=200)
         responded_urls = {r.get("video_url") for r in existing_reactions if r.get("video_url")}
 
         proxy_cfg = proxy_manager.get_playwright_proxy()
@@ -557,20 +563,49 @@ class TikTokStreakService:
 
         try:
             async with async_playwright() as p:
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars"
+                ]
                 browser = await p.chromium.launch(
                     headless=True,
                     proxy=proxy_cfg,
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+                    args=launch_args
                 )
                 try:
-                    context = await browser.new_context(
-                        storage_state=str(DATA_DIR / "tiktok_state.json"),
-                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                        viewport={"width": 1280, "height": 800}
-                    )
+                    state_file = DATA_DIR / "tiktok_state.json"
+                    cookies_file = DATA_DIR / "tiktok_cookies.json"
+                    session_id = self.get_streaks_session_id()
+
+                    context_kwargs = {
+                        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        "viewport": {"width": 1280, "height": 800},
+                        "locale": "uk-UA"
+                    }
+                    if state_file.exists():
+                        context_kwargs["storage_state"] = str(state_file)
+
+                    context = await browser.new_context(**context_kwargs)
+
+                    if cookies_file.exists():
+                        try:
+                            with open(cookies_file, "r", encoding="utf-8") as cf:
+                                raw_cookies = json.load(cf)
+                                if isinstance(raw_cookies, list):
+                                    await context.add_cookies(raw_cookies)
+                        except Exception:
+                            pass
+                    elif not state_file.exists() and session_id:
+                        await context.add_cookies([
+                            {"name": "sessionid", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
+                            {"name": "sessionid_ss", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
+                        ])
+
                     page = await context.new_page()
 
-                    logger.info("Відкриваємо повідомлення TikTok для перевірки надісланих відео...")
+                    logger.info("Відкриваємо TikTok Messages для перевірки надісланих відео...")
                     await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
                     await page.wait_for_timeout(3500)
 
@@ -585,8 +620,13 @@ class TikTokStreakService:
 
                     for target in targets:
                         user = target["username"].lower()
-                        # Шукаємо контакт у сайдбарі
+                        is_gf = bool(target.get("is_girlfriend"))
+                        nick = target.get("nickname") or user
+
                         aliases = KNOWN_DISPLAY_NAMES.get(user, [user])
+                        if nick and nick not in aliases:
+                            aliases.append(nick)
+
                         chat_target = None
                         for alias in aliases:
                             loc = page.locator(f'text="{alias}", [href*="/{alias}"]')
@@ -600,35 +640,61 @@ class TikTokStreakService:
                         await chat_target.click(force=True)
                         await page.wait_for_timeout(2500)
 
-                        # Шукаємо посилання на відео в поточному чаті
+                        # Перевіряємо повідомлення у поточному відкритому чаті
                         video_links = page.locator('a[href*="/video/"]')
                         v_cnt = await video_links.count()
                         if v_cnt == 0:
                             continue
 
-                        # Беремо останнє відео в розмові
-                        last_link_elem = video_links.last
-                        href = await last_link_elem.get_attribute("href")
+                        # Знаходимо останнє відео в чаті
+                        last_video_elem = video_links.last
+                        href = await last_video_elem.get_attribute("href")
                         if not href:
                             continue
 
                         full_url = href if href.startswith("http") else f"https://www.tiktok.com{href}"
 
-                        # Перевіряємо чи це відео вже коментували
+                        # Якщо вже реагували на це відео — пропускаємо
                         if full_url in responded_urls:
                             continue
 
+                        # Перевіряємо чи останнє повідомлення не надіслане НАМИ (якщо останній говорив я — не повторюємо)
+                        try:
+                            # Отримуємо батьківський елемент повідомлення та перевіряємо чи воно вирівняне вправо (наше)
+                            is_outgoing = await last_video_elem.evaluate(
+                                """el => {
+                                    const parentMsg = el.closest('[data-e2e="chat-item"]') || el.closest('div[class*="Message"]');
+                                    if (!parentMsg) return false;
+                                    const style = window.getComputedStyle(parentMsg);
+                                    const parentStyle = window.getComputedStyle(parentMsg.parentElement || parentMsg);
+                                    return style.justifyContent === 'flex-end' || 
+                                           style.alignItems === 'flex-end' ||
+                                           parentStyle.justifyContent === 'flex-end' ||
+                                           parentMsg.className.includes('Right') ||
+                                           parentMsg.querySelector('[class*="AvatarRight"]') !== null;
+                                }"""
+                            )
+                            if is_outgoing:
+                                logger.info(f"Відео {full_url} надіслано нами (outgoing), реакція не потрібна.")
+                                continue
+                        except Exception as eval_err:
+                            logger.debug(f"Перевірка is_outgoing: {eval_err}")
+
                         logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
 
-                        # Генеруємо реакцію
-                        reaction_res = tiktok_reactions_service.process_tiktok_link(full_url)
-                        reaction_text = reaction_res.get("reaction") or "одааа, чисто сігма мув 😎"
+                        # Генеруємо реакцію через Gemini AI (з урахуванням чи це дівчина)
+                        reaction_res = tiktok_reactions_service.process_tiktok_link(
+                            url=full_url,
+                            is_girlfriend=is_gf
+                        )
+                        reaction_text = reaction_res.get("reaction") or ("Ахаха це розрив 😂❤️" if is_gf else "одааа, чисто сігма мув 😎")
 
-                        # Знаходимо поле вводу та надсилаємо реакцію
+                        # Знаходимо поле вводу чату та надсилаємо реакцію
                         chat_input = page.locator(
                             '[data-e2e="chat-input"] [contenteditable="true"], '
-                            '[contenteditable="true"][role="textbox"], '
-                            '[contenteditable="true"]'
+                            'div[contenteditable="true"][role="textbox"], '
+                            'div[contenteditable="true"], '
+                            '[placeholder*="Відправити повідомлення"]'
                         )
                         if await chat_input.count() > 0:
                             inp = chat_input.first
@@ -637,29 +703,31 @@ class TikTokStreakService:
                             try:
                                 await inp.fill(reaction_text)
                             except Exception:
-                                await page.keyboard.type(reaction_text, delay=30)
+                                await page.keyboard.type(reaction_text, delay=35)
                             await page.wait_for_timeout(600)
                             await page.keyboard.press("Enter")
                             await page.wait_for_timeout(2500)
 
                             responded_urls.add(full_url)
-                            logger.info(f"✅ Реакцію успішно надіслано до @{user}: «{reaction_text}»")
+                            logger.info(f"✅ Реакцію Gemini успішно надіслано до @{user}: «{reaction_text}»")
 
                             # Сповіщення адміну в Telegram
+                            tag = "❤️ 👸 Кохана" if is_gf else "🔥 Друг"
                             self._notify_admin_telegram(
-                                f"🎬 <b>Відреагував на TikTok відео!</b>\n"
-                                f"👤 Від: <b>@{user}</b>\n"
+                                f"🎬 <b>Відреагував на TikTok відео через Gemini!</b>\n"
+                                f"{tag}: <b>@{user}</b>\n"
                                 f"🔗 Відео: <a href='{full_url}'>Дивитись відео</a>\n"
-                                f"💬 Реакція Боді: <i>«{reaction_text}»</i>"
+                                f"💬 Реакція: <i>«{reaction_text}»</i>"
                             )
 
                             processed.append({
                                 "username": user,
+                                "is_girlfriend": is_gf,
                                 "video_url": full_url,
                                 "reaction": reaction_text
                             })
 
-                    # Оновлюємо стан сесії
+                    # Оновлюємо та зберігаємо стан сесії
                     try:
                         await context.storage_state(path=str(DATA_DIR / "tiktok_state.json"))
                     except Exception:
@@ -667,7 +735,7 @@ class TikTokStreakService:
                 finally:
                     await browser.close()
         except Exception as e:
-            logger.error(f"Помилка при перевірці надісланих відео: {e}")
+            logger.error(f"Помилка при перевірці надісланих відео: {e}", exc_info=True)
 
         return processed
 

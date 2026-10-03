@@ -499,6 +499,36 @@ class GeminiService:
             "hashtags": tag_str
         }
 
+    def _generate_fallback(self, content_type: ContentType, raw_text: Optional[str] = None) -> Dict[str, str]:
+        """Генерує надійний локальний фолбек, якщо Gemini API тимчасово недоступний або вичерпано ліміт"""
+        base_text = sanitize_typography(raw_text).strip() if raw_text else ""
+        if not base_text:
+            if content_type == ContentType.VIDEO:
+                base_text = "Нове атмосферне відео! Дивіться повну версію та оцінюйте ⚡️"
+            elif content_type in (ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
+                base_text = "Добірка найкращих моментів та корисної інформації 📸"
+            elif content_type == ContentType.PHOTO:
+                base_text = "Свіже фото та гарний настрій 🌟"
+            else:
+                base_text = "Цікава думка та оновлення на сьогодні 🚀"
+
+        title = truncate_at_word_boundary(base_text.split("\n")[0], 70)
+        default_tags = "#тренди #рек #fyp #ukraine #content #top"
+
+        fallback_data = {
+            "youtube_title": title,
+            "caption": f"{base_text}\n\n{default_tags}",
+            "snapchat_title": title,
+            "twitter_post": truncate_at_word_boundary(base_text, 200) + " #рек #fyp",
+            "threads_post": truncate_at_word_boundary(base_text, 350) + " #рек",
+            "facebook_post": f"{base_text}\n\n{default_tags}",
+            "pinterest_title": title,
+            "pinterest_desc": truncate_at_word_boundary(base_text, 400),
+            "bluesky_post": truncate_at_word_boundary(base_text, 220),
+            "hashtags": ["#тренди", "#рек", "#fyp", "#ukraine"]
+        }
+        return self._normalize_metadata(fallback_data)
+
     def analyze_video(self, video_path: str, prompt: str = "") -> Optional[str]:
         """
         Аналізує відеофайл або відео-кружечок за допомогою Gemini Multimodal (новий SDK).

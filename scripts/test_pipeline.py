@@ -13,6 +13,7 @@
 """
 import sys
 import os
+import asyncio
 import subprocess
 from pathlib import Path
 from PIL import Image
@@ -228,6 +229,9 @@ def main():
 
     # 10. ТЕСТ АВТОМАТИЗАЦІЇ #2 (TIKTOK ВОГНИКИ ТА СЕРДЕЧКА ДЛЯ ДІВЧИНИ)
     print("\n🔟 ТЕСТ: Автоматизація #2 (TikTok Streaks & Сердечка для Дівчини)...")
+    import services.automations.automation_2 as auto2_mod
+    orig_dry_run = auto2_mod.DRY_RUN_MODE
+    auto2_mod.DRY_RUN_MODE = True
     from services.automations.automation_2 import tiktok_streak_service
     from core.database import (
         set_girlfriend_target,
@@ -266,12 +270,12 @@ def main():
     print(f"   • Генерація для друга: '{fr_msg}' (вогник 🔥 присутній, типографіка '-') ✅")
 
     # Тест відправки в Demo/Dry-Run режимі
-    success, note = tiktok_streak_service.send_tiktok_direct_message("test_sweet_girl", gf_msg)
+    success, note = asyncio.run(tiktok_streak_service.send_tiktok_direct_message("test_sweet_girl", gf_msg))
     assert success is True
     print(f"   • Відправка TikTok DM (Безпечний Demo/Dry-run): {note} ✅")
 
     # Тест повного диспетчера розсилки вогників (run_streaks_dispatch)
-    dispatch_res = tiktok_streak_service.run_streaks_dispatch()
+    dispatch_res = asyncio.run(tiktok_streak_service.run_streaks_dispatch())
     assert dispatch_res["success"] is True
     assert dispatch_res["total_targets"] >= 2
     assert dispatch_res["sent_count"] >= 2
@@ -282,6 +286,7 @@ def main():
     stats = get_streak_stats()
     print(f"   • Результат розсилки вогників: успішно {dispatch_res['sent_count']}/{dispatch_res['total_targets']} ✅")
     print(f"   • Статистика в базі даних: Всього цілей: {stats['total_targets']}, Дівчина: {stats['has_girlfriend']}, Відправлено сьогодні: {stats['sent_today']}, Макс. серія: {stats['max_streak']} ✅")
+    auto2_mod.DRY_RUN_MODE = orig_dry_run
 
     # 11. ТЕСТ РЕАКЦІЙ НА TIKTOK У СТИЛІ БОДІ (АВТЕНТИЧНИЙ ЧАТ-СТИЛЬ)
     print("\n1️⃣1️⃣ ТЕСТ: Реакції на TikTok у фірмовому стилі Боді...")

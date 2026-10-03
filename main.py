@@ -69,8 +69,9 @@ async def main():
     from config import ALLOWED_USER_IDS
 
     async def streak_scheduler_background_task():
-        logger.info("Фоновий планувальник TikTok вогників активний.")
+        logger.info("Фоновий планувальник TikTok вогників та вхідних відео активний.")
         last_dispatched_date = None
+        last_react_check_minute = None
         while True:
             try:
                 await asyncio.sleep(45)
@@ -94,6 +95,15 @@ async def main():
                                 )
                             except Exception:
                                 pass
+
+                # Періодична перевірка вхідних TikTok відео кожні 15 хвилин
+                if now.minute % 15 == 0 and last_react_check_minute != now.minute:
+                    last_react_check_minute = now.minute
+                    try:
+                        logger.info("🔍 Фонова перевірка скинутих TikTok відео у чатах...")
+                        await tiktok_streak_service.check_and_react_to_shared_videos()
+                    except Exception as react_err:
+                        logger.error(f"Помилка фонової перевірки TikTok відео: {react_err}")
             except asyncio.CancelledError:
                 break
             except Exception as e:

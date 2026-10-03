@@ -53,6 +53,7 @@ from bot.keyboards import (
     get_publish_keyboard,
     get_condense_keyboard,
     get_main_menu_keyboard,
+    get_main_reply_keyboard,
     get_prompt_management_keyboard,
     get_streak_menu_keyboard,
     get_streak_targets_management_keyboard,
@@ -82,8 +83,21 @@ class BotStates(StatesGroup):
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     if not is_user_allowed(message.from_user.id):
-        await message.answer("⛔️ Вибачте, у вас немає доступу до цього бота.")
+        logger.warning(f"Користувач {message.from_user.id} ({message.from_user.username}) спробував доступ!")
+        await message.answer(
+            f"⛔️ <b>Доступ обмежено.</b>\n"
+            f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n\n"
+            f"Щоб користуватися ботом, додайте цей ID у змінну <code>ALLOWED_TELEGRAM_USER_IDS</code> у Railway або .env.",
+            parse_mode="HTML"
+        )
         return
+
+    # Встановлюємо постійну клавіатуру з великими кнопками внизу екрана
+    await message.answer(
+        "📱 <b>Меню управління активовано!</b> Оберіть дію кнопками внизу або в повідомленні 👇",
+        reply_markup=get_main_reply_keyboard(),
+        parse_mode="HTML"
+    )
 
     welcome_text = sanitize_typography(
         "👋 <b>Вітаю в хабі мультиплатформенного автозаливу!</b>\n\n"
@@ -96,6 +110,61 @@ async def cmd_start(message: Message):
         "Gemini AI миттєво згенерує адаптовані описи під точні ліміти кожної платформи!"
     )
     await message.answer(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+
+
+# ---------------------------------------------------------
+# ОБРОБНИКИ ПОСТІЙНИХ КНОПОК НИЖНЬОЇ КЛАВІАТУРИ
+# ---------------------------------------------------------
+
+@router.message(F.text == "🚀 Пост на ВСІ платформи (YT+IG+TT+TG)")
+async def reply_btn_crosspost(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Надіслати відео у чат - я опублікую на всіх!", callback_data="crosspost_hint")],
+        [InlineKeyboardButton(text="🔄 Взяти останнє відео з бази і запостити", callback_data="crosspost_last")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_back")]
+    ])
+    await message.answer(
+        "🚀 <b>Крос-постинг короткого відео</b>\n\n"
+        "Я запущу публікацію одночасно на:\n"
+        "🔴 YouTube Shorts (Bohdan AI)\n"
+        "🟣 Instagram Reels (@bohdan.gpt)\n"
+        "⚫️ TikTok (@bohdan.gpt)\n"
+        "💬 Telegram-канал (@bohdan_gpt)\n\n"
+        "Обери варіант:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+@router.message(F.text == "🔥 TikTok Вогники")
+async def reply_btn_streaks(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    await show_streak_menu_message(message)
+
+
+@router.message(F.text == "📊 Перегляди / Статистика")
+async def reply_btn_stats(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    await show_stats_message(message)
+
+
+@router.message(F.text == "🌐 Перевірити Проксі")
+async def reply_btn_proxy(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    await show_proxy_message(message)
+
+
+@router.message(F.text == "🤖 Головне меню")
+async def reply_btn_main_menu(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    await message.answer("🤖 <b>Головне меню:</b>", reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
 
 
 @router.message(Command("stats"))
@@ -1146,6 +1215,7 @@ async def show_streaks_dashboard(target_msg: Message):
         "<b>Як це працює:</b>\n"
         "• 💖 <b>Для дівчини:</b> Gemini ШІ щодня генерує унікальні романтичні повідомлення з сердечками (❤️, 🥰, 💖) та компліментами!\n"
         "• 🔥 <b>Для інших контактів:</b> надсилаються дружні нагадування з вогником для збереження серії.\n"
+        "• ⚡️ <b>Відповіді на відео:</b> Gemini аналізує скинуті вам TikTok відео та автоматично надсилає влучні реакції!\n"
         "• 🛡 <b>Безпека:</b> US/NY IP + людський jitter (3-7 сек) між відправками."
     )
     await target_msg.answer(text, reply_markup=get_streak_menu_keyboard(), parse_mode="HTML")
@@ -1225,6 +1295,47 @@ async def callback_streak_decay_check(call: CallbackQuery):
     text += "\n💡 Натисніть <b>'🚀 Відправити всім вогники зараз'</b>, щоб врятувати серії!"
     await call.message.answer(text, reply_markup=get_streak_menu_keyboard(), parse_mode="HTML")
     await call.answer()
+
+
+@router.callback_query(F.data == "streak_check_incoming_videos")
+async def callback_streak_check_incoming_videos(call: CallbackQuery):
+    await call.answer("🔍 Перевіряємо вхідні відео...", show_alert=False)
+    status_msg = await call.message.answer(
+        "⏳ <b>Перевіряємо чати TikTok на надіслані відео через Gemini...</b>\n"
+        "Завантажуємо та аналізуємо контент у Playwright..."
+    )
+    try:
+        results = await tiktok_streak_service.check_and_react_to_shared_videos()
+        if not results:
+            await status_msg.edit_text(
+                "👌 <b>Усі надіслані відео вже мають відповіді!</b>\n"
+                "Нових непрокоментованих TikTok відео від контактів наразі немає.",
+                reply_markup=get_streak_menu_keyboard(),
+                parse_mode="HTML"
+            )
+            return
+
+        text = (
+            f"🎬 <b>Успішно відреаговано на {len(results)} відео через Gemini!</b>\n\n"
+        )
+        for r in results:
+            tag = "❤️ 👸 Кохана" if r.get("is_girlfriend") else "🔥 Друг"
+            user = html.escape(r.get("username", "користувач"))
+            reaction = html.escape(r.get("reaction", ""))
+            v_url = r.get("video_url", "")
+            text += (
+                f"{tag}: <b>@{user}</b>\n"
+                f"🔗 <a href='{v_url}'>Відео</a>\n"
+                f"💬 Реакція: <i>«{reaction}»</i>\n\n"
+            )
+        await status_msg.edit_text(text, reply_markup=get_streak_menu_keyboard(), parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:
+        logger.error(f"Помилка callback_streak_check_incoming_videos: {e}")
+        await status_msg.edit_text(
+            f"⚠️ <b>Помилка під час перевірки відео:</b> <code>{html.escape(str(e))}</code>",
+            reply_markup=get_streak_menu_keyboard(),
+            parse_mode="HTML"
+        )
 
 
 @router.callback_query(F.data == "streak_set_gf")
@@ -1452,6 +1563,49 @@ async def cmd_tiktok_react(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"Помилка cmd_tiktok_react: {e}")
         await status_msg.edit_text(f"💬 <b>{html.escape(tiktok_reactions_service.generate_reaction())}</b>", parse_mode="HTML")
+
+
+@router.message(Command("check_videos"))
+async def cmd_check_videos(message: Message):
+    """Команда швидкої перевірки та реагування на надіслані TikTok відео через Gemini"""
+    if not is_user_allowed(message.from_user.id):
+        return
+    status_msg = await message.answer(
+        "⏳ <b>Перевіряємо чати TikTok на надіслані відео через Gemini...</b>\n"
+        "Завантажуємо та аналізуємо контент у Playwright..."
+    )
+    try:
+        results = await tiktok_streak_service.check_and_react_to_shared_videos()
+        if not results:
+            await status_msg.edit_text(
+                "👌 <b>Усі надіслані відео вже мають відповіді!</b>\n"
+                "Нових непрокоментованих TikTok відео від контактів наразі немає.",
+                reply_markup=get_streak_menu_keyboard(),
+                parse_mode="HTML"
+            )
+            return
+
+        text = (
+            f"🎬 <b>Успішно відреаговано на {len(results)} відео через Gemini!</b>\n\n"
+        )
+        for r in results:
+            tag = "❤️ 👸 Кохана" if r.get("is_girlfriend") else "🔥 Друг"
+            user = html.escape(r.get("username", "користувач"))
+            reaction = html.escape(r.get("reaction", ""))
+            v_url = r.get("video_url", "")
+            text += (
+                f"{tag}: <b>@{user}</b>\n"
+                f"🔗 <a href='{v_url}'>Відео</a>\n"
+                f"💬 Реакція: <i>«{reaction}»</i>\n\n"
+            )
+        await status_msg.edit_text(text, reply_markup=get_streak_menu_keyboard(), parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:
+        logger.error(f"Помилка cmd_check_videos: {e}")
+        await status_msg.edit_text(
+            f"⚠️ <b>Помилка під час перевірки відео:</b> <code>{html.escape(str(e))}</code>",
+            reply_markup=get_streak_menu_keyboard(),
+            parse_mode="HTML"
+        )
 
 
 @router.callback_query(F.data == "menu_cyber_rizhyi")
