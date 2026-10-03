@@ -30,6 +30,7 @@ from config import (
 from services.cyber_turikov import cyber_turikov_service
 from services.cyber_rizhyi import clean_bot_reply
 from services.tiktok_reactions import tiktok_reactions_service
+from services.cyber_avatars import get_user_avatar_description, get_chat_avatars_summary, preload_known_avatars
 from core.database import (
     init_db,
     save_cyber_rizhyi_message,
@@ -430,9 +431,22 @@ async def handle_text(message: Message, bot: Bot):
         custom_instr = (
             "Це пише Вітьок (@zelenskiy404)! Підтримай травлю Вітька! "
             "1. Спитай чо він мовчить чмо або підколи що його навіть власна тупа тьолка кинула. "
-            "2. Угорай з того що він поставив чужу ламбу на аву ('нахуя чужу ламбу на аву вліпив мажор комнатний', 'чия це ламба спустись на землю'). "
+            "2. Угорай з того що він поставив чужу ламбу на аву ('блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. реальні бабки на ламбу є в давіда, він піднявся на фейсбуку', 'чия це ламба спустись на землю'). "
             "Пиши 1 коротку репліку без '!'. Без школи і уроків."
         )
+
+    # Фонове (але не блокуюче) отримання аватарки відправника через Gemini Vision (кеш 15 хв)
+    sender_avatar_desc = None
+    all_avatars_ctx = None
+    try:
+        sender_avatar_desc = await get_user_avatar_description(
+            bot, message.from_user.id,
+            username=message.from_user.username,
+            display_name=message.from_user.first_name
+        )
+        all_avatars_ctx = get_chat_avatars_summary(exclude_user_id=message.from_user.id)
+    except Exception as _av_err:
+        logger.debug(f"Аватарка недоступна: {_av_err}")
 
     pkg = cyber_turikov_service.generate_reply_package(
         chat_id=message.chat.id,
@@ -445,7 +459,9 @@ async def handle_text(message: Message, bot: Bot):
         custom_instruction=custom_instr,
         reply_to_user_id=target_id,
         reply_to_name=target_name,
-        reply_to_text=reply_to_text
+        reply_to_text=reply_to_text,
+        sender_avatar_desc=sender_avatar_desc,
+        all_avatars_context=all_avatars_ctx
     )
     await send_reply_package(message, bot, pkg)
 
@@ -723,6 +739,8 @@ async def main():
     logger.info(f"🚀 Бот «Кібер Саня Туріков» (@{bot_info.username}) успішно запущено!")
 
     await bot.delete_webhook(drop_pending_updates=True)
+    # Передзавантаження аватарок відомих учасників чату при старті (фон, не блокує)
+    asyncio.ensure_future(preload_known_avatars(bot))
     worker_task = asyncio.create_task(spontaneous_turikov_worker(bot))
     bridge_task = asyncio.create_task(inter_bot_bridge_worker(bot))
     try:

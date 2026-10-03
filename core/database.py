@@ -276,6 +276,18 @@ def init_db():
             )
         """)
 
+        # Кеш аватарок користувачів з візуальним описом через Gemini Vision
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cyber_user_avatars (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                display_name TEXT,
+                file_unique_id TEXT,
+                description TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute("SELECT value FROM settings WHERE key = 'ai_prompt'")
         row = cursor.fetchone()
         if not row:
@@ -969,6 +981,59 @@ def mark_cyber_bot_event_processed(event_id: int) -> None:
         conn.commit()
 
 
+# ==========================================
+# 🖼️ КЕШ ТА ВІЗУАЛЬНИЙ ОПИС АВАТАРОК КОРИСТУВАЧІВ
+# ==========================================
+
+def get_cached_avatar(user_id: int) -> Optional[Dict[str, Any]]:
+    """Отримує збережений візуальний опис аватарки за user_id"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cyber_user_avatars WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def save_cached_avatar(
+    user_id: int,
+    username: Optional[str],
+    display_name: Optional[str],
+    file_unique_id: str,
+    description: str
+) -> None:
+    """Зберігає або оновлює візуальний опис аватарки в базі"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO cyber_user_avatars (user_id, username, display_name, file_unique_id, description, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                display_name = excluded.display_name,
+                file_unique_id = excluded.file_unique_id,
+                description = excluded.description,
+                updated_at = excluded.updated_at
+        """, (user_id, username or "", display_name or "", file_unique_id, description))
+        conn.commit()
+
+
+def get_avatar_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Пошук опису аватарки за username"""
+    clean_u = (username or "").lstrip("@").lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cyber_user_avatars WHERE LOWER(username) = ?", (clean_u,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_cached_avatars(limit: int = 50) -> List[Dict[str, Any]]:
+    """Повертає список останніх відомих аватарок учасників"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cyber_user_avatars ORDER BY updated_at DESC LIMIT ?", (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
 
 
 def save_tiktok_reaction_log(
