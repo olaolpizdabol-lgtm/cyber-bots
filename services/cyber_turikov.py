@@ -77,8 +77,8 @@ CYBER_TURIKOV_SYSTEM_PROMPT = """
 - @Mxsdt - МИШКО (Міша) - кент, гуляєте разом. Серйозно займається каратє.
 - @davvidka1 - ДАВІД - бро. Робить бізнес на YouTube шортсах і роблоксі.
 - @timur - ТІМУР - бро, кайфує від кейс-сайтів (кейсери), постійно дропає кейси.
-- @HzShoPusati - ТАНЄВСЬКИЙ - кент.
-- @zelenskiy404 - ВІТОС - кент.
+- @HzShoPusati - ТАНЄВСЬКИЙ - кент (СТРОГО НЕ ТЕГАТИ! Ніколи не тегай його першим у чаті, заборонено!).
+- @zelenskiy404 - ВІТОС (Вітя) - кент. У нього на авці в Telegram стоїть згенерована ШІ хуйня клоуна! Обов'язково підйобуй його: "шо за хуйня згенерована у тебе стоїть на аві клоун".
 - @For4iK333 - ІЛЮХА - бро.
 - "моя Катя" / Катрін - знайома дівчина ("вона просто тупенька і все", "вони тупі", забув привітати її з випуском).
 
@@ -458,16 +458,21 @@ class CyberTurikovService:
 
         # 2. Якщо обидва AI недоступні — ультра-короткий нейтральний fallback (не рандом!)
         if not reply:
-            fallback_shorts = ["пр", "да", "норм", "ок", "хз", "а ок"]
+            fallback_shorts = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
             recent_low = [r.lower() for r in self._recent_replies_cache.get(chat_id, [])]
-            reply = next((s for s in fallback_shorts if s not in recent_low), "ок")
+            reply = next((s for s in fallback_shorts if s not in recent_low), fallback_shorts[0])
 
         reply = sanitize_typography(reply.strip()).replace("!", "")
 
-        # Захист від заборонених слів
-        for bad in ["лушпиння", "клоун", "біоробот"]:
-            if bad in reply.lower():
-                reply = re.sub(rf'\b{bad}\b', '', reply, flags=re.IGNORECASE).strip()
+        # Захист від заборонених слів (дозволяємо 'клоун' якщо обговорюємо авку)
+        if "ава" not in reply.lower() and "фото" not in reply.lower():
+            for bad in ["лушпиння", "клоун", "біоробот"]:
+                if bad in reply.lower():
+                    reply = re.sub(rf'\b{bad}\b', '', reply, flags=re.IGNORECASE).strip()
+        else:
+            for bad in ["лушпиння", "біоробот"]:
+                if bad in reply.lower():
+                    reply = re.sub(rf'\b{bad}\b', '', reply, flags=re.IGNORECASE).strip()
 
         # 3. СУВОРИЙ АНТИ-ПОВТОР: ніколи не надсилати те саме повідомлення поспіль!
         # АЛЕ: якщо AI дав нову відповідь — НЕ замінюємо її рандомом!
@@ -475,7 +480,7 @@ class CyberTurikovService:
         if not reply:
             reply = self._get_smart_offline_reply(message_text, chat_id)
         elif reply.lower().strip() in recent[-4:]:
-            short_variants = ["пр", "да", "ок", "пон", "норм", "хз", "а ок", "спс", "не знаю"]
+            short_variants = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не врубався"]
             fresh = [v for v in short_variants if v not in recent[-4:]]
             reply = random.choice(fresh if fresh else short_variants)
 
@@ -535,7 +540,7 @@ class CyberTurikovService:
             "ЗАБОРОНЕНО писати будь-які знаки перед @ (НІЯКИХ '=@', тільки '@'). "
             "ЗАБОРОНЕНО тегати одного й того ж двічі поспіль! "
             "ЗАБОРОНЕНО: @turikov_bot, @cyber_red_head_bot. "
-            "ЗАБОРОНЕНО 'пр'/'ок' якщо написали конкретне речення. "
+            "СТРОГО ЗАБОРОНЕНО односкладові відмовки: 'ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок', 'спс'! ЗАВЖДИ ЗАХОДЬ У ДІАЛОГ І РОЗВИВАЙ ЙОГО: запитуй, підколюй, сперечайся, розвивай тему! "
             "1-6 слів. Без '!'.]"
         )
         messages.append({"role": "user", "content": f"{current_input}{directive}"})
@@ -553,12 +558,26 @@ class CyberTurikovService:
                     top_p=0.9
                 )
                 text = completion.choices[0].message.content
-                if text:
+                if text and not is_ai_refusal(text):
                     return text.strip()
             except Exception as e:
                 err_str = str(e)
+                if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
+                    try:
+                        logger.info("Туріков: Groq 120B в ліміті, перемикаємось на Qwen 27B...")
+                        qwen_comp = client.chat.completions.create(
+                            model="qwen/qwen3.8-27b",
+                            messages=messages,
+                            temperature=0.88,
+                            max_tokens=90
+                        )
+                        q_text = qwen_comp.choices[0].message.content
+                        if q_text and not is_ai_refusal(q_text):
+                            return q_text.strip()
+                    except Exception as qe:
+                        logger.debug(f"Turikov Qwen error: {qe}")
                 self._rotate_groq_key()
-                if "429" in err_str:
+                if "429" in err_str or "rate_limit" in err_str.lower():
                     continue
                 break
         return self._call_gemini_fallback(history, current_input, custom_instruction=custom_instruction)
@@ -685,7 +704,7 @@ class CyberTurikovService:
         crew_tags = [
             "@bodya_qq", "@twdht", "@cyber_red_head_bot", "@La_coste228",
             "@Vad1mk4k", "@CHERNIVTSIZOV1958", "@Mxsdt", "@davvidka1",
-            "@HzShoPusati", "@zelenskiy404", "@For4iK333", "@Smo1zi"
+            "@zelenskiy404", "@For4iK333", "@Smo1zi"
         ]
         target_tag = random.choice(crew_tags)
         if recent_users and random.random() < 0.6:
@@ -739,7 +758,7 @@ class CyberTurikovService:
             ["@CHERNIVTSIZOV1958 коля здаров"],
             ["@Mxsdt мишко ти йдеш гуляти?"],
             ["@davvidka1 давід виходь"],
-            ["@HzShoPusati танєвський здаров"],
+            ["@zelenskiy404 вітя шо за хуйня згенерована у тебе стоїть на аві клоун 🤡😂"],
             ["@zelenskiy404 вітос ти де"],
             ["@For4iK333 ілюха виходь"],
             ["здаров хлопці"],

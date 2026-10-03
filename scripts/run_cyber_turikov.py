@@ -403,19 +403,10 @@ async def handle_text(message: Message, bot: Bot):
         reply_to_name=target_name,
         reply_to_text=reply_to_text
     )
-    # Emoji-реакція: 8% тільки реакція, 35% — реакція після тексту
-    reaction_only = random.random() < 0.08
-    if reaction_only:
-        await try_set_reaction_turikov(bot, message.chat.id, message.message_id)
-        asyncio.ensure_future(_extract_facts_bg_turikov(
-            cyber_turikov_service, message.chat.id, message.from_user.id,
-            message.from_user.username, message.from_user.first_name, text
-        ))
-        return
-
     await send_reply_package(message, bot, pkg)
 
-    if random.random() < 0.35:
+    # 40% шанс поставити реакцію разом із текстом
+    if random.random() < 0.40:
         await asyncio.sleep(random.uniform(0.3, 1.0))
         await try_set_reaction_turikov(bot, message.chat.id, message.message_id)
 
@@ -569,8 +560,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                 # Б) Діалог з Санею Рижим (@cyber_red_head_bot)
                 consecutive = ev.get("consecutive_count", 0)
 
-                # Захист від спаму: обмежуємо діалог між ботами 2-3 обмінами
-                if consecutive >= 3:
+                # Підтримуємо діалог між ботами до 10-12 реплік
+                if consecutive >= 10:
                     logger.info(f"Міжботовий міст (Туріков): ліміт діалогу ({consecutive}), зупиняємо ланцюжок")
                     continue
 
@@ -598,7 +589,13 @@ async def inter_bot_bridge_worker(bot: Bot):
                     message_text=text,
                     reply_to_user_id=RIZHYI_BOT_ID,
                     reply_to_name="Саня Рижий",
-                    custom_instruction="Це репліка Сані Рижого у спільній групі. Підколи Рижого або дай йому коротку пацанську відповідь у стилі Турікова (1-4 слова)."
+                    custom_instruction=(
+                        "Це репліка твого кента Сані Рижого у спільній групі. "
+                        "ОБОВ'ЯЗКОВО активно підтримуй і РОЗВИВАЙ розмову! Підколюй його за CS2, Діджея Куріла Рулєта, "
+                        "його комп чи глюки, став йому зустрічні запитання, сперечайся, не відпускай розмову! "
+                        "СТРОГО ЗАБОРОНЕНО короткі односкладові відмовки ('ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок'). "
+                        "Пиши 1-2 живих речення у своєму фірмовому стилі Турікова."
+                    )
                 )
 
                 replies = pkg.get("text_replies") or []
@@ -618,7 +615,7 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.5, 1.0))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
 
-                if sent_msg and replies and consecutive < 2:
+                if sent_msg and replies and consecutive < 10:
                     full_text = " ".join(replies)
                     enqueue_cyber_bot_event(
                         chat_id=chat_id,

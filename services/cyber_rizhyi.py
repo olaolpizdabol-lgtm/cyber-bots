@@ -75,8 +75,8 @@ CYBER_RIZHYI_SYSTEM_PROMPT = """
 - @Mxsdt - МИШКО (Міша) - найближчий кент, разом з тобою після 8 класу перейшов до 18 ліцею, часто спить або мовчить. Серйозно займається каратє, ходить кілька разів на тиждень.
 - @davvidka1 - ДАВІД - бро з двіжухи. Робить бізнес на YouTube шортсах, фейсбуку і роблоксі, постійно виклада контент, шукає способи заробити бабло онлайн.
 - @timur - ТІМУР - бро, кайфує від кейс-сайтів (кейсери), постійно дропає кейси і або щастить і пише "дроп", або нарікає що знов нічого путнього.
-- @HzShoPusati - ТАНЄВСЬКИЙ - кент.
-- @zelenskiy404 - ВІТОС - кент.
+- @HzShoPusati - ТАНЄВСЬКИЙ - кент (СТРОГО НЕ ТЕГАТИ! Ніколи не тегай його першим у чаті, заборонено!).
+- @zelenskiy404 - ВІТОС (Вітя) - кент. У нього на авці в Telegram стоїть згенерована ШІ хуйня клоуна! Підйобуй його за це при кожній нагоді: "шо за хуйня згенерована у тебе стоїть на аві клоун".
 - @For4iK333 - ІЛЮХА - бро.
 З ними ти пройшов усе: від отруєння до завозу на секонд.
 Ти НЕ штучний інтелект, НЕ бот, НЕ асистент!
@@ -887,7 +887,7 @@ class CyberRizhyiService:
                 if is_insult:
                     reply = get_contextual_insult_clapback(message_text, recent_replies=self._recent_replies_cache.get(chat_id, []))
                 else:
-                    fallback_shorts = ["і шо", "шо ти", "нормас", "та єбу", "хз", "не знаю"]
+                    fallback_shorts = ["ти це серйозно зараз?", "чуй а розпиши детальніше", "ти шо з дуба впав, поясни", "поясни нормально бо не поняв"]
                     recent_low = [r.lower() for r in self._recent_replies_cache.get(chat_id, [])]
                     reply = next((s for s in fallback_shorts if s not in recent_low), fallback_shorts[0])
 
@@ -989,8 +989,9 @@ class CyberRizhyiService:
         # 8. СТРОГИЙ ЗАХИСТ: слова "лушпиння", "клоун", "біоробот", "дзеркало" повністю фільтруються
         if "лушпиння" in reply.lower():
             reply = re.sub(r'лушпиння[^\s]*', 'херня', reply, flags=re.IGNORECASE)
-        for bad_w in ["клоун", "клоуна", "клоуну", "клоуном", "клоуни", "клоунів"]:
-            reply = re.sub(rf'\b{bad_w}\b', 'довбень', reply, flags=re.IGNORECASE)
+        if "ава" not in reply.lower() and "фото" not in reply.lower():
+            for bad_w in ["клоун", "клоуна", "клоуну", "клоуном", "клоуни", "клоунів"]:
+                reply = re.sub(rf'\b{bad_w}\b', 'довбень', reply, flags=re.IGNORECASE)
         for bad_w in ["біоробот", "біоробота", "біороботу"]:
             reply = re.sub(rf'\b{bad_w}\b', 'далбайоб', reply, flags=re.IGNORECASE)
         if "дзеркало" in reply.lower() or "зеркало" in reply.lower():
@@ -1007,10 +1008,15 @@ class CyberRizhyiService:
                 photo_desc=photo_desc or "", chat_id=chat_id
             )
         elif reply.lower().strip() in recent[-4:]:
-            # Відповідь є, але вже недавно казали — трохи варіюємо (не рандом!)
+            # Відповідь є, але вже недавно казали — варіюємо живими запитаннями (НЕ односкладовими відмовками!)
             short_variants = [
-                "шо ти", "нормас", "та єбу", "хз", "і шо",
-                "ок", "блять", "не знаю", "ти де", "шо блч"
+                "ти це серйозно зараз?",
+                "чуй а розпиши детальніше бо цікаво",
+                "ти шо з дуба впав, поясни нормально",
+                "і до чого це взагалі було?",
+                "поясни нормально бо я не врубався",
+                "та ну нафіг, ти серйозно?",
+                "роздуплись і розкажи нормально"
             ]
             fresh = [v for v in short_variants if v not in recent[-4:]]
             reply = random.choice(fresh if fresh else short_variants)
@@ -1104,20 +1110,32 @@ class CyberRizhyiService:
                     model=self.model,
                     messages=messages,
                     temperature=0.92,
-                    max_tokens=100,
+                    max_tokens=90,
                     top_p=0.95
                 )
                 text = completion.choices[0].message.content
                 if text and not is_ai_refusal(text):
                     return text.strip()
-                elif text:
-                    logger.warning(f"Groq видав шаблонну відмову: '{text}'. Фільтруємо!")
-                    return None
             except Exception as e:
                 err_str = str(e)
-                logger.warning(f"Groq ключ #{self._key_index + 1} повернув помилку: {err_str}")
+                logger.warning(f"Groq ключ #{self._key_index + 1} помилка: {err_str}")
+                # МИТТЄВИЙ fallback на qwen/qwen3.8-27b при будь-якому 429 чи rate limit
+                if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
+                    try:
+                        logger.info("Groq 120B в ліміті, перемикаємось на Qwen 27B...")
+                        qwen_comp = client.chat.completions.create(
+                            model="qwen/qwen3.8-27b",
+                            messages=messages,
+                            temperature=0.92,
+                            max_tokens=90
+                        )
+                        q_text = qwen_comp.choices[0].message.content
+                        if q_text and not is_ai_refusal(q_text):
+                            return q_text.strip()
+                    except Exception as qe:
+                        logger.debug(f"Qwen error: {qe}")
                 self._rotate_groq_key()
-                if "429" in err_str or "rate_limit" in err_str.lower() or "too many requests" in err_str.lower():
+                if "429" in err_str or "rate_limit" in err_str.lower():
                     continue
                 else:
                     break
@@ -1447,7 +1465,7 @@ class CyberRizhyiService:
         recent_users = get_recent_chat_users(chat_id, limit=8, exclude_bots=True)
         crew_tags = [
             "@bodya_qq", "@twdht", "@Smo1zi", "@Vad1mk4k", "@CHERNIVTSIZOV1958",
-            "@Mxsdt", "@davvidka1", "@HzShoPusati", "@zelenskiy404", "@For4iK333",
+            "@Mxsdt", "@davvidka1", "@zelenskiy404", "@For4iK333",
             "@turikov_bot", "@La_coste228"
         ]
         target_tag = random.choice(crew_tags)
@@ -1513,7 +1531,7 @@ class CyberRizhyiService:
             ["@CHERNIVTSIZOV1958 шахов здаров"],
             ["@CHERNIVTSIZOV1958 коля шо ти"],
             ["@davvidka1 давід шо ти"],
-            ["@HzShoPusati танєвський підйом"],
+            ["@zelenskiy404 вітя шо за хуйня згенерована у тебе стоїть на аві клоун 🤡😂"],
             ["@zelenskiy404 вітос ау"],
             ["@For4iK333 ілюха шо ти"],
             ["@La_coste228 о мій двійник здаров"],

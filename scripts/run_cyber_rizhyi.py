@@ -500,21 +500,10 @@ async def handle_text(message: Message, bot: Bot):
         reply_to_name=target_name,
         reply_to_text=reply_to_text
     )
-    # Emoji-реакція: 35% шанс поставити реакцію додатково до тексту, 8% — тільки реакція без тексту
-    reaction_only = random.random() < 0.08
-    if reaction_only:
-        await try_set_reaction(bot, message.chat.id, message.message_id)
-        # Фоновий LLM-витяг фактів
-        asyncio.ensure_future(_extract_facts_background(
-            service, message.chat.id, message.from_user.id,
-            message.from_user.username, message.from_user.first_name, text
-        ))
-        return
-
     await send_reply_package(message, bot, pkg)
 
-    # 35% шанс поставити реакцію ЩЕ й після тексту
-    if random.random() < 0.35:
+    # 40% шанс поставити реакцію разом із текстом
+    if random.random() < 0.40:
         await asyncio.sleep(random.uniform(0.3, 1.0))
         await try_set_reaction(bot, message.chat.id, message.message_id)
 
@@ -627,8 +616,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                     continue
                 consecutive = ev.get("consecutive_count", 0)
 
-                # Захист від спаму: обмежуємо діалог між ботами 2-3 обмінами
-                if consecutive >= 3:
+                # Підтримуємо діалог між ботами до 10-12 реплік
+                if consecutive >= 10:
                     logger.info(f"Міжботовий міст (Рижий): ліміт діалогу ({consecutive}), пауза до репліки людей")
                     continue
 
@@ -657,7 +646,13 @@ async def inter_bot_bridge_worker(bot: Bot):
                     message_text=text,
                     reply_to_user_id=TURIKOV_BOT_ID,
                     reply_to_name="Саня Туріков",
-                    custom_instruction="Це репліка Сані Турікова у спільній групі. Підколи Турікова або дай коротку пацанську відповідь у стилі Рижого (1-4 слова)."
+                    custom_instruction=(
+                        "Це репліка твого кента Сані Турікова у спільній групі. "
+                        "ОБОВ'ЯЗКОВО активно підтримуй і РОЗВИВАЙ розмову! Підколюй його за самокат, тайстру, "
+                        "карти на площадці, його історійки чи дівчат, став йому зустрічні запитання, сперечайся, не відпускай розмову! "
+                        "СТРОГО ЗАБОРОНЕНО короткі односкладові відповіді ('ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок'). "
+                        "Пиши 1-2 живих пацанських речення у своєму стилі."
+                    )
                 )
 
                 replies = pkg.get("text_replies") or []
@@ -677,7 +672,7 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.7, 1.3))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
 
-                if sent_msg and replies and consecutive < 2:
+                if sent_msg and replies and consecutive < 10:
                     full_text = " ".join(replies)
                     enqueue_cyber_bot_event(
                         chat_id=chat_id,

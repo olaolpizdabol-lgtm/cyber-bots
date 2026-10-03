@@ -35,7 +35,7 @@ TELEGRAM_TARGET_CHANNEL_ID = os.getenv("TELEGRAM_TARGET_CHANNEL_ID", "").strip()
 
 # Google Gemini AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
 DEFAULT_AI_PROMPT = os.getenv(
     "DEFAULT_AI_PROMPT",
     "Проаналізуй контент та оптимізуй опис під пошукові запити (Social SEO 2026) для TikTok Search, Instagram Explore, YouTube Search, Pinterest та Google. "
