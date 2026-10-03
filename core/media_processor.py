@@ -60,6 +60,14 @@ class MediaProcessor:
         if not ANTI_DETECTION_CLEANING:
             return str(in_p)
 
+        info = self.get_video_info(str(in_p))
+        duration = info.get("duration", 0.0)
+        loop_args = []
+        if 0 < duration < 3.0:
+            loops = int(4.0 / duration) + 1
+            loop_args = ["-stream_loop", str(loops)]
+            logger.info(f"Відео коротке ({duration:.1f}с < 3с). Зациклюємо {loops} разів для Reels.")
+
         vf_filters = [
             "scale=1080:1920:force_original_aspect_ratio=decrease",
             "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
@@ -70,6 +78,7 @@ class MediaProcessor:
         cmd = [
             self.ffmpeg_path,
             "-y",
+            *loop_args,
             "-i", str(in_p),
             "-vf", vf_str,
             "-af", "volume=1.001",
