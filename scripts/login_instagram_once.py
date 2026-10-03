@@ -49,6 +49,8 @@ def login_instagram():
             viewport={"width": 1280, "height": 800},
             locale="en-US"
         )
+        page = context.new_page()
+
         try:
             from playwright_stealth import stealth_sync
             stealth_sync(page)
