@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 🤖 Бот 1: Канал Автоматизація
+  channel_bot:
+    build: .
+    container_name: channel_automations_bot
+    restart: unless-stopped
+    command: python main.py
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./credentials:/app/credentials
+      - ./downloads:/app/downloads
+
+  # 🤖 Бот 2: Кібер Рижий
+  cyber_rizhyi_bot:
+    build: .
+    container_name: cyber_rizhyi_bot
+    restart: unless-stopped
+    command: python run_cyber_rizhyi.py
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./credentials:/app/credentials
+      - ./downloads:/app/downloads

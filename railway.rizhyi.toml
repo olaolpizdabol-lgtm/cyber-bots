@@ -1,0 +1,8 @@
+# Railway конфіг для Кібер Рижого
+[build]
+dockerfile = "Dockerfile.rizhyi"
+
+[deploy]
+startCommand = "python scripts/run_cyber_rizhyi.py"
+restartPolicyType = "always"
+restartPolicyMaxRetries = 10

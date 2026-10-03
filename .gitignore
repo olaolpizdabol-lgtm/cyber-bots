@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+downloads/*
+!downloads/.gitkeep
+credentials/*
+!credentials/.gitkeep
+data/*
+!data/.gitkeep
+.DS_Store
