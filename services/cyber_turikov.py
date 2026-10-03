@@ -289,8 +289,8 @@ class CyberTurikovService:
         self._recent_replies_cache[chat_id].append(chosen)
         if len(self._recent_replies_cache[chat_id]) > 25:
             self._recent_replies_cache[chat_id].pop(0)
-        if reply:
-            found_tags = re.findall(r'@[\w\d_]+', reply)
+        if chosen:
+            found_tags = re.findall(r'@[\w\d_]+', chosen)
             if found_tags:
                 if chat_id not in self._recent_tags_cache:
                     self._recent_tags_cache[chat_id] = []
@@ -658,6 +658,10 @@ class CyberTurikovService:
         parts = []
         if "|||" in raw_reply:
             parts = [clean_bot_reply(p) for p in raw_reply.split("|||") if clean_bot_reply(p)]
+        elif " | " in raw_reply:
+            parts = [clean_bot_reply(p) for p in raw_reply.split(" | ") if clean_bot_reply(p)]
+        elif "|" in raw_reply:
+            parts = [clean_bot_reply(p) for p in raw_reply.split("|") if clean_bot_reply(p)]
         elif "\n" in raw_reply:
             parts = [clean_bot_reply(line) for line in raw_reply.split("\n") if clean_bot_reply(line)]
         else:
@@ -726,31 +730,31 @@ class CyberTurikovService:
 
     def generate_spontaneous_shout(self, chat_id: int) -> Tuple[List[str], Optional[str]]:
         recent_users = get_recent_chat_users(chat_id, limit=8, exclude_bots=True)
-        crew_tags = [
-            "@bodya_qq", "@twdht", "@cyber_red_head_bot", "@La_coste228",
-            "@Vad1mk4k", "@CHERNIVTSIZOV1958", "@Mxsdt", "@davvidka1",
-            "@zelenskiy404", "@For4iK333", "@Smo1zi"
+        crew_names = [
+            "бодя", "діма", "саня рижий", "хомяк", "коля", "міша", "давід",
+            "вітьок", "ілюха", "смолзі"
         ]
-        target_tag = random.choice(crew_tags)
+        target_name = random.choice(crew_names)
         if recent_users and random.random() < 0.6:
             candidate = random.choice(recent_users)
+            fn = (candidate.get("first_name") or "").lower()
             u = (candidate.get("username") or "").lower()
-            if u and u not in ("turikov_bot", "cyber_turikov_bot") and not u.endswith("bot"):
-                target_tag = f"@{candidate['username']}"
-            elif candidate.get("first_name") and "туріков" not in candidate["first_name"].lower() and "кібер" not in candidate["first_name"].lower():
-                target_tag = candidate["first_name"]
+            tag_to_name = {
+                "twdht": "діма", "smo1zi": "саня туріков", "vad1mk4k": "хомяк",
+                "chernivtsizov1958": "коля", "mxsdt": "міша", "davvidka1": "давід",
+                "zelenskiy404": "вітьок", "for4ik333": "ілюха", "bodya_qq": "бодя",
+                "invicible11": "тімур", "la_coste228": "саня рижий"
+            }
+            if u in tag_to_name:
+                target_name = tag_to_name[u]
+            elif fn and "туріков" not in fn and "кібер" not in fn and "саня" not in fn:
+                target_name = fn
+            elif u and u not in ("turikov_bot", "cyber_turikov_bot", "cyber_red_head_bot") and not u.endswith("bot"):
+                target_name = u
 
         # Захист: Туріков ніколи не тегає себе самого!
-        if target_tag.lower() in ("@turikov_bot", "@cyber_turikov_bot") or "туріков" in target_tag.lower():
-            target_tag = "@cyber_red_head_bot"
-
-        tag_to_name = {
-            "@twdht": "діма", "@Smo1zi": "смолзі", "@Vad1mk4k": "хомяк",
-            "@CHERNIVTSIZOV1958": "коля", "@Mxsdt": "міша", "@davvidka1": "давід",
-            "@zelenskiy404": "вітя", "@For4iK333": "ілюха", "@bodya_qq": "бодя",
-            "@invicible11": "тімур"
-        }
-        target_name = tag_to_name.get(target_tag, target_tag.lstrip("@"))
+        if target_name.lower() in ("turikov_bot", "cyber_turikov_bot", "туріков", "саня туріков"):
+            target_name = "саня рижий"
 
         options = [
             [f"{target_name} привіт пупсик"],
@@ -814,7 +818,8 @@ class CyberTurikovService:
             if not any(t in full_txt for t in recent_tags[-3:]):
                 valid_options.append(opt)
         chosen = random.choice(valid_options if valid_options else options)
-        return chosen, target_tag
+        clean_chosen = [clean_bot_reply(s) for s in chosen if clean_bot_reply(s)]
+        return clean_chosen, target_name
 
     def generate_ai_spontaneous(self, chat_id: int) -> Optional[List[str]]:
         """Генерує спонтанне повідомлення від Турікова через AI або підхоплює тему після паузи"""
@@ -862,19 +867,19 @@ class CyberTurikovService:
                     f"У чаті була бесіда, але всі замовкли півгодини тому: {convo}. "
                     f"Ти Саня Туріков (з телефона, гуляєш на дворі). "
                     f"Підхопи розмову, запитай що роблять або поклич гуляти на площадку. "
-                    f"{avoid_str}1-5 слів. Без '!'"
+                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок, рижий)! 1-5 слів. Без '!'"
                 )
             else:
                 task_desc = (
                     f"Продовж останню розмову або підколи по темі: {convo}. "
-                    f"{avoid_str}Не повторюй однакових слів. 1-5 слів. Без '!'"
+                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок, рижий)! Не повторюй однакових слів. 1-5 слів. Без '!'"
                 )
 
             prompt = (
                 f"{CYBER_TURIKOV_SYSTEM_PROMPT}\n\n"
                 f"{temporal['prompt_context']}\n"
                 f"{user_facts}\n\n"
-                f"[{task_desc}]\nСаня Туріков:"
+                f"[{task_desc}]"
             )
 
             text = None
@@ -905,8 +910,22 @@ class CyberTurikovService:
                     pass
 
             if text:
-                parts = [p.strip() for p in text.split("|||") if p.strip()]
-                return parts[:2]
+                text = clean_bot_reply(text)
+                if not text:
+                    return None
+                parts = []
+                if "|||" in text:
+                    parts = [clean_bot_reply(p) for p in text.split("|||") if clean_bot_reply(p)]
+                elif " | " in text:
+                    parts = [clean_bot_reply(p) for p in text.split(" | ") if clean_bot_reply(p)]
+                elif "|" in text:
+                    parts = [clean_bot_reply(p) for p in text.split("|") if clean_bot_reply(p)]
+                elif "\n" in text:
+                    parts = [clean_bot_reply(line) for line in text.split("\n") if clean_bot_reply(line)]
+                else:
+                    parts = [text]
+                clean_parts = [clean_bot_reply(p) for p in parts if clean_bot_reply(p)]
+                return clean_parts[:2] if clean_parts else None
         except Exception as e:
             logger.debug(f"[Turikov AI Spon] {e}")
         return None

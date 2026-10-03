@@ -30,7 +30,7 @@ from config import (
     CYBER_RIZHYI_RESPOND_ALL_GROUP_MSGS,
     DOWNLOADS_DIR
 )
-from services.cyber_rizhyi import cyber_rizhyi_service
+from services.cyber_rizhyi import cyber_rizhyi_service, clean_bot_reply
 from services.cyber_turikov import cyber_turikov_service
 from services.tiktok_reactions import tiktok_reactions_service
 from core.database import (
@@ -566,8 +566,8 @@ async def spontaneous_rizhyi_worker(bot: Bot):
             active_chats = get_active_cyber_rizhyi_chats()
             for chat_id in active_chats:
                 try:
-                    # СТРОГИЙ ЗАХИСТ: НЕ перебивати живий діалог у чаті! Тільки якщо глуха тиша 40+ хв!
-                    if not is_cyber_chat_silent_for_minutes(chat_id, minutes=40.0):
+                    # СТРОГИЙ ЗАХИСТ: НЕ перебивати живий діалог у чаті! Тільки якщо глуха тиша 60+ хв!
+                    if not is_cyber_chat_silent_for_minutes(chat_id, minutes=60.0):
                         continue
 
                     if random.random() < 0.75:
@@ -578,12 +578,15 @@ async def spontaneous_rizhyi_worker(bot: Bot):
                             ai_msgs = await asyncio.get_event_loop().run_in_executor(
                                 None, service.generate_ai_spontaneous, chat_id
                             )
-                        # Якщо AI не дав результат — fallback на старий generate_spontaneous_shout
+                        # Якщо AI не дав результат — fallback на generate_spontaneous_shout
                         if ai_msgs:
                             messages = ai_msgs
                             tagged = None
                         else:
                             messages, tagged = service.generate_spontaneous_shout(chat_id)
+
+                        if messages:
+                            messages = [clean_bot_reply(m) for m in messages if clean_bot_reply(m)]
 
                         if messages:
                             logger.info(f"AI спонтанне в чат {chat_id}: {messages}")

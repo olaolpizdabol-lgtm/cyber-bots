@@ -635,6 +635,22 @@ def clean_bot_reply(reply: str) -> str:
         "верзеш": "несеш",
         "верзе": "несе",
         "верз": "ніс",
+        "верзти": "нести",
+        "верзете": "несете",
+        "поверзеш": "понесеш",
+        "чекати": "ждати",
+        "чекаю": "жду",
+        "чекаєш": "ждеш",
+        "чекає": "жде",
+        "чекайте": "ждіть",
+        "почекай": "подожди",
+        "зачекай": "подожди",
+        "навіщо": "нахуя",
+        "чому": "чого",
+        "бігом": "бєгом",
+        "мерщій": "бєгом",
+        "негайно": "срочно",
+        "справді": "реально",
         "мовиш": "кажеш",
         "мовити": "казати",
         "гаразд": "оке",
@@ -694,7 +710,7 @@ def clean_bot_reply(reply: str) -> str:
         for bad_w in ["клоун", "клоуна", "клоуну", "клоуном", "клоуни", "клоунів"]:
             reply = re.sub(rf'\b{bad_w}\b', 'довбень', reply, flags=re.IGNORECASE)
 
-    return reply.strip()
+    return reply.strip(" |")
 
 
 
@@ -1579,6 +1595,10 @@ class CyberRizhyiService:
         parts = []
         if "|||" in reply:
             parts = [clean_bot_reply(p) for p in reply.split("|||") if clean_bot_reply(p)]
+        elif " | " in reply:
+            parts = [clean_bot_reply(p) for p in reply.split(" | ") if clean_bot_reply(p)]
+        elif "|" in reply:
+            parts = [clean_bot_reply(p) for p in reply.split("|") if clean_bot_reply(p)]
         elif "\n" in reply:
             parts = [clean_bot_reply(line) for line in reply.split("\n") if clean_bot_reply(line)]
         else:
@@ -1599,33 +1619,34 @@ class CyberRizhyiService:
     def generate_spontaneous_shout(self, chat_id: int) -> Tuple[List[str], Optional[str]]:
         """
         Генерує спонтанне ініціативне повідомлення від Рижого в групу.
-        Повертає ([повідомлення1, повідомлення2, ...], tagged_target).
+        Повертає ([повідомлення1, повідомлення2, ...], target_name).
         """
         recent_users = get_recent_chat_users(chat_id, limit=8, exclude_bots=True)
-        crew_tags = [
-            "@twdht", "@Smo1zi", "@Vad1mk4k", "@CHERNIVTSIZOV1958",
-            "@Mxsdt", "@davvidka1", "@zelenskiy404", "@For4iK333"
+        crew_names = [
+            "діма", "саня туріков", "хомяк", "коля",
+            "міша", "давід", "вітьок", "ілюха"
         ]
-        target_tag = random.choice(crew_tags)
+        target_name = random.choice(crew_names)
         if recent_users and random.random() < 0.4:
             candidate = random.choice(recent_users)
+            fn = (candidate.get("first_name") or "").lower()
             u = (candidate.get("username") or "").lower()
-            if u and u not in ("cyber_red_head_bot", "cyber_bot") and not u.endswith("bot"):
-                target_tag = f"@{candidate['username']}"
-            elif candidate.get("first_name") and "кібер" not in candidate["first_name"].lower() and "рижий" not in candidate["first_name"].lower():
-                target_tag = candidate["first_name"]
+            tag_to_name = {
+                "twdht": "діма", "smo1zi": "саня туріков", "vad1mk4k": "хомяк",
+                "chernivtsizov1958": "коля", "mxsdt": "міша", "davvidka1": "давід",
+                "zelenskiy404": "вітьок", "for4ik333": "ілюха", "bodya_qq": "бодя",
+                "invicible11": "тімур", "la_coste228": "саня рижий"
+            }
+            if u in tag_to_name:
+                target_name = tag_to_name[u]
+            elif fn and "кібер" not in fn and "рижий" not in fn and "туріков" not in fn:
+                target_name = fn
+            elif u and u not in ("cyber_red_head_bot", "cyber_bot", "turikov_bot") and not u.endswith("bot"):
+                target_name = u
 
         # Захист: Рижий ніколи не тегає себе самого!
-        if target_tag.lower() in ("@cyber_red_head_bot", "@cyber_bot") or "рижий" in target_tag.lower():
-            target_tag = "@turikov_bot"
-
-        tag_to_name = {
-            "@twdht": "діма", "@Smo1zi": "смолзі", "@Vad1mk4k": "хомяк",
-            "@CHERNIVTSIZOV1958": "коля", "@Mxsdt": "міша", "@davvidka1": "давід",
-            "@zelenskiy404": "вітя", "@For4iK333": "ілюха", "@bodya_qq": "бодя",
-            "@invicible11": "тімур", "@La_coste228": "рижий"
-        }
-        target_name = tag_to_name.get(target_tag, target_tag.lstrip("@"))
+        if target_name.lower() in ("cyber_red_head_bot", "cyber_bot", "рижий", "саня рижий"):
+            target_name = "саня туріков"
 
         # Пул автентичних спонтанних вкидів Рижого (БЕЗ @ ТЕГІВ!)
         options = [
@@ -1710,7 +1731,8 @@ class CyberRizhyiService:
             if not any(t in full_txt for t in recent_tags[-3:]):
                 valid_options.append(opt)
         chosen = random.choice(valid_options if valid_options else options)
-        return chosen, target_tag
+        clean_chosen = [clean_bot_reply(s) for s in chosen if clean_bot_reply(s)]
+        return clean_chosen, target_name
 
     def _update_memory_heuristics(self, user_id: int, text: str):
         """Прості евристики оновлення довгострокової пам'яті про людину"""
@@ -1809,19 +1831,19 @@ class CyberRizhyiService:
                     f"У чаті була активна бесіда, але всі замовкли півгодини тому. "
                     f"Останнє обговорення:\n{convo}\n"
                     f"Підхопи розмову, спитай що вирішили, або підколи за тишу ('шо всі заснули', 'шо замовкли' тощо). "
-                    f"{avoid_str}НЕ копіюй шаблони! 1-7 слів. Без '!'"
+                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок)! НЕ копіюй шаблони! 1-7 слів. Без '!'"
                 )
             else:
                 task_desc = (
                     f"Продовж останню розмову в чаті або вкинь підкол по темі: {convo}. "
-                    f"{avoid_str}Не повторюй однакових слів. 1-7 слів. Без '!'"
+                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок)! Не повторюй однакових слів. 1-7 слів. Без '!'"
                 )
 
             prompt = (
                 f"{CYBER_RIZHYI_SYSTEM_PROMPT}\n\n"
                 f"{temporal['prompt_context']}\n"
                 f"{user_facts}\n\n"
-                f"[{task_desc}]\nРижий:"
+                f"[{task_desc}]"
             )
 
             text = None
@@ -1852,8 +1874,22 @@ class CyberRizhyiService:
                     logger.debug(f"[AI Spon Gemini] {gme}")
 
             if text:
-                parts = [p.strip() for p in text.split("|||") if p.strip()]
-                return parts[:2]
+                text = clean_bot_reply(text)
+                if not text:
+                    return None
+                parts = []
+                if "|||" in text:
+                    parts = [clean_bot_reply(p) for p in text.split("|||") if clean_bot_reply(p)]
+                elif " | " in text:
+                    parts = [clean_bot_reply(p) for p in text.split(" | ") if clean_bot_reply(p)]
+                elif "|" in text:
+                    parts = [clean_bot_reply(p) for p in text.split("|") if clean_bot_reply(p)]
+                elif "\n" in text:
+                    parts = [clean_bot_reply(line) for line in text.split("\n") if clean_bot_reply(line)]
+                else:
+                    parts = [text]
+                clean_parts = [clean_bot_reply(p) for p in parts if clean_bot_reply(p)]
+                return clean_parts[:2] if clean_parts else None
         except Exception as e:
             logger.debug(f"[AI Spontaneous] Помилка: {e}")
         return None
