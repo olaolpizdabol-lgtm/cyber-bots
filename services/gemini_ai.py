@@ -236,6 +236,10 @@ class GeminiService:
 1. Займають перші позиції у внутрішньому пошуку (TikTok Search, Instagram Search, YouTube Search, Pinterest Search, Google Search).
 2. Забезпечують максимальний вірусний CTR та додиви (Watch Time) у рекомендаціях (FYP, Reels, Shorts).
 
+🔥 СУВОРЕ ПРАВИЛО МОВИ (CRITICAL LANGUAGE RULE - 100% ENGLISH):
+УВЕСЬ згенерований контент (youtube_title, caption, snapchat_title, twitter_post, threads_post, facebook_post, pinterest_title, pinterest_desc, bluesky_post, hashtags) ПОВИНЕН БУТИ ВИКЛЮЧНО АНГЛІЙСЬКОЮ МОВОЮ (NATURAL AMERICAN ENGLISH)!
+Категорично заборонено використовувати українську чи інші мови у заголовках, текстах та хештегах. Навіть якщо відео, аудіо чи початковий текст українською - перекладай, адаптуй та генеруй вірусний англомовний контент для глобальної аудиторії США/Global!
+
 ПРОМПТ КОРИСТУВАЧА ТА SEO-ВКАЗІВКИ:
 {prompt}
 
@@ -243,15 +247,15 @@ class GeminiService:
 
 ПРАВИЛА ПОШУКОВОЇ ОПТИМІЗАЦІЇ (SOCIAL SEO 2026):
 1. ГОЛОВНИЙ ПОШУКОВИЙ ЗАПИТ (Primary Search Query):
-   Визнач, яку саме фразу люди вбивають у рядок пошуку на цю тему (наприклад, 'як налаштувати...', 'найкращі сервіси для...', 'як зробити...').
+   Визнач, яку саме фразу люди вбивають у рядок пошуку на цю тему (наприклад, 'how to automate...', 'best ai tools for...', 'how to build...').
 2. ВХОДЖЕННЯ В ПЕРШІ РЯДКИ (Search Bar Match):
-   Перші 1-2 речення опису (до 75-100 символів) та заголовки ПОВИННІ містити точний пошуковий запит. TikTok та Instagram використовують саме перші рядки для генерації пошукової підказки у верхньому рядку ('Search: [запит]').
+   Перші 1-2 речення опису (до 75-100 символів) та заголовки ПОВИННІ містити точний англійський пошуковий запит. TikTok та Instagram використовують саме перші рядки для генерації пошукової підказки у верхньому рядку ('Search: [запит]').
 3. LSI-КЛЮЧОВІ СЛОВА ТА СИНОНІМИ:
-   Органічно інтегруй 3-5 семантично пов'язаних термінів у тіло тексту. НІЯКОГО безглуздого переспаму (Keyword Stuffing) - текст має читатися захоплююче, природно і легко!
+   Органічно інтегруй 3-5 семантично пов'язаних англійських термінів у тіло тексту. НІЯКОГО переспаму (Keyword Stuffing) - текст має читатися захоплююче, природно і легко!
 4. ПОШУКОВИЙ НАМІР (Search Intent) + HOOK:
-   Поєднай розв'язання болю/запиту користувача із сильним емоційним гачком та чітким закликом до дії (CTA).
+   Поєднай розв'язання болю/запиту користувача із сильним вірусним хуком та CTA.
 5. SEO-ХЕШТЕГИ:
-   Використовуй 3-5 цільових пошукових категорій/кластерів (наприклад, #smmпоради #автоматизація #айті), а не загальні спам-теги (#fyp #viral).
+   Використовуй 3-5 цільових англійських хештегів (наприклад, #ai #automation #tech #productivity #chatgpt), а не спам-теги.
 
 КРИТИЧНІ ПРАВИЛА ТИПОГРАФІКИ:
 1. СТРОГО ЗАБОРОНЕНО використовувати довге тире '—' або середнє тире '–'!
@@ -500,32 +504,32 @@ class GeminiService:
         }
 
     def _generate_fallback(self, content_type: ContentType, raw_text: Optional[str] = None) -> Dict[str, str]:
-        """Генерує надійний локальний фолбек, якщо Gemini API тимчасово недоступний або вичерпано ліміт"""
+        """Генерує надійний локальний фолбек англійською, якщо Gemini API тимчасово недоступний"""
         base_text = sanitize_typography(raw_text).strip() if raw_text else ""
         if not base_text:
             if content_type == ContentType.VIDEO:
-                base_text = "Нове атмосферне відео! Дивіться повну версію та оцінюйте ⚡️"
+                base_text = "Building the future with AI and automated systems. Watch the full breakdown! ⚡️"
             elif content_type in (ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
-                base_text = "Добірка найкращих моментів та корисної інформації 📸"
+                base_text = "Key insights and top frameworks you need to know today 📸"
             elif content_type == ContentType.PHOTO:
-                base_text = "Свіже фото та гарний настрій 🌟"
+                base_text = "Behind the scenes of modern building and scaling 🚀"
             else:
-                base_text = "Цікава думка та оновлення на сьогодні 🚀"
+                base_text = "Quick thought on scaling systems and technology in 2026 💡"
 
         title = truncate_at_word_boundary(base_text.split("\n")[0], 70)
-        default_tags = "#тренди #рек #fyp #ukraine #content #top"
+        default_tags = "#shorts #ai #automation #tech #viral #fyp"
 
         fallback_data = {
-            "youtube_title": title,
+            "youtube_title": title + " #shorts",
             "caption": f"{base_text}\n\n{default_tags}",
             "snapchat_title": title,
-            "twitter_post": truncate_at_word_boundary(base_text, 200) + " #рек #fyp",
-            "threads_post": truncate_at_word_boundary(base_text, 350) + " #рек",
+            "twitter_post": truncate_at_word_boundary(base_text, 200) + " #tech #ai",
+            "threads_post": truncate_at_word_boundary(base_text, 350) + " #automation",
             "facebook_post": f"{base_text}\n\n{default_tags}",
             "pinterest_title": title,
             "pinterest_desc": truncate_at_word_boundary(base_text, 400),
             "bluesky_post": truncate_at_word_boundary(base_text, 220),
-            "hashtags": ["#тренди", "#рек", "#fyp", "#ukraine"]
+            "hashtags": ["#shorts", "#ai", "#automation", "#tech", "#viral"]
         }
         return self._normalize_metadata(fallback_data)
 

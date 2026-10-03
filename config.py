@@ -46,12 +46,13 @@ else:
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
 DEFAULT_AI_PROMPT = os.getenv(
     "DEFAULT_AI_PROMPT",
-    "Проаналізуй контент та оптимізуй опис під пошукові запити (Social SEO 2026) для TikTok Search, Instagram Explore, YouTube Search, Pinterest та Google. "
-    "1. Визнач головний пошуковий запит (Primary Search Keyword), який користувачі вбивають у пошук. "
-    "2. Органічно інтегруй його у перші 1-2 рядки опису для закріплення у пошуковому рядку TikTok та Instagram. "
-    "3. Додай 3-5 LSI-ключових слів та синонімів у тіло тексту без переспаму. "
-    "4. Поєднай пошуковий намір (Search Intent) із вірусним гачком (Hook) та закликом до дії (CTA). "
-    "5. Підбери релевантні нішеві SEO-хештеги (пошукові кластери)."
+    "Analyze the content and optimize descriptions for Social Search SEO (2026) for TikTok Search, Instagram Explore, YouTube Search, Pinterest, and Google. "
+    "MANDATORY: ALL output (titles, captions, descriptions, tweets, posts, and hashtags) MUST BE EXCLUSIVELY IN ENGLISH! "
+    "1. Identify the Primary Search Keyword people type into the search bar. "
+    "2. Organically integrate it into the first 1-2 lines of the caption for TikTok/Instagram Search Bar match. "
+    "3. Include 3-5 LSI keywords and synonyms naturally. "
+    "4. Combine search intent with a strong viral hook and clear call-to-action (CTA). "
+    "5. Add 3-5 high-converting niche SEO hashtags in English."
 ).strip()
 
 # US / New York Proxy

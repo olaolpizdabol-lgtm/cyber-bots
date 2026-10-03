@@ -292,7 +292,7 @@ def init_db():
         row = cursor.fetchone()
         if not row:
             cursor.execute("INSERT INTO settings (key, value) VALUES ('ai_prompt', ?)", (DEFAULT_AI_PROMPT,))
-        elif "Проаналізуй це коротке вертикальне відео" in row["value"]:
+        elif "Проаналізуй" in row["value"] or "українськ" in row["value"].lower():
             cursor.execute("UPDATE settings SET value = ? WHERE key = 'ai_prompt'", (DEFAULT_AI_PROMPT,))
             
         conn.commit()
