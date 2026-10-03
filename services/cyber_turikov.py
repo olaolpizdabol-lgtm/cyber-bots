@@ -565,9 +565,13 @@ class CyberTurikovService:
                 if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
                     try:
                         logger.info("Туріков: Groq 120B в ліміті, перемикаємось на Qwen 27B...")
+                        compact_qwen = [
+                            {"role": "system", "content": "Ти Саня Туріков з Чернівців (пупсик). Спілкуйся живою пацанською мовою, активно розвивай діалог, підколюй, запитуй. Пиши 1-2 речення без '!' і СТРОГО без 'ок'/'пр'/'хз'."},
+                            *messages[1:][-4:]
+                        ]
                         qwen_comp = client.chat.completions.create(
                             model="qwen/qwen3.8-27b",
-                            messages=messages,
+                            messages=compact_qwen,
                             temperature=0.88,
                             max_tokens=90
                         )

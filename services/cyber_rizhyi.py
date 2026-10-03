@@ -1123,9 +1123,13 @@ class CyberRizhyiService:
                 if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
                     try:
                         logger.info("Groq 120B в ліміті, перемикаємось на Qwen 27B...")
+                        compact_qwen = [
+                            {"role": "system", "content": "Ти Саня Рижий з Чернівців (@sigma rigiu). Спілкуйся живою пацанською мовою, активно розвивай діалог, запитуй, підколюй. Пиши 1-2 речення без '!' і СТРОГО без 'ок'/'пр'/'хз'."},
+                            *messages[1:][-4:]
+                        ]
                         qwen_comp = client.chat.completions.create(
                             model="qwen/qwen3.8-27b",
-                            messages=messages,
+                            messages=compact_qwen,
                             temperature=0.92,
                             max_tokens=90
                         )
