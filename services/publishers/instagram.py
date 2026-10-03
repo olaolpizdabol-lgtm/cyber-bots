@@ -82,7 +82,11 @@ class InstagramPublisher(BasePublisher):
         if len(caption) > 2000:
             caption = caption[:1996] + "..."
 
-        if DRY_RUN_MODE or not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD or INSTAGRAM_USERNAME.startswith("your_"):
+        session_path = Path(INSTAGRAM_SESSION_FILE)
+        has_session = session_path.exists()
+        has_creds = bool(INSTAGRAM_USERNAME and not INSTAGRAM_USERNAME.startswith("your_"))
+
+        if DRY_RUN_MODE or not (has_session or (has_creds and INSTAGRAM_PASSWORD and not INSTAGRAM_PASSWORD.startswith("your_"))):
             logger.info(f"[DRY RUN / NO CREDS] Instagram: Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
