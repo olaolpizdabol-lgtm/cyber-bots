@@ -489,6 +489,23 @@ async def handle_text(message: Message, bot: Bot):
         return
 
     # 3. Відповідь активного персонажа (Саня Рижий чи Саня Туріков)
+    sender_uname = (message.from_user.username or "").lower() if message.from_user else ""
+    sender_fname = (message.from_user.first_name or "").lower() if message.from_user else ""
+    is_vitos = (
+        sender_uname == "zelenskiy404"
+        or any(k in sender_fname for k in ["вітя", "вітьок", "зеленський"])
+        or target_name == "Вітьок"
+        or "@zelenskiy404" in text.lower()
+    )
+
+    custom_instr = None
+    if is_vitos:
+        custom_instr = (
+            "Це пише Вітьок (@zelenskiy404)! Загноби його жорстко за те що він пес і клоун! "
+            "Видай вбивчий панч: 'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'. "
+            "Без '!' і без уроків чи школи."
+        )
+
     service = get_service_for_chat(message.chat.id)
     pkg = service.generate_reply_package(
         chat_id=message.chat.id,
@@ -498,10 +515,16 @@ async def handle_text(message: Message, bot: Bot):
         first_name=message.from_user.first_name,
         message_text=text,
         has_photo=False,
+        custom_instruction=custom_instr,
         reply_to_user_id=target_id,
         reply_to_name=target_name,
         reply_to_text=reply_to_text
     )
+    if is_vitos:
+        replies = pkg.get("replies") or []
+        if not any("тьолка" in r.lower() for r in replies):
+            pkg["replies"] = ["тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес"]
+
     _handled_group_msg_ids.add(message.message_id)
     await send_reply_package(message, bot, pkg)
 
@@ -715,20 +738,20 @@ async def inter_bot_bridge_worker(bot: Bot):
                 # Б) Діалог з Санею Туріковим (@turikov_bot)
                 consecutive = ev.get("consecutive_count", 0)
 
-                # Підтримуємо діалог між ботами до 10-12 реплік
-                if consecutive >= 10:
-                    logger.info(f"Міжботовий міст (Рижий): ліміт діалогу ({consecutive}), пауза до репліки людей")
+                # Підтримуємо діалог між ботами НЕ більше 1 обміну (щоб не було спаму між ботами!)
+                if consecutive >= 1:
+                    logger.info(f"Міжботовий міст (Рижий): ліміт діалогу ({consecutive}), зупиняємось, чекаємо людину")
                     continue
 
                 text_low = text.lower()
 
-                # Активний діалог: якщо Туріков звертається до Рижого або це активний ланцюжок
+                # Активний діалог: якщо Туріков звертається до Рижого
                 is_mentioned = any(k in text_low for k in ["рижий", "рижа", "куріл", "рулет", "@cyber_red_head_bot", "кирило", "печення", "@la_coste228", "комп", "кс", "задрот"])
-                if consecutive == 0 and not is_mentioned and random.random() > 0.65:
+                if consecutive == 0 and not is_mentioned and random.random() > 0.40:
                     continue
 
                 # Швидка та природна пауза (2.0-3.5 с думає, 1.0-1.8 с друкує)
-                await asyncio.sleep(random.uniform(2.0, 3.5))
+                await asyncio.sleep(random.uniform(2.5, 4.0))
                 try:
                     await bot.send_chat_action(chat_id=chat_id, action="typing")
                     await asyncio.sleep(random.uniform(1.0, 1.8))
@@ -746,10 +769,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                     reply_to_name="Саня Туріков",
                     custom_instruction=(
                         "Це репліка твого кента Сані Турікова у спільній групі. "
-                        "ОБОВ'ЯЗКОВО активно підтримуй і РОЗВИВАЙ розмову! Підколюй його за самокат, тайстру, "
-                        "карти на площадці, його історійки чи дівчат, став йому зустрічні запитання, сперечайся, не відпускай розмову! "
-                        "СТРОГО ЗАБОРОНЕНО короткі односкладові відповіді ('ок', 'пр', 'да', 'пон', 'і шо', 'хз', 'а ок'). "
-                        "Пиши 1-2 живих пацанських речення у своєму стилі."
+                        "Підтримай або підколи його коротко (за самокат, карти на площадці, тайстру). "
+                        "Пиши ПЕРЕВАЖНО ОДНУ коротку живу пацанську фразу! Без '!'. Без уроків і школи."
                     )
                 )
 
@@ -770,20 +791,7 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.7, 1.3))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
 
-                if sent_msg and replies and consecutive < 10:
-                    full_text = " ".join(replies)
-                    enqueue_cyber_bot_event(
-                        chat_id=chat_id,
-                        from_bot="rizhyi",
-                        to_bot="turikov",
-                        message_id=sent_msg.message_id,
-                        text=full_text,
-                        consecutive_count=consecutive + 1,
-                        sender_user_id=bot.id,
-                        sender_username="cyber_red_head_bot",
-                        sender_first_name="Саня Рижий",
-                        reply_to_name="Саня Туріков"
-                    )
+                # Боти НЕ продовжують розмову між собою далі (чекають повідомлень від людей)
             await asyncio.sleep(2.0)
         except asyncio.CancelledError:
             break
