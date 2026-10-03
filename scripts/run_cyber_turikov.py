@@ -395,7 +395,17 @@ async def handle_text(message: Message, bot: Bot):
 
     custom_instr = None
     if is_vitos:
-        custom_instr = "Це Вітьок з чужою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-4 слова"
+        custom_instr = (
+            "Це пише Вітьок (@zelenskiy404) з чужою зеленою ламбою на аві, якого кинула дівчина! "
+            "Жорстко над ним угарай: 'Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку'! "
+            "Тегни @zelenskiy404 і @davvidka1. 1 коротка фраза."
+        )
+    elif is_group and random.random() < 0.18:
+        custom_instr = (
+            "Підтримай тему по-пацанськи. Якщо доречно, підколи або тегни когось із кентів: "
+            "@zelenskiy404 (що він додік з чужою ламбою на аві і його кинула дівчина, вся 11 школа угарає), "
+            "@davvidka1 (що в нього реальні бабки з фб), @twdht (Діма), @bodya_qq (Бодя). 1 коротка фраза."
+        )
 
     # Фонове (але не блокуюче) отримання аватарки відправника через Gemini Vision (кеш 15 хв)
     sender_avatar_desc = None
@@ -425,6 +435,22 @@ async def handle_text(message: Message, bot: Bot):
         sender_avatar_desc=sender_avatar_desc,
         all_avatars_context=all_avatars_ctx
     )
+    if is_vitos:
+        replies = pkg.get("text_replies") or []
+        if not any("ламб" in r.lower() or "тьолк" in r.lower() or "11" in r.lower() for r in replies):
+            pkg["text_replies"] = [
+                "Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку",
+                "@zelenskiy404 рот завали клоун"
+            ]
+    elif is_group and random.random() < 0.18:
+        tag_prompts = [
+            "@zelenskiy404 ти нахуя чужу ламбу на аву вліпив додік, тебе тьолка кинула і вся 11 школа з тебе рже",
+            "@davvidka1 скажи цьому клоуну @zelenskiy404 чия то ламба, в тебе реальні бабки з фб є а він лох"
+        ]
+        replies = pkg.get("text_replies") or []
+        if replies and random.random() < 0.25:
+            pkg["text_replies"].append(random.choice(tag_prompts))
+
     await send_reply_package(message, bot, pkg)
 
 
@@ -558,22 +584,26 @@ async def inter_bot_bridge_worker(bot: Bot):
                     sender_uname = ev.get("sender_username")
                     sender_name = ev.get("sender_first_name") or "Кент"
 
-                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower()
+                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower() or "@zelenskiy404" in text.lower()
                     if is_vitos:
                         relay_instruction = (
                             "Це пише Вітьок (@zelenskiy404)! Твій бро Рижий уже осадив його, тепер ТИ включайся і добивай! "
-                            "Називай його 'Вітьок' (не Вітос)! Трави його: 'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'! "
-                            "Заримуй на нього: 'вітьок з хуйом в тік токє огоньок'! "
-                            "Угорай з того що він поставив чужу ламбу на аву: 'нахуя чужу ламбу на аву вліпив мажор комнатний', 'чия це ламба спустись на землю'! "
-                            "Якщо мовчить — спитай 'чо ти мовчиш чмо'! "
-                            "Пиши 1 коротке повідомлення. Без '!' і СТРОГО без @ тегів!"
+                            "Називай його 'Вітьок'! Скажи: 'Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку'! "
+                            "Тегни @zelenskiy404 і @davvidka1. Пиши 1 коротке живе повідомлення."
                         )
                     else:
-                        relay_instruction = (
-                            f"Твій бро Рижий щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                            f"спокійно й дружньо підтримай тему по-пацанськи! Без агресії до друзів. "
-                            "Пиши 1 коротке повідомлення. Без '!' і без @ тегів!"
-                        )
+                        if random.random() < 0.20:
+                            relay_instruction = (
+                                f"Твій бро Рижий щойно відповів {sender_name} у групі. Підтримай тему по-пацанськи. "
+                                "Можеш контекстно підколоти чи тегнути @zelenskiy404 (що він додік з чужою ламбою на аві і його кинула дівчина, вся 11 школа угарає) чи тегнути @davvidka1 або @twdht. "
+                                "Пиши 1 коротке живе повідомлення."
+                            )
+                        else:
+                            relay_instruction = (
+                                f"Твій бро Рижий щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
+                                f"спокійно й дружньо підтримай тему по-пацанськи! "
+                                "Пиши 1 коротке живе повідомлення."
+                            )
 
                     pkg = cyber_turikov_service.generate_reply_package(
                         chat_id=chat_id,
@@ -587,6 +617,12 @@ async def inter_bot_bridge_worker(bot: Bot):
                         custom_instruction=relay_instruction
                     )
                     replies = pkg.get("text_replies") or []
+                    if is_vitos and not any("ламб" in r.lower() or "тьолк" in r.lower() or "11" in r.lower() for r in replies):
+                        replies = [
+                            "Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку",
+                            "@zelenskiy404 рот завали клоун"
+                        ]
+
                     for idx, rep in enumerate(replies):
                         if idx == 0:
                             try:
@@ -595,12 +631,15 @@ async def inter_bot_bridge_worker(bot: Bot):
                                     text=rep,
                                     reply_to_message_id=target_msg_id
                                 )
+                                record_sent_message(chat_id, rep)
                             except Exception:
                                 tagged_rep = rep if rep.startswith("@") else f"{sender_name}, {rep}"
                                 await bot.send_message(chat_id=chat_id, text=tagged_rep)
+                                record_sent_message(chat_id, tagged_rep)
                         else:
                             await asyncio.sleep(random.uniform(0.5, 1.0))
                             await bot.send_message(chat_id=chat_id, text=rep)
+                            record_sent_message(chat_id, rep)
 
                     # Діалог між людиною і Туріковим НЕ повинен автоматично тригерити Рижого
                     continue
@@ -661,7 +700,7 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.5, 1.0))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
                 # Боти НЕ продовжують розмову між собою далі (чекають повідомлень від людей)
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(0.8)
         except asyncio.CancelledError:
             break
         except Exception as e:

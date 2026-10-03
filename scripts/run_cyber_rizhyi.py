@@ -508,12 +508,38 @@ async def handle_text(message: Message, bot: Bot):
         all_avatars_context=all_avatars_ctx
     )
     if is_vitos:
-        replies = pkg.get("replies") or []
-        if not any("тьолка" in r.lower() for r in replies):
-            pkg["replies"] = ["тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес"]
+        replies = pkg.get("text_replies") or []
+        if not any("ламб" in r.lower() or "тьолк" in r.lower() or "11" in r.lower() for r in replies):
+            pkg["text_replies"] = [
+                "Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку",
+                "@zelenskiy404 ротяку стули циркач"
+            ]
+    elif is_group and random.random() < 0.18:
+        # Періодичний контекстний стьоб або тег кентів
+        tag_prompts = [
+            "@zelenskiy404 ти нахуя чужу ламбу на аву поставив, тебе тьолка кинула і з тебе вся 11 школа угарає",
+            "@davvidka1 скажи цьому клоуну @zelenskiy404 чия то ламба, в тебе хоч реальні бабки з фб є",
+            "@twdht дімас ти де, гуляти йдеш?"
+        ]
+        replies = pkg.get("text_replies") or []
+        if replies and random.random() < 0.25:
+            pkg["text_replies"].append(random.choice(tag_prompts))
 
     _handled_group_msg_ids.add(message.message_id)
     await send_reply_package(message, bot, pkg)
+
+    # Гарантована ретрансляція до Турікова (для обходу обмежень Telegram Privacy Mode)
+    if is_group:
+        enqueue_cyber_bot_event(
+            chat_id=message.chat.id,
+            from_bot="user_relay",
+            to_bot="turikov",
+            message_id=message.message_id,
+            text=text,
+            sender_user_id=message.from_user.id,
+            sender_username=message.from_user.username,
+            sender_first_name=message.from_user.first_name
+        )
 
 
 
