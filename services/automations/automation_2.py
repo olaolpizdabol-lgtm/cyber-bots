@@ -146,19 +146,11 @@ class TikTokStreakService:
 {"Контекст/побажання: " + custom_note if custom_note else ""}
 """
             try:
-                if getattr(gemini_service, "is_new_sdk", False):
-                    resp = gemini_service.client.models.generate_content(
-                        model=gemini_service.model_name,
-                        contents=[prompt]
-                    )
-                    text = resp.text.strip()
-                else:
-                    resp = gemini_service.legacy_model.generate_content([prompt])
-                    text = resp.text.strip()
-
-                clean = sanitize_typography(text)
-                if clean:
-                    return clean
+                resp = gemini_service.generate_content([prompt])
+                if resp:
+                    clean = sanitize_typography(resp.text.strip())
+                    if clean:
+                        return clean
             except Exception as e:
                 logger.warning(f"Помилка Gemini при генерації повідомлення для дівчини: {e}")
 

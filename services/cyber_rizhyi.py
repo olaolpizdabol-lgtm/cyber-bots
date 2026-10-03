@@ -555,16 +555,8 @@ class CyberRizhyiService:
         try:
             from PIL import Image
             img = Image.open(photo_path)
-            if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                resp = gemini_service.client.models.generate_content(
-                    model=gemini_service.model_name,
-                    contents=[prompt, img]
-                )
-                res_text = sanitize_typography(resp.text.strip())
-                if res_text:
-                    return res_text
-            elif hasattr(gemini_service, "legacy_model"):
-                resp = gemini_service.legacy_model.generate_content([prompt, img])
+            resp = gemini_service.generate_content([prompt, img])
+            if resp and getattr(resp, "text", None):
                 res_text = sanitize_typography(resp.text.strip())
                 if res_text:
                     return res_text
@@ -611,16 +603,8 @@ class CyberRizhyiService:
         try:
             from PIL import Image
             img = Image.open(photo_path)
-            if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                resp = gemini_service.client.models.generate_content(
-                    model=gemini_service.model_name,
-                    contents=[prompt, img]
-                )
-                res_text = sanitize_typography(resp.text.strip())
-                if res_text:
-                    return res_text
-            elif hasattr(gemini_service, "legacy_model"):
-                resp = gemini_service.legacy_model.generate_content([prompt, img])
+            resp = gemini_service.generate_content([prompt, img])
+            if resp and getattr(resp, "text", None):
                 res_text = sanitize_typography(resp.text.strip())
                 if res_text:
                     return res_text
@@ -977,14 +961,8 @@ class CyberRizhyiService:
         prompt += f"\nПоточне повідомлення:\n{current_input}\n\n[Відповідай чітко на слова «{msg_gem}» по-пацанськи. Дуже коротко: 1-5 слів. Без крапок, без '!']"
 
         try:
-            if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                resp = gemini_service.client.models.generate_content(
-                    model=gemini_service.model_name,
-                    contents=[prompt]
-                )
-                return clean_bot_reply(resp.text.strip())
-            elif hasattr(gemini_service, "legacy_model"):
-                resp = gemini_service.legacy_model.generate_content([prompt])
+            resp = gemini_service.generate_content(prompt)
+            if resp and getattr(resp, "text", None):
                 return clean_bot_reply(resp.text.strip())
         except Exception as e:
             logger.warning(f"Gemini fallback помилка: {e}")
@@ -1552,14 +1530,11 @@ class CyberRizhyiService:
                 except Exception as ge:
                     logger.debug(f"[AI Spon Groq] {ge}")
 
-            # Надійний Gemini 3.8 Flash fallback якщо Groq 429
-            if not text and gemini_service.client and getattr(gemini_service, "is_new_sdk", False):
+            # Надійний Gemini Flash fallback якщо Groq 429
+            if not text:
                 try:
-                    resp = gemini_service.client.models.generate_content(
-                        model=gemini_service.model_name,
-                        contents=[prompt]
-                    )
-                    if resp and resp.text:
+                    resp = gemini_service.generate_content([prompt])
+                    if resp and getattr(resp, "text", None):
                         text = sanitize_typography(resp.text.strip())
                 except Exception as gme:
                     logger.debug(f"[AI Spon Gemini] {gme}")

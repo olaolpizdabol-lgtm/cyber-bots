@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from PIL import Image
-from config import GEMINI_API_KEY, GEMINI_MODEL
+from config import GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL
 from core.database import get_setting
 from core.content_type import ContentType
 
@@ -100,30 +100,111 @@ def truncate_at_word_boundary(text: str, max_chars: int, suffix: str = "...") ->
 
 class GeminiService:
     def __init__(self):
-        self.api_key = GEMINI_API_KEY
+        self.api_keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([GEMINI_API_KEY] if GEMINI_API_KEY else [])
+        self.api_key = self.api_keys[0] if self.api_keys else GEMINI_API_KEY
         self.model_name = GEMINI_MODEL
-        self.client = None
-        self._init_client()
+        self._key_index = 0
+        self._clients: List[Any] = []
+        self.is_new_sdk = True
+        self._init_clients()
 
-    def _init_client(self):
-        if not self.api_key or self.api_key.startswith("AIzaSyYour"):
-            return
-
+    def _init_clients(self):
+        self._clients = []
         try:
             from google import genai
-            self.client = genai.Client(api_key=self.api_key)
-            self.is_new_sdk = True
-            logger.info("Успішно підключено modern google-genai SDK.")
+            from google.genai import types
+            for key in self.api_keys:
+                if key and not key.startswith("AIzaSyYour"):
+                    try:
+                        c = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=10000))
+                        self._clients.append(c)
+                    except Exception as e:
+                        logger.error(f"Помилка створення Gemini клієнта: {e}")
+            if self._clients:
+                self.is_new_sdk = True
+                logger.info(f"Успішно підключено {len(self._clients)} Gemini клієнтів для ротації.")
+            else:
+                raise RuntimeError("Немає доступних modern Gemini клієнтів")
         except Exception as e:
             logger.warning(f"google.genai не ініціалізовано: {e}. Спроба legacy google.generativeai.")
             try:
                 import google.generativeai as legacy_genai
-                legacy_genai.configure(api_key=self.api_key)
-                self.legacy_model = legacy_genai.GenerativeModel(self.model_name)
-                self.is_new_sdk = False
+                if self.api_key:
+                    legacy_genai.configure(api_key=self.api_key)
+                    self.legacy_model = legacy_genai.GenerativeModel(self.model_name)
+                    self.is_new_sdk = False
             except Exception as e2:
                 logger.error(f"Помилка ініціалізації Gemini: {e2}")
-                self.client = None
+
+    @property
+    def client(self):
+        if not self._clients:
+            return None
+        return self._clients[self._key_index % len(self._clients)]
+
+    def _rotate_key(self):
+        if self._clients:
+            self._key_index = (self._key_index + 1) % len(self._clients)
+            logger.info(f"🔄 Ротація Gemini ключа: переключено на слот #{self._key_index + 1}/{len(self._clients)}")
+
+    def generate_content(
+        self,
+        contents: Any,
+        preferred_model: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None
+    ) -> Optional[Any]:
+        """
+        Універсальна відмовостійка генерація з ротацією ключів та каскадом моделей:
+        1. Спробувати preferred_model (за замовчуванням gemini-3.5-flash).
+        2. Якщо 504 DEADLINE_EXCEEDED, 503 UNAVAILABLE чи 404 NOT_FOUND —
+           автоматично пробувати каскад: gemini-3.5-flash-lite -> gemini-3.8-flash -> gemini-3.1-flash-lite.
+        3. Якщо 429 RESOURCE_EXHAUSTED — ротувати ключ і повторити.
+        """
+        target_model = preferred_model or self.model_name
+        models_cascade = [target_model]
+        for alt in ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"]:
+            if alt not in models_cascade:
+                models_cascade.append(alt)
+
+        if not self._clients and hasattr(self, "legacy_model"):
+            try:
+                c_list = contents if isinstance(contents, list) else [contents]
+                kwargs = {}
+                if config:
+                    kwargs["generation_config"] = config
+                return self.legacy_model.generate_content(c_list, **kwargs)
+            except Exception as e:
+                logger.warning(f"Legacy Gemini помилка: {e}")
+                return None
+
+        if not self._clients:
+            return None
+
+        max_key_attempts = len(self._clients)
+        for m in models_cascade:
+            for _ in range(max_key_attempts):
+                c = self.client
+                if not c:
+                    break
+                try:
+                    kwargs = {}
+                    if config:
+                        kwargs["config"] = config
+                    resp = c.models.generate_content(model=m, contents=contents, **kwargs)
+                    if resp and (getattr(resp, "text", None) or getattr(resp, "candidates", None)):
+                        return resp
+                except Exception as e:
+                    err_str = str(e)
+                    logger.warning(f"Gemini ({m}, ключ #{self._key_index + 1}) помилка: {err_str[:100]}")
+                    if "429" in err_str or "exhausted" in err_str.lower():
+                        self._rotate_key()
+                        continue
+                    elif "504" in err_str or "503" in err_str or "deadline" in err_str.lower() or "unavailable" in err_str.lower() or "404" in err_str:
+                        break
+                    else:
+                        self._rotate_key()
+                        break
+        return None
 
     def generate_metadata(
         self,
@@ -231,19 +312,13 @@ class GeminiService:
                         except Exception as ie:
                             logger.error(f"Помилка відкриття фото: {ie}")
 
-            if getattr(self, "is_new_sdk", False) and self.client:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=contents,
-                    config={"response_mime_type": "application/json"}
-                )
-                text_resp = response.text.strip()
-            else:
-                response = self.legacy_model.generate_content(
-                    contents,
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                text_resp = response.text.strip()
+            response = self.generate_content(
+                contents=contents,
+                config={"response_mime_type": "application/json"}
+            )
+            if not response or not getattr(response, "text", None):
+                raise RuntimeError("Gemini не повернув відповіді")
+            text_resp = response.text.strip()
 
             if text_resp.startswith("```json"):
                 text_resp = text_resp[7:]
@@ -298,16 +373,10 @@ class GeminiService:
 {clean_text}
 """
         try:
-            contents = [prompt]
-            if getattr(self, "is_new_sdk", False) and self.client:
-                resp = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=contents
-                )
-                res_text = resp.text.strip()
-            else:
-                resp = self.legacy_model.generate_content(contents)
-                res_text = resp.text.strip()
+            resp = self.generate_content(contents=[prompt])
+            if not resp or not getattr(resp, "text", None):
+                raise RuntimeError("Gemini не повернув відповіді")
+            res_text = resp.text.strip()
 
             res_text = sanitize_typography(res_text)
             if len(res_text) > max_chars:
@@ -366,19 +435,13 @@ class GeminiService:
 }}
 """
         try:
-            if getattr(self, "is_new_sdk", False) and self.client:
-                resp = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=[prompt],
-                    config={"response_mime_type": "application/json"}
-                )
-                t_resp = resp.text.strip()
-            else:
-                resp = self.legacy_model.generate_content(
-                    [prompt],
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                t_resp = resp.text.strip()
+            resp = self.generate_content(
+                contents=[prompt],
+                config={"response_mime_type": "application/json"}
+            )
+            if not resp or not getattr(resp, "text", None):
+                raise RuntimeError("Gemini не повернув відповіді")
+            t_resp = resp.text.strip()
 
             if t_resp.startswith("```json"):
                 t_resp = t_resp[7:]

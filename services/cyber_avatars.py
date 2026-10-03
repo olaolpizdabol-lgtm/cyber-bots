@@ -71,17 +71,9 @@ async def analyze_avatar_image(
     def _call_gemini() -> Optional[str]:
         try:
             img = Image.open(photo_path)
-            if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                resp = gemini_service.client.models.generate_content(
-                    model=gemini_service.model_name,
-                    contents=[prompt, img]
-                )
-                text = resp.text.strip() if resp and resp.text else ""
-                return sanitize_typography(text)
-            elif hasattr(gemini_service, "legacy_model"):
-                resp = gemini_service.legacy_model.generate_content([prompt, img])
-                text = resp.text.strip() if resp and resp.text else ""
-                return sanitize_typography(text)
+            resp = gemini_service.generate_content([prompt, img])
+            text = resp.text.strip() if resp and getattr(resp, "text", None) else ""
+            return sanitize_typography(text) if text else None
         except Exception as e:
             logger.warning(f"Помилка аналізу аватарки через Gemini Vision: {e}")
         return None

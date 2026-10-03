@@ -456,14 +456,8 @@ class CyberTurikovService:
         extra = f"\n[{custom_instruction}]" if custom_instruction else ""
         prompt += f"\nПоточне повідомлення:\n{current_input}\n\n[Відповідай чітко на слова «{msg_gem_t}» як Туріков. Ультра-коротко: 1-4 слова. Без крапок, без '!']{extra}"
         try:
-            if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                resp = gemini_service.client.models.generate_content(
-                    model=gemini_service.model_name,
-                    contents=[prompt]
-                )
-                return clean_bot_reply(resp.text.strip())
-            elif hasattr(gemini_service, "legacy_model"):
-                resp = gemini_service.legacy_model.generate_content([prompt])
+            resp = gemini_service.generate_content(prompt)
+            if resp and getattr(resp, "text", None):
                 return clean_bot_reply(resp.text.strip())
         except Exception as e:
             logger.warning(f"Туріков Gemini fallback помилка: {e}")
@@ -776,13 +770,10 @@ class CyberTurikovService:
                     pass
 
             # Gemini fallback
-            if not text and gemini_service.client and getattr(gemini_service, "is_new_sdk", False):
+            if not text:
                 try:
-                    resp = gemini_service.client.models.generate_content(
-                        model=gemini_service.model_name,
-                        contents=[prompt]
-                    )
-                    if resp and resp.text:
+                    resp = gemini_service.generate_content([prompt])
+                    if resp and getattr(resp, "text", None):
                         text = sanitize_typography(resp.text.strip())
                 except Exception:
                     pass

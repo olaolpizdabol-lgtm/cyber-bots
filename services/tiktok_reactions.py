@@ -215,16 +215,8 @@ class TikTokReactionsService:
                 if uploaded_file and gemini_service.client:
                     contents.append(gemini_service.client.files.get(name=uploaded_file))
 
-                if getattr(gemini_service, "is_new_sdk", False) and gemini_service.client:
-                    resp = gemini_service.client.models.generate_content(
-                        model=gemini_service.model_name,
-                        contents=contents
-                    )
-                    clean_res = sanitize_typography(resp.text.strip())
-                    if clean_res:
-                        return clean_res
-                elif hasattr(gemini_service, "legacy_model"):
-                    resp = gemini_service.legacy_model.generate_content(contents)
+                resp = gemini_service.generate_content(contents)
+                if resp:
                     clean_res = sanitize_typography(resp.text.strip())
                     if clean_res:
                         return clean_res
