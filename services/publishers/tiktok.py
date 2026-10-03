@@ -34,14 +34,20 @@ class TikTokPublisher(BasePublisher):
         if len(caption) > 2000:
             caption = caption[:1996] + "..."
 
+        from config import DATA_DIR
+        channel_state_file = DATA_DIR / "tiktok_channel_state.json"
+        has_channel_state = channel_state_file.exists()
+
         upload_session = TIKTOK_UPLOAD_SESSION_ID or TIKTOK_SESSION_ID
-        if DRY_RUN_MODE or not upload_session or upload_session.startswith("your_"):
+        is_configured = has_channel_state or (upload_session and not upload_session.startswith("your_"))
+
+        if DRY_RUN_MODE or not is_configured:
             logger.info(f"[DRY RUN / NO CREDS] TikTok (Канал відео): Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_tt_video_789",
-                url="https://www.tiktok.com/@user/video/mock_tt_video_789",
+                url="https://www.tiktok.com/@bohdan.agi/video/mock_tt_video_789",
                 error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TIKTOK_UPLOAD_SESSION_ID для заливу відео ще не налаштовано)"
             )
 
