@@ -304,7 +304,7 @@ async def handle_video_upload(message: Message, bot: Bot):
         local_path = DOWNLOADS_DIR / local_filename
 
         await bot.download_file(file_info.file_path, destination=local_path)
-        await status_msg.edit_text("🧠 <b>Gemini 2.5 аналізує відео</b> під стандарти всіх соцмереж...")
+        await status_msg.edit_text("🧠 <b>Gemini 3.5 аналізує відео</b> під стандарти всіх соцмереж...")
 
         data = auto_poster.process_incoming_video(str(local_path))
         await send_prepared_preview(message, status_msg, data)
@@ -391,7 +391,7 @@ async def handle_single_photo(message: Message, bot: Bot):
         local_path = DOWNLOADS_DIR / f"photo_{message.from_user.id}_{message.message_id}{file_ext}"
 
         await bot.download_file(file_info.file_path, destination=local_path)
-        await status_msg.edit_text("🧠 <b>Gemini 2.5 створює вірусні описи під фото...</b>")
+        await status_msg.edit_text("🧠 <b>Gemini 3.5 створює вірусні описи під фото...</b>")
 
         data = auto_poster.process_incoming_content(
             content_type=ContentType.PHOTO,
@@ -497,7 +497,7 @@ async def handle_text_post(message: Message):
     if not is_user_allowed(message.from_user.id):
         return
 
-    status_msg = await message.answer("🧠 <b>Gemini 2.5 оптимізує текст</b> під стандарти Twitter, Threads, Bluesky та Facebook...")
+    status_msg = await message.answer("🧠 <b>Gemini 3.5 оптимізує текст</b> під стандарти Twitter, Threads, Bluesky та Facebook...")
 
     try:
         data = auto_poster.process_incoming_content(
