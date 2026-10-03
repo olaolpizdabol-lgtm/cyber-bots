@@ -244,3 +244,81 @@ def is_message_addressed_to_bot(message: Message, bot_identity: str) -> bool:
 
     # НА БУДЬ-ЯКЕ ПОВІДОМЛЕННЯ В ЧАТІ ВІДПОВІДАЮТЬ ОБИДВА БОТИ!
     return True
+
+
+# ==============================================================================
+# 🛡️ АНТИ-ПОВТОР 30 ХВИЛИН (1800 СЕКУНД) ТА ПЕРЕРВИ МІЖ ПОВІДОМЛЕННЯМИ БОТІВ
+# ==============================================================================
+import time
+from typing import Dict, Tuple
+
+_sent_message_timestamps: Dict[Tuple[int, str], float] = {}
+_last_bot_message_timestamp: Dict[int, float] = {}
+
+
+def normalize_message_for_dedup(text: str) -> str:
+    """Нормалізує текст повідомлення для перевірки дублікатів (без знаків, нижній регістр)"""
+    if not text:
+        return ""
+    import re
+    cleaned = re.sub(r'[^\w\s]', '', text.lower())
+    return " ".join(cleaned.split())
+
+
+def is_recent_duplicate(chat_id: int, text: str, cooldown_seconds: float = 1800.0) -> bool:
+    """
+    Перевіряє, чи надсилалося таке саме (або практично ідентичне) повідомлення
+    у цей чат протягом останніх 30 хвилин (1800 секунд).
+    """
+    now = time.time()
+    norm = normalize_message_for_dedup(text)
+    if not norm or len(norm) < 3:
+        return False
+
+    # Очищуємо застарілі записи в оперативній пам'яті (старше 1 години)
+    to_del = [k for k, t in _sent_message_timestamps.items() if (now - t) > 3600.0]
+    for k in to_del:
+        _sent_message_timestamps.pop(k, None)
+
+    key = (chat_id, norm)
+    last_t = _sent_message_timestamps.get(key)
+    if last_t and (now - last_t) < cooldown_seconds:
+        return True
+
+    # Перевірка по базі даних cyber_rizhyi_messages
+    try:
+        from core.database import get_connection
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT reply_text FROM cyber_rizhyi_messages
+                WHERE chat_id = ? AND reply_text IS NOT NULL
+                  AND created_at >= datetime('now', '-' || ? || ' seconds')
+                ORDER BY id DESC LIMIT 50
+            """, (chat_id, int(cooldown_seconds)))
+            for row in cursor.fetchall():
+                db_reply = row["reply_text"]
+                if db_reply and normalize_message_for_dedup(db_reply) == norm:
+                    _sent_message_timestamps[key] = now
+                    return True
+    except Exception:
+        pass
+
+    return False
+
+
+def record_sent_message(chat_id: int, text: str):
+    """Фіксує надіслане повідомлення для блокування повторів на 30 хвилин та оновлює час останнього повідомлення"""
+    norm = normalize_message_for_dedup(text)
+    if norm:
+        _sent_message_timestamps[(chat_id, norm)] = time.time()
+    _last_bot_message_timestamp[chat_id] = time.time()
+
+
+def get_seconds_since_last_bot_message(chat_id: int) -> float:
+    """Повертає кількість секунд з моменту останнього повідомлення будь-якого бота у чаті"""
+    last_t = _last_bot_message_timestamp.get(chat_id)
+    if not last_t:
+        return 9999.0
+    return time.time() - last_t
+

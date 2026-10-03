@@ -154,23 +154,32 @@ async def try_set_reaction(bot: Bot, chat_id: int, message_id: int) -> bool:
 
 
 async def send_burst_replies(message: Message, bot: Bot, replies: list[str]) -> list[Message]:
-    """Надсилає серію з 1-3 повідомлень з натуральними затримками друку (манера підлітка в Telegram)"""
+    """Надсилає серію з 1-3 повідомлень з натуральними затримками друку та захистом від дублікатів на 30 хв"""
+    from services.cyber_routing import is_recent_duplicate, record_sent_message
     sent = []
     if not replies:
         return sent
-    for idx, rep in enumerate(replies):
+
+    # Фільтруємо повідомлення, які вже надсилалися у цей чат за останні 30 хвилин
+    filtered = [r for r in replies if not is_recent_duplicate(message.chat.id, r)]
+    if not filtered and replies:
+        filtered = [replies[0]]
+
+    for idx, rep in enumerate(filtered):
         if idx == 0:
             m = await message.reply(rep)
             sent.append(m)
+            record_sent_message(message.chat.id, rep)
         else:
-            await asyncio.sleep(random.uniform(0.7, 1.4))
+            await asyncio.sleep(random.uniform(1.2, 2.5))
             try:
                 await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-                await asyncio.sleep(random.uniform(0.5, 1.2))
+                await asyncio.sleep(random.uniform(0.8, 1.6))
             except Exception:
                 pass
             m = await message.answer(rep)
             sent.append(m)
+            record_sent_message(message.chat.id, rep)
     return sent
 
 
@@ -501,8 +510,10 @@ async def handle_text(message: Message, bot: Bot):
     custom_instr = None
     if is_vitos:
         custom_instr = (
-            "Це пише Вітьок (@zelenskiy404)! Загноби його жорстко за те що він пес і клоун! "
-            "Видай вбивчий панч: 'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'. "
+            "Це пише Вітьок (@zelenskiy404)! Загноби його жорстко: "
+            "1. Якщо він мовчить або відповідає - спитай чо він мовчить чмо або видай панч про тьолку: "
+            "'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'. "
+            "2. Угорай з того що він поставив чужу ламбу на аву ('нахуя чужу ламбу на аву поклав мажор комнатний', 'чия це ламба спустись на землю'). "
             "Без '!' і без уроків чи школи."
         )
 
@@ -696,14 +707,15 @@ async def inter_bot_bridge_worker(bot: Bot):
                             "Це пише Вітьок (@zelenskiy404)! Твій бро Туріков уже осадив його, тепер ТИ включайся і добивай! "
                             "Називай його 'Вітьок' (не Вітос)! Трави його: 'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'! "
                             "Заримуй на нього: 'вітьок з хуйом в тік токє огоньок'! "
-                            "Підйобуй за згенеровану ШІ аватарку клоуна, скажи що він в край ахуєл пес, закрий йому ротяку! "
-                            "Розбий на 2-3 короткі повідомлення через '|||'. Без '!' і СТРОГО без @ тегів!"
+                            "Угорай з того що він поставив чужу ламбу на аву: 'нахуя чужу ламбу на аву вліпив мажор комнатний', 'чия це ламба спустись на землю'! "
+                            "Якщо мовчить — спитай 'чо ти мовчиш чмо'! "
+                            "Пиши 1 коротке повідомлення. Без '!' і СТРОГО без @ тегів!"
                         )
                     else:
                         relay_instruction = (
                             f"Твій бро Туріков щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                            f"підтримай тему або заримуй смішну дражнилку на {sender_name} як справжній напарник! "
-                            "Розбий на 2 короткі репліки через '|||'. Без '!' і без @ тегів!"
+                            f"спокійно й дружньо підтримай тему по-пацанськи! Без агресії до друзів. "
+                            "Пиши 1 коротке повідомлення. Без '!' і без @ тегів!"
                         )
 
                     pkg = cyber_rizhyi_service.generate_reply_package(

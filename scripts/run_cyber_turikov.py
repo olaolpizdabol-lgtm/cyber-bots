@@ -144,22 +144,32 @@ async def cmd_memory(message: Message):
 
 
 async def send_burst_replies(message: Message, bot: Bot, replies: list[str]) -> list[Message]:
+    """Надсилає серію з 1-3 повідомлень з натуральними затримками друку та захистом від дублікатів на 30 хв"""
+    from services.cyber_routing import is_recent_duplicate, record_sent_message
     sent = []
     if not replies:
         return sent
-    for idx, rep in enumerate(replies):
+
+    # Фільтруємо повідомлення, які вже надсилалися у цей чат за останні 30 хвилин
+    filtered = [r for r in replies if not is_recent_duplicate(message.chat.id, r)]
+    if not filtered and replies:
+        filtered = [replies[0]]
+
+    for idx, rep in enumerate(filtered):
         if idx == 0:
             m = await message.reply(rep)
             sent.append(m)
+            record_sent_message(message.chat.id, rep)
         else:
-            await asyncio.sleep(random.uniform(0.6, 1.2))
+            await asyncio.sleep(random.uniform(1.2, 2.5))
             try:
                 await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-                await asyncio.sleep(random.uniform(0.4, 0.9))
+                await asyncio.sleep(random.uniform(0.8, 1.6))
             except Exception:
                 pass
             m = await message.answer(rep)
             sent.append(m)
+            record_sent_message(message.chat.id, rep)
     return sent
 
 
@@ -419,8 +429,8 @@ async def handle_text(message: Message, bot: Bot):
     if is_vitos:
         custom_instr = (
             "Це пише Вітьок (@zelenskiy404)! Підтримай травлю Вітька! "
-            "Загноби його за згенеровану ШІ аватарку клоуна і що він пес. "
-            "Підколюй що його навіть власна тьолка кинула. "
+            "1. Спитай чо він мовчить чмо або підколи що його навіть власна тупа тьолка кинула. "
+            "2. Угорай з того що він поставив чужу ламбу на аву ('нахуя чужу ламбу на аву вліпив мажор комнатний', 'чия це ламба спустись на землю'). "
             "Пиши 1 коротку репліку без '!'. Без школи і уроків."
         )
 
@@ -592,14 +602,15 @@ async def inter_bot_bridge_worker(bot: Bot):
                             "Це пише Вітьок (@zelenskiy404)! Твій бро Рижий уже осадив його, тепер ТИ включайся і добивай! "
                             "Називай його 'Вітьок' (не Вітос)! Трави його: 'тебе даже твоя тупа тьолка бросила хыхпавхпхвхапхвахп, хто тут пес'! "
                             "Заримуй на нього: 'вітьок з хуйом в тік токє огоньок'! "
-                            "Підйобуй за згенеровану ШІ аватарку клоуна, скажи що він в край ахуєл пес, закрий йому ротяку! "
-                            "Розбий на 2-3 короткі повідомлення через '|||'. Без '!' і СТРОГО без @ тегів!"
+                            "Угорай з того що він поставив чужу ламбу на аву: 'нахуя чужу ламбу на аву вліпив мажор комнатний', 'чия це ламба спустись на землю'! "
+                            "Якщо мовчить — спитай 'чо ти мовчиш чмо'! "
+                            "Пиши 1 коротке повідомлення. Без '!' і СТРОГО без @ тегів!"
                         )
                     else:
                         relay_instruction = (
                             f"Твій бро Рижий щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                            f"підтримай тему або заримуй смішну дражнилку на {sender_name} як справжній напарник! "
-                            "Розбий на 2 короткі репліки через '|||'. Без '!' і без @ тегів!"
+                            f"спокійно й дружньо підтримай тему по-пацанськи! Без агресії до друзів. "
+                            "Пиши 1 коротке повідомлення. Без '!' і без @ тегів!"
                         )
 
                     pkg = cyber_turikov_service.generate_reply_package(
