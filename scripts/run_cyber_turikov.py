@@ -645,10 +645,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                 # Б) Діалог з Санею Рижим (@cyber_red_head_bot)
                 consecutive = ev.get("consecutive_count", 0)
 
-                # Дозволяємо живий діалог між ботами до 5 реплік
-                if consecutive >= 5:
-                    logger.info(f"Міжботовий міст (Туріков): ліміт діалогу ({consecutive}), пауза")
-                    continue
+                # Дозволяємо нескінченний діалог між ботами
+                pass
 
                 text_low = text.lower()
 
@@ -671,8 +669,13 @@ async def inter_bot_bridge_worker(bot: Bot):
                     reply_to_name="Саня Рижий",
                     custom_instruction=(
                         "Це репліка твого кента Сані Рижого у спільній групі. "
-                        "Активно підтримай діалог, підколи його за комп чи кс, за рулет або разом підколіть когось із чату. "
-                        "Пиши 1 коротку живу пацанську фразу! Без '!'. Без уроків і школи."
+                        "Активно підтримуй нескінченний діалог, підколи його або разом підколіть когось із чату "
+                        "(Вітька @zelenskiy404 за чужу ламбу, Давіда @davvidka1 за фб чи Бодю @bodya_qq). "
+                        "Згадуй Південно-Кільцеву, Майдан, Формаркет, Жовтневий парк, Мак або Столову №1 "
+                        "(борщик поїсти, там найс прайс не дорого, барабуля фрі для родини)! "
+                        "Можеш тегати пацанів пачками (@cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404). "
+                        "(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
+                        "Пиши 1 коротку живу пацанську фразу! Без '!'."
                     )
                 )
 
@@ -693,8 +696,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.5, 1.0))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
 
-                # Продовжуємо бесіду: передаємо хід Рижому
-                if sent_msg and replies and consecutive < 5:
+                # Продовжуємо бесіду нескінченно: передаємо хід Рижому
+                if sent_msg and replies:
                     full_text = " ".join(replies)
                     enqueue_cyber_bot_event(
                         chat_id=chat_id,

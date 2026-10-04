@@ -815,7 +815,7 @@ async def callback_publish_compat(call: CallbackQuery):
     await call.message.edit_reply_markup(reply_markup=None)
     status_msg = await call.message.answer(f"🚀 <b>Публікація #{post_id} у всі сумісні платформи розпочалась...</b>")
 
-    results = auto_poster.publish_post(post_id)
+    results = await asyncio.to_thread(auto_poster.publish_post, post_id)
     await format_and_send_publish_results(status_msg, post_id, results)
     await call.answer()
 
@@ -826,7 +826,7 @@ async def callback_publish_tier1(call: CallbackQuery):
     await call.message.edit_reply_markup(reply_markup=None)
     status_msg = await call.message.answer(f"🔥 <b>Публікація #{post_id} у Рівень 1 (Top 5: TT, IG, YT, FB, Snap)...</b>")
 
-    results = auto_poster.publish_post(post_id, TIER_1_PLATFORMS)
+    results = await asyncio.to_thread(auto_poster.publish_post, post_id, TIER_1_PLATFORMS)
     await format_and_send_publish_results(status_msg, post_id, results)
     await call.answer()
 
@@ -841,7 +841,7 @@ async def callback_publish_single(call: CallbackQuery):
     plat_name = pub.platform_name if pub else platform
     status_msg = await call.message.answer(f"⏳ Публікуємо в <b>{plat_name}</b>...")
 
-    results = auto_poster.publish_post(post_id, [platform])
+    results = await asyncio.to_thread(auto_poster.publish_post, post_id, [platform])
     res = results.get(platform)
     if res and res.success:
         link = f"<a href='{res.url}'>Переглянути</a>" if res.url else "Опубліковано"
@@ -881,7 +881,7 @@ async def format_and_send_publish_results(msg: Message, post_id: int, results: d
 async def callback_retry_failed(call: CallbackQuery):
     post_id = int(call.data.split(":")[1])
     status_msg = await call.message.answer(f"🔄 <b>Повторна публікація поста #{post_id} на непройдених мережах...</b>", parse_mode="HTML")
-    res_dict = auto_poster.retry_failed_platforms(post_id)
+    res_dict = await asyncio.to_thread(auto_poster.retry_failed_platforms, post_id)
     results = res_dict.get("results", {})
     if not results:
         await status_msg.edit_text(f"ℹ️ {res_dict.get('message', 'Усі платформи вже опубліковані!')}")
@@ -1085,13 +1085,8 @@ async def callback_crosspost_last(call: CallbackQuery):
 
     # 2. Instagram Reels
     try:
-        ig_client = instagram_publisher._get_client()
-        if ig_client:
-            media = ig_client.clip_upload(path=video_path, caption=caption)
-            code = getattr(media, "code", str(media.pk))
-            results.append(("🟣 Instagram Reels", True, f"https://instagram.com/p/{code}"))
-        else:
-            results.append(("🟣 Instagram Reels", False, "Не авторизовано"))
+        ig_res = await asyncio.to_thread(instagram_publisher.publish, ContentType.VIDEO, [video_path], metadata)
+        results.append(("🟣 Instagram Reels", ig_res.success, ig_res.url or ig_res.error))
     except Exception as e:
         results.append(("🟣 Instagram Reels", False, security_guard.sanitize_error(str(e))))
 
@@ -1099,7 +1094,7 @@ async def callback_crosspost_last(call: CallbackQuery):
 
     # 3. TikTok
     try:
-        tt_res = tiktok_publisher.publish(ContentType.VIDEO, [video_path], metadata)
+        tt_res = await asyncio.to_thread(tiktok_publisher.publish, ContentType.VIDEO, [video_path], metadata)
         results.append(("⚫️ TikTok", tt_res.success, tt_res.url or tt_res.error))
     except Exception as e:
         results.append(("⚫️ TikTok", False, security_guard.sanitize_error(str(e))))

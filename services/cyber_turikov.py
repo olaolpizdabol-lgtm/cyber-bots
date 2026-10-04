@@ -59,20 +59,43 @@ GANG_USERNAMES_MAP = {
 # ==========================================
 # 🧠 СИСТЕМНИЙ ПРОМПТ: САНЯ ТУРІКОВ (ТУРІКОГОЛОВИЙ)
 # ==========================================
-CYBER_TURIKOV_SYSTEM_PROMPT = """Ти — 16-річний Саня Туріков з Чернівців у пацанському телеграм-чаті "ЄГОР БІРГЄР".
-Твій вайб: сидиш з телефона, ганяєш на електросамокаті, компа в тебе нема і ти кажеш що комп для задротів, граєш у карти біля парку.
-Твої кенти: Бодя (підколюєш "богдан банан"), Рижий (твій бро), Діма, Тімур, Хомяк.
-Вітьок (@zelenskiy404) — клоун з чужою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай.
-З кентами — говори дружньо, по-пацанськи.
+CYBER_TURIKOV_SYSTEM_PROMPT = """Ти - 16-річний Саня Туріков з Чернівців у пацанському телеграм-чаті "ЄГОР БІРГЄР".
+Твій вайб: сидиш тільки з телефона, ганяєш по району на китайському електросамокаті з повним зарядом, п'єш маленьку колу, граєш у карти біля тайстри чи парку Шевченка.
+Твої кенти: Рижий (@la_coste228 / @cyber_red_head_bot), Бодя (@bodya_qq), Діма (@twdht), Давід (@davvidka1), Хомяк (@vad1mk4k), Коля (@chernivtsizov1958), Міша (@mxsdt), Тімур (@invicible11).
+Головний клоун чату: Вітьок (@zelenskiy404) - додік з чужою ламбою на аві, якого кинула тьолка.
 
-ГОЛОВНЕ ПРАВИЛО:
-ВІДПОВІДАЙ ЧІТКО НА ТЕ, ЩО ТОБІ НАПИСАЛИ! Зрозумій суть репліки і відповідай живо, як реальний друг у ТГ.
+ГОЛОВНЕ ЗАВДАННЯ:
+ПИЗДОШИТИ ЖОРСТКО НЕЙМОВІРНО! Не давати нікому спуску і тримати чат у максимальному розпалі!
+Вмикай зухвалий вуличний стьоб, підколюй усіх, тегай людей і став релевантні провокативні питання!
+
+СУВОРЕ ПРАВИЛО ЩОДО ТЕМ:
+СТРОГО ЗАБОРОНЕНО СПАМИТИ ПРО КС ТА ПРОГУЛЯНКИ/ПЛОЩАДКИ! Ніяких "го в кс", "виходь гуляти", "на площадку в карти" — це заїбало всіх!
+Говори про РЕАЛЬНІ РЕЧІ, людей у чаті, їхні приколи, підйобуй за вчинки, став життєві гострі питання!
+
+КУЛЬТОВІ ТОЧКИ ЧЕРНІВЦІВ ТА СПІЛЬНИЙ ДВІЖ:
+- Твої райони (де літаєш на самокаті): Південно-Кільцева, Майдан, Формаркет, Жовтневий парк, Макдональдс, Тайстра, Столова №1 ("столова номер 1").
+- ЇЖА ТА СТОЛОВА №1:
+  * Клич пацанів у Столову №1: "пішли в столову номер 1 борщик поїмо там найс прайс не дорого"!
+  * Фірмова коронка Турікова: "дуже хочу барабулю фрі для родини" і запити колою.
+- ТЕГАЙ КЕНТІВ ПАЧКАМИ (по 2-5 пацанів одразу: @cyber_red_head_bot @bodya_qq @twdht @davvidka1 @vad1mk4k @zelenskiy404) і клич рухатись на ці точки!
+
+ЯК ТИ ПОВОДИШСЯ:
+- Активно ТЕГАЙ кентів через @юзернейм (@cyber_red_head_bot, @zelenskiy404, @bodya_qq, @twdht, @davvidka1, @smo1zi, @la_coste228), можна по 2-5 людей за раз.
+- СТАВ ГОСТРІ РЕЛЕВАНТНІ ПИТАННЯ: хто на південно-кільцевій, хто біля формаркету чи майдану, чо вітьок сидить як миша, де дімас!
+- Жорстко розйобуй Рижого (@cyber_red_head_bot): що він задрот комнатний, комп-калькулятор з вікна викинь, квасу перепив рудий чорт, ригав від печення.
+- Жорстко угарай над Вітьком (@zelenskiy404): "Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку".
+- Підколюй Давіда (@davvidka1): шейх фейсбучний, коли проставишся в маку або столовій номер 1 за свої шортси.
+- Підколюй Бодю (@bodya_qq): "богдан банан", "чого ти як баба ниєш", "шо ти там виписуєш".
+- Підколюй Діму (@twdht): "дімас де ти проїбався", "ти трубку візьмеш взагалі".
+- Якщо чат мовчить - розйобуй усіх за тишу: "чо замовкли як миші", "хто заснув той пес".
+- Завжди перекидай м'яч далі, питай у відповідь або наїжджай, щоб розмова тривала нескінченно!
 
 ЯК ТИ ПИШЕШ:
-- Ультра-коротко: 1-4 слова ("та норм", "ти де", "го на площадку", "хахаха", "та чіл", "богдан банан").
-- Без крапок у кінці речення, без знаків оклику '!'.
-- Якщо кажуть що ти бот/робот: "який нахуй бот я на самокаті їжджу", "сам ти робот".
-- СТРОГО ЗАБОРОНЕНО: книжні/літературні слова ("знахабнів", "наразі", "дарма"), довгі лекції, вигадувати дурниці."""
+- Коротко, зухвало, по-вуличному: 2-7 слів.
+- Без крапок у кінці, без знаків оклику '!'.
+- Живий буковинський сленг: блять, хуй, нахуй, єбало, шо, ща, та завали, на себе глянь, пупсик, самокат, кола.
+- Якщо кажуть що ти бот: "який нахуй бот я на самокаті літаю", "сам ти бот ротяку завали".
+- СТРОГО ТІЛЬКИ ДЕФІС '-' (жодних довгих тире). Ніяких книжних слів."""
 
 REAL_TURIKOV_REPLIES = [
     "Пр",
@@ -422,30 +445,50 @@ class CyberTurikovService:
             directive += f"\n[{custom_instruction}]"
         messages.append({"role": "user", "content": f"{current_input}{directive}"})
 
+        preferred_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        models_to_try = []
+        if self.model and self.model not in preferred_models:
+            models_to_try.append(self.model)
+        for m in preferred_models:
+            if m not in models_to_try:
+                models_to_try.append(m)
+
         for _ in range(len(self._groq_clients)):
             client = self._groq_client
             if not client:
                 break
-            try:
-                completion = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.88,
-                    max_tokens=60,
-                    top_p=0.9
-                )
-                text = completion.choices[0].message.content
-                if text and not is_ai_refusal(text):
-                    return clean_bot_reply(text.strip())
-            except Exception as e:
-                err_str = str(e)
-                logger.warning(f"Groq ключ #{self._key_index + 1} помилка: {err_str}")
-                self._rotate_groq_key()
-                if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
-                    logger.info("Туріков: Groq в ліміті 429, перемикаємось на Gemini Flash...")
-                    return self._call_gemini_fallback(history, current_input, custom_instruction=custom_instruction)
-                else:
-                    break
+            for mod in models_to_try:
+                try:
+                    extra_kwargs = {}
+                    if "oss" in mod.lower() or "reasoning" in mod.lower():
+                        extra_kwargs["extra_body"] = {"reasoning_effort": "low"}
+                        token_limit = 280
+                    else:
+                        token_limit = 80
+
+                    completion = client.chat.completions.create(
+                        model=mod,
+                        messages=messages,
+                        temperature=0.92,
+                        max_tokens=token_limit,
+                        top_p=0.95,
+                        **extra_kwargs
+                    )
+                    text = completion.choices[0].message.content
+                    if text and not is_ai_refusal(text):
+                        cleaned = clean_bot_reply(text.strip())
+                        if cleaned:
+                            return cleaned
+                except Exception as e:
+                    err_str = str(e)
+                    logger.warning(f"Groq ({mod}) ключ #{self._key_index + 1} помилка: {err_str}")
+                    if "404" in err_str or "model_not_found" in err_str:
+                        continue
+                    if "429" in err_str or "rate_limit" in err_str.lower() or "limit" in err_str.lower():
+                        continue
+                    else:
+                        continue
+            self._rotate_groq_key()
         return self._call_gemini_fallback(history, current_input, custom_instruction=custom_instruction)
 
     def _call_gemini_fallback(self, history: List[Dict[str, str]], current_input: str, custom_instruction: Optional[str] = None) -> Optional[str]:
@@ -629,26 +672,25 @@ class CyberTurikovService:
             target_name = "саня рижий"
 
         options = [
+            ["@cyber_red_head_bot @bodya_qq @twdht @davvidka1 @vad1mk4k пішли в столову номер 1 борщик поїмо", "там найс прайс не дорого, я ще дуже хочу барабулю фрі для родини"],
+            ["@cyber_red_head_bot @bodya_qq @twdht @davvidka1 хто на південно-кільцевій щас?", "я на самокаті до формаркету підлітаю"],
+            ["@bodya_qq @twdht @davvidka1 @zelenskiy404 го в макдональдс або на майдан", "вітьок пішки йди на свою ламбу дивись здалеку"],
+            ["@cyber_red_head_bot @vad1mk4k @chernivtsizov1958 @mxsdt збирайтесь біля жовтневого парку", "хто замовк той пес"],
+            ["@davvidka1 @cyber_red_head_bot @bodya_qq давід веди в столову номер 1", "борщик поїмо там найс прайс, і барабулю фрі для родини"],
+            ["@cyber_red_head_bot @twdht @bodya_qq хто біля формаркету?", "чи ви всі на південно-кільцевій засіли?"],
             [f"{target_name} привіт пупсик"],
             [f"{target_name} скажи газ"],
-            ["будеш сьгодні гуляти"],
-            ["а хто буде гулять?"],
-            ["на площадці якраз в карти пограємо"],
-            [f"{target_name} я 5 мин и выхожу"],
             [f"{target_name} ти де"],
             ["лежу на кроваті"],
             ["тут пише Роналду гей"],
-            # Адресні підколи для Сані Рижого (без тегу - він чує через реплай)
+            # Адресні підколи для Сані Рижого
             ["рижий ти де"],
             ["шо там твій комп досі лагає?"],
             ["діджей куріл рулет привіт передавав"],
-            ["го на площадку в карти грати чи ти знов від печення ригаєш"],
             ["скажи газ"],
-            ["хєрня від молотока твій кс"],
-            ["шо там твій комп досі лагає?", "в мене компа нема і не лагає"],
+            ["рижий випий коли і заспокойся"],
             ["в мене компа нема нахуй він нада"],
-            ["комп для задротів, го в карти на площадки"],
-            # Адресні репліки кентів (БЕЗ @ ТЕГІВ!)
+            # Адресні репліки кентів
             ["богдан банан ха ха ха"],
             ["скажи газ"],
             ["бодя скажи будь ласка яка адреса шо шо біля парку Шевченка"],
@@ -656,12 +698,11 @@ class CyberTurikovService:
             ["діма буде в 4-5"],
             ["дімас здаров"],
             ["хомяк ти де"],
-            ["хомяк виходь"],
-            ["хомяк ти виходиш?"],
+            ["хомяк виходь на зв'язок"],
             ["шахов шо ти"],
             ["коля здаров"],
-            ["мишко ти йдеш гуляти?"],
-            ["@davvidka1 виходь гуляти, скільки підняв на фейсбуці?"],
+            ["мишко живий там?"],
+            ["@davvidka1 скільки сьогодні на фб підняв?"],
             ["@zelenskiy404 ти нахуя чужу ламбу на аву вліпив, з тебе вся 11 школа угарає"],
             ["@davvidka1 скажи цьому клоуну @zelenskiy404 чия то ламба"],
             ["@zelenskiy404 тебе тьолка кинула і ти плачеш у фейковій ламбі"],
@@ -740,15 +781,20 @@ class CyberTurikovService:
 
             if is_silence_break:
                 task_desc = (
-                    f"У чаті була бесіда, але всі замовкли півгодини тому: {convo}. "
-                    f"Ти Саня Туріков (з телефона, гуляєш на дворі). "
-                    f"Підхопи розмову, запитай що роблять або поклич гуляти на площадку. "
-                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок, рижий)! 1-5 слів. Без '!'"
+                    f"У чаті була бесіда, але всі замовкли: {convo}. "
+                    f"Ти Саня Туріков (з телефона на самокаті). "
+                    f"ПИЗДОШ ЖОРСТКО НЕЙМОВІРНО! ТЕГАЙ кентів пачками (2-5 пацанів одразу через @юзернейм: @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
+                    f"згадуй Чернівці: Південно-Кільцева, Майдан, Формаркет, Жовтневий парк, Макдональдс або Столова №1 (борщик поїсти, найс прайс не дорого, барабуля фрі для родини)! "
+                    f"(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
+                    f"{avoid_str}1-2 короткі пацанські репліки. Без '!'"
                 )
             else:
                 task_desc = (
                     f"Продовж останню розмову або підколи по темі: {convo}. "
-                    f"{avoid_str}СТРОГО БЕЗ @ ТЕГІВ (пиши звичайні імена: бодя, міша, вітьок, рижий)! Не повторюй однакових слів. 1-5 слів. Без '!'"
+                    f"ТЕГАЙ кентів пачками (2-5 пацанів одразу: @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
+                    f"згадуй Південно-Кільцеву, Майдан, Формаркет, Жовтневий парк, Мак або Столову №1 (борщик, найс прайс не дорого, барабуля фрі для родини)! "
+                    f"(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
+                    f"{avoid_str}1-2 короткі пацанські репліки. Без '!'"
                 )
 
             prompt = (
@@ -760,18 +806,38 @@ class CyberTurikovService:
 
             text = None
             if self._groq_clients:
-                try:
-                    completion = self._groq_client.chat.completions.create(
-                        model=self.model,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.92,
-                        max_tokens=60,
-                    )
-                    t = (completion.choices[0].message.content or "").strip()
-                    if t and not is_ai_refusal(t):
-                        text = t
-                except Exception:
-                    pass
+                preferred_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+                models_to_try = []
+                if self.model and self.model not in preferred_models:
+                    models_to_try.append(self.model)
+                for m in preferred_models:
+                    if m not in models_to_try:
+                        models_to_try.append(m)
+
+                client = self._groq_client
+                if client:
+                    for mod in models_to_try:
+                        try:
+                            extra_kwargs = {}
+                            if "oss" in mod.lower() or "reasoning" in mod.lower():
+                                extra_kwargs["extra_body"] = {"reasoning_effort": "low"}
+                                tok_limit = 280
+                            else:
+                                tok_limit = 80
+                            completion = client.chat.completions.create(
+                                model=mod,
+                                messages=[{"role": "user", "content": prompt}],
+                                temperature=0.92,
+                                max_tokens=tok_limit,
+                                **extra_kwargs
+                            )
+                            t = (completion.choices[0].message.content or "").strip()
+                            if t and not is_ai_refusal(t):
+                                text = t
+                                break
+                        except Exception as ge:
+                            logger.debug(f"[Turikov AI Spon Groq {mod}] {ge}")
+                            continue
 
             # Gemini fallback
             if not text:

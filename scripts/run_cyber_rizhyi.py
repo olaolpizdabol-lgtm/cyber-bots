@@ -732,21 +732,17 @@ async def inter_bot_bridge_worker(bot: Bot):
 
                     continue
 
-                # Б) Діалог з Санею Туріковим (@turikov_bot)
+                # Б) Діалог з Санею Туріковим (@turikov_bot) — НЕСКІНЧЕННИЙ ЖИВИЙ ДВІЖ
                 consecutive = ev.get("consecutive_count", 0)
-
-                # Дозволяємо живий діалог між ботами до 5 реплік
-                if consecutive >= 5:
-                    logger.info(f"Міжботовий міст (Рижий): ліміт діалогу ({consecutive}), пауза")
-                    continue
 
                 text_low = text.lower()
 
-                # Швидка та природна пауза (2.5-4.0 с думає, 1.0-1.8 с друкує)
-                await asyncio.sleep(random.uniform(2.5, 4.0))
+                # Природна пауза (якщо дуже довгий діалог — трохи більша пауза для захисту від флуду)
+                sleep_thinking = random.uniform(3.0, 5.5) if consecutive > 15 else random.uniform(2.5, 4.0)
+                await asyncio.sleep(sleep_thinking)
                 try:
                     await bot.send_chat_action(chat_id=chat_id, action="typing")
-                    await asyncio.sleep(random.uniform(1.0, 1.8))
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
                 except Exception:
                     pass
 
@@ -761,8 +757,13 @@ async def inter_bot_bridge_worker(bot: Bot):
                     reply_to_name="Саня Туріков",
                     custom_instruction=(
                         "Це репліка твого кента Сані Турікова у спільній групі. "
-                        "Активно підтримай діалог, підколи його за самокат, карти біля парку, тайстру, або разом підколіть когось із чату. "
-                        "Пиши 1 коротку живу пацанську фразу! Без '!'. Без уроків і школи."
+                        "Активно підтримуй нескінченний діалог, підколи його або разом підколіть когось із чату "
+                        "(Вітька @zelenskiy404 за чужу ламбу, Давіда @davvidka1 за фб чи Діму @twdht). "
+                        "Згадуй Південно-Кільцеву, Майдан, Формаркет, Жовтневий парк, Мак або Столову №1 "
+                        "(борщик поїсти, там найс прайс не дорого, барабуля фрі для родини)! "
+                        "Можеш тегати пацанів пачками (@bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404). "
+                        "(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
+                        "Пиши 1 коротку живу пацанську фразу! Без '!'."
                     )
                 )
 
@@ -783,8 +784,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                         await asyncio.sleep(random.uniform(0.7, 1.3))
                         sent_msg = await bot.send_message(chat_id=chat_id, text=rep)
 
-                # Продовжуємо бесіду: передаємо хід Турікову
-                if sent_msg and replies and consecutive < 5:
+                # Продовжуємо бесіду нескінченно: передаємо хід Турікову
+                if sent_msg and replies:
                     full_text = " ".join(replies)
                     enqueue_cyber_bot_event(
                         chat_id=chat_id,

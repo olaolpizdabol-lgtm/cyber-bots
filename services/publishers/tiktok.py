@@ -58,26 +58,49 @@ class TikTokPublisher(BasePublisher):
                 error="❌ Для TikTok обов'язково потрібен US/NY проксі (інакше алгоритми ріжуть перегляди)"
             )
 
-        try:
-            logger.info(f"TikTok публікація ({content_type.value}) через Creator Studio...")
+        import concurrent.futures
+
+        def _do_upload() -> PublishResult:
+            import shutil
             from playwright.sync_api import sync_playwright
             from config import DATA_DIR
             state_file = DATA_DIR / "tiktok_channel_state.json"
             proxy_cfg = proxy_manager.get_playwright_proxy()
 
+            chromium_bin = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
+            launch_kwargs = {
+                "headless": True,
+                "proxy": proxy_cfg,
+                "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+            }
+            if chromium_bin:
+                launch_kwargs["executable_path"] = chromium_bin
+
             with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    proxy=proxy_cfg,
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-                )
+                browser = p.chromium.launch(**launch_kwargs)
                 try:
                     context = browser.new_context(
                         storage_state=str(state_file) if state_file.exists() else None,
                         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                         viewport={"width": 1280, "height": 800}
                     )
+                    if not state_file.exists() and upload_session:
+                        try:
+                            context.add_cookies([
+                                {"name": "sessionid", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
+                                {"name": "sessionid_ss", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
+                            ])
+                            logger.info("TikTok: додано sessionid та sessionid_ss у браузер")
+                        except Exception as ce:
+                            logger.warning(f"TikTok: не вдалося додати sessionid cookies: {ce}")
+
                     page = context.new_page()
+                    try:
+                        from playwright_stealth import stealth_sync
+                        stealth_sync(page)
+                    except Exception:
+                        pass
+
                     page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
                     page.wait_for_timeout(4000)
 
@@ -100,12 +123,11 @@ class TikTokPublisher(BasePublisher):
                             page.wait_for_timeout(25000)
 
                     # 2.5. Закриваємо popup-модалки TikTok (content checks, new features тощо)
-                    # TikTok показує "Turn on automatic content checks?" — треба закрити перед вводом
                     for _ in range(4):
                         closed = False
                         for close_sel in [
-                            'button:has-text("Cancel")',           # "Turn on automatic content checks" → Cancel
-                            'button:has-text("Got it")',           # "New editing features" → Got it
+                            'button:has-text("Cancel")',
+                            'button:has-text("Got it")',
                             'button[aria-label="Close"]',
                             '[data-e2e="modal-close-btn"]',
                             '.TUXModal-overlay ~ * button:has-text("×")',
@@ -121,7 +143,6 @@ class TikTokPublisher(BasePublisher):
                                     break
                             except Exception:
                                 continue
-                        # Також пробуємо Escape
                         try:
                             overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
                             if overlay.count() > 0:
@@ -134,9 +155,8 @@ class TikTokPublisher(BasePublisher):
 
                     page.wait_for_timeout(1000)
                     # 3. Поле підпису — перебираємо кілька варіантів selectors
-                    # На step3 скрінші видно: div[role="combobox"][contenteditable="true"] (Draft.js)
                     caption_selectors = [
-                        'div[role="combobox"][contenteditable="true"]',          # Draft.js editor (реальний TikTok)
+                        'div[role="combobox"][contenteditable="true"]',
                         'div[data-e2e="upload-caption"] [contenteditable="true"]',
                         'div[class*="caption"] [contenteditable="true"]',
                         'div[contenteditable="true"][data-placeholder]',
@@ -147,10 +167,8 @@ class TikTokPublisher(BasePublisher):
                         cap_loc = page.locator(sel)
                         if cap_loc.count() > 0:
                             try:
-                                # force=True щоб обійти залишки overlay
                                 cap_loc.first.click(force=True)
                                 page.wait_for_timeout(500)
-                                # Очищаємо поле і вводимо підпис
                                 page.keyboard.press("Meta+a")
                                 page.keyboard.press("Control+a")
                                 page.keyboard.press("Backspace")
@@ -196,6 +214,12 @@ class TikTokPublisher(BasePublisher):
                 external_id="tt_uploaded_id",
                 url="https://www.tiktok.com/@bohdan.gpt"
             )
+
+        try:
+            logger.info(f"TikTok публікація ({content_type.value}) через Creator Studio...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_upload)
+                return future.result(timeout=180)
         except Exception as e:
             from core.security_guard import security_guard
             err_clean = security_guard.sanitize_error(str(e))

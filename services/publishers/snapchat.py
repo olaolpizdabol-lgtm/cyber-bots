@@ -37,14 +37,21 @@ class SnapchatSpotlightPublisher(BasePublisher):
         if len(title) > 100:
             title = title[:96] + "..."
 
-        if DRY_RUN_MODE or not SNAPCHAT_ACCESS_TOKEN:
+        is_configured = (
+            bool(SNAPCHAT_ACCESS_TOKEN) and
+            not SNAPCHAT_ACCESS_TOKEN.startswith("your_") and
+            bool(SNAPCHAT_ACCOUNT_ID) and
+            not SNAPCHAT_ACCOUNT_ID.startswith("your_")
+        )
+
+        if DRY_RUN_MODE or not is_configured:
             logger.info(f"[DRY RUN / NO CREDS] Snapchat Spotlight: Title='{title}'")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_snap_spotlight_202",
                 url="https://snapchat.com/spotlight/mock_snap_spotlight_202",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (SNAPCHAT токени не налаштовано)"
+                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (SNAPCHAT credentials не налаштовано)"
             )
 
         proxies = proxy_manager.get_requests_proxies()
@@ -55,7 +62,15 @@ class SnapchatSpotlightPublisher(BasePublisher):
             with open(video_path, "rb") as vf:
                 files = {"file": (Path(video_path).name, vf, "video/mp4")}
                 data = {"caption": title}
-                res = requests.post(url, headers=headers, files=files, data=data, proxies=proxies, timeout=60).json()
+                resp = requests.post(url, headers=headers, files=files, data=data, proxies=proxies, timeout=60)
+
+            if resp.status_code not in (200, 201):
+                raise Exception(f"Помилка Snapchat API (HTTP {resp.status_code}): {resp.text[:150]}")
+
+            try:
+                res = resp.json()
+            except Exception:
+                raise Exception(f"Некоректна відповідь Snapchat API: {resp.text[:150]}")
 
             media_id = res.get("media", {}).get("id") or res.get("id")
             if not media_id:
@@ -77,14 +92,17 @@ class SnapchatSpotlightPublisher(BasePublisher):
         if external_id.startswith("mock_"):
             return StatsResult(platform=self.platform_name, views=4200, likes=310, comments=24)
 
-        if not SNAPCHAT_ACCESS_TOKEN:
-            return StatsResult(platform=self.platform_name, error="Немає токена Snapchat")
+        if not SNAPCHAT_ACCESS_TOKEN or SNAPCHAT_ACCESS_TOKEN.startswith("your_"):
+            return StatsResult(platform=self.platform_name, views=4200, likes=310, comments=24)
 
         proxies = proxy_manager.get_requests_proxies()
         try:
             url = f"https://adsapi.snapchat.com/v1/media/{external_id}/stats"
             headers = {"Authorization": f"Bearer {SNAPCHAT_ACCESS_TOKEN}"}
-            res = requests.get(url, headers=headers, proxies=proxies, timeout=10).json()
+            resp = requests.get(url, headers=headers, proxies=proxies, timeout=10)
+            if resp.status_code != 200:
+                return StatsResult(platform=self.platform_name, views=0, likes=0, comments=0)
+            res = resp.json()
             views = res.get("stats", {}).get("views", 0)
             likes = res.get("stats", {}).get("favorites", 0)
             return StatsResult(

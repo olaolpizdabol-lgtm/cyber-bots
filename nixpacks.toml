@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ["python311", "ffmpeg"]
+nixPkgs = ["python311", "ffmpeg", "chromium"]
 
 [phases.install]
-cmds = ["python -m pip install --upgrade pip", "pip install -r requirements.txt"]
+cmds = ["python -m pip install --upgrade pip", "pip install -r requirements.txt", "playwright install chromium"]
+
+[variables]
+PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true"
 
 [start]
 cmd = "python run_all_bots.py"
