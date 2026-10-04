@@ -299,8 +299,8 @@ async def handle_media_group(message: Message, bot: Bot, album: Optional[List[Me
 # ---------------------------------------------------------
 
 def is_video_message(message: Message) -> bool:
-    """Визначає, чи є повідомлення відео (як медіа або як документ)"""
-    if message.video:
+    """Визначає, чи є повідомлення відео (як медіа, анімація, кружечок або документ)"""
+    if message.video or message.animation or message.video_note:
         return True
     if message.document:
         doc = message.document
@@ -308,7 +308,7 @@ def is_video_message(message: Message) -> bool:
         if mime.startswith("video/"):
             return True
         name = (doc.file_name or "").lower()
-        if name.endswith((".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".3gp", ".flv")):
+        if name.endswith((".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".3gp", ".flv", ".gif")):
             return True
     return False
 
@@ -331,12 +331,19 @@ def is_photo_message(message: Message) -> bool:
 @router.message(is_video_message)
 async def handle_video_upload(message: Message, bot: Bot):
     if not is_user_allowed(message.from_user.id):
+        logger.warning(f"Відео від неавторизованого користувача: {message.from_user.id}")
+        await message.answer(
+            f"⛔️ <b>Доступ обмежено.</b>\n"
+            f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n"
+            f"Додайте його у змінну <code>ALLOWED_TELEGRAM_USER_IDS</code> у Railway.",
+            parse_mode="HTML"
+        )
         return
 
     status_msg = await message.answer("⏳ <b>Відео отримано!</b> Завантажуємо та готуємо до аналізу...")
 
     try:
-        video_obj = message.video or message.document
+        video_obj = message.video or message.animation or message.video_note or message.document
         file_size = getattr(video_obj, "file_size", 0) or 0
         is_local_server = getattr(getattr(bot, "session", None), "api", None) and getattr(bot.session.api, "is_local", False)
         if file_size > 20 * 1024 * 1024 and not is_local_server:

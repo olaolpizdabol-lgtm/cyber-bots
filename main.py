@@ -25,6 +25,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+from aiogram import BaseMiddleware
+from aiogram.types import Update
+
+
+class UpdateLoggingMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event: Update, data):
+        if event.message:
+            m = event.message
+            u_id = m.from_user.id if m.from_user else "unknown"
+            u_name = m.from_user.username if m.from_user else ""
+            c_type = m.content_type
+            txt = (m.text or m.caption or "")[:80]
+            logger.info(f"📩 Вхідне Message від {u_id} (@{u_name}): {c_type}, txt={txt!r}, video={bool(m.video)}, photo={bool(m.photo)}, doc={bool(m.document)}")
+        elif event.callback_query:
+            cq = event.callback_query
+            u_id = cq.from_user.id if cq.from_user else "unknown"
+            logger.info(f"🔘 Вхідний Callback від {u_id}: data={cq.data!r}")
+        return await handler(event, data)
+
+
 async def main():
     from core.railway_sync import restore_sessions_from_env
     restore_sessions_from_env()
@@ -49,6 +69,9 @@ async def main():
     # Надійне офіційне підключення до Telegram Cloud API (100% доставка повідомлень)
     bot = Bot(token=token if token else "000000000:dummy")
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Логуємо всі вхідні оновлення для прозорої діагностики
+    dp.update.outer_middleware(UpdateLoggingMiddleware())
 
     # Реєструємо AlbumMiddleware для коректної обробки медіагруп (каруселей/альбомів)
     dp.message.middleware(AlbumMiddleware(latency=0.6))
