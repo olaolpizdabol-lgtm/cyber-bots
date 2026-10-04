@@ -752,46 +752,84 @@ class TikTokStreakService:
                             await chat_target.click(force=True)
                             await page.wait_for_timeout(2500)
     
-                            # Перевіряємо повідомлення у поточному відкритому чаті
-                            video_links = page.locator('a[href*="/video/"]')
-                            v_cnt = await video_links.count()
-                            if v_cnt == 0:
+                            # Перевіряємо повідомлення ТІЛЬКИ у вікні активного діалогу (div[class*="DivChatBox"]), а не в лівій колонці нотифікацій
+                            chat_box = page.locator('div[class*="DivChatBox"], div[data-e2e="chat-room"]')
+                            if await chat_box.count() == 0:
                                 continue
-    
-                            # Знаходимо останнє відео в чаті
-                            last_video_elem = video_links.last
-                            href = await last_video_elem.get_attribute("href")
-                            if not href:
+
+                            chat_items = chat_box.locator('div[data-e2e="dm-new-chat-item"]')
+                            item_count = await chat_items.count()
+                            if item_count == 0:
                                 continue
-    
-                            full_url = href if href.startswith("http") else f"https://www.tiktok.com{href}"
-    
-                            # Якщо вже реагували на це відео — пропускаємо
-                            if full_url in responded_urls:
+
+                            # Аналізуємо СТРОГО останнє повідомлення у діалозі (не реагуємо на старі повідомлення та власні відповіді)
+                            last_msg = chat_items.last
+                            msg_analysis = await last_msg.evaluate(
+                                """el => {
+                                    const text = el.innerText || '';
+                                    // 1. Перевірка чи повідомлення надіслано нами (Богданом)
+                                    const hasMyAvatar = !!el.querySelector('a[href*="/@flame.ai"]');
+                                    const hasYouReplied = text.includes("You replied");
+                                    const textContainer = el.querySelector('div[class*="DivTextContainer"]');
+                                    const isCyanBg = textContainer && window.getComputedStyle(textContainer).backgroundColor.includes("162, 201");
+                                    const isSelf = !!el.querySelector('[data-e2e*="self"], [class*="Self"], [class*="Right"]');
+
+                                    if (hasMyAvatar || hasYouReplied || isCyanBg || isSelf) {
+                                        return { isIncoming: false, hasVideo: false, reason: "outgoing" };
+                                    }
+
+                                    // 2. Перевірка чи це відео
+                                    const directLink = el.querySelector('a[href*="/video/"]');
+                                    const sharedVideo = el.querySelector('[data-e2e="dm-new-shared-video"]');
+
+                                    if (!directLink && !sharedVideo) {
+                                        return { isIncoming: true, hasVideo: false, reason: "not_a_video" };
+                                    }
+
+                                    const moreBtn = el.querySelector('[data-e2e="dm-new-more-btn"]');
+                                    const msgId = moreBtn ? moreBtn.id : null;
+                                    let videoUrl = directLink ? directLink.href : null;
+
+                                    return {
+                                        isIncoming: true,
+                                        hasVideo: true,
+                                        directUrl: videoUrl,
+                                        msgId: msgId,
+                                        isSharedCard: !!sharedVideo
+                                    };
+                                }"""
+                            )
+
+                            if not msg_analysis.get("isIncoming"):
+                                logger.debug(f"Останнє повідомлення у чаті @{user} надіслано нами. Реакція не потрібна.")
                                 continue
-    
-                            # Перевіряємо чи останнє повідомлення не надіслане НАМИ (якщо останній говорив я — не повторюємо)
-                            try:
-                                # Отримуємо батьківський елемент повідомлення та перевіряємо чи воно вирівняне вправо (наше)
-                                is_outgoing = await last_video_elem.evaluate(
-                                    """el => {
-                                        const parentMsg = el.closest('[data-e2e="chat-item"]') || el.closest('div[class*="Message"]');
-                                        if (!parentMsg) return false;
-                                        const style = window.getComputedStyle(parentMsg);
-                                        const parentStyle = window.getComputedStyle(parentMsg.parentElement || parentMsg);
-                                        return style.justifyContent === 'flex-end' || 
-                                               style.alignItems === 'flex-end' ||
-                                               parentStyle.justifyContent === 'flex-end' ||
-                                               parentMsg.className.includes('Right') ||
-                                               parentMsg.querySelector('[class*="AvatarRight"]') !== null;
-                                    }"""
-                                )
-                                if is_outgoing:
-                                    logger.info(f"Відео {full_url} надіслано нами (outgoing), реакція не потрібна.")
-                                    continue
-                            except Exception as eval_err:
-                                logger.debug(f"Перевірка is_outgoing: {eval_err}")
-    
+
+                            if not msg_analysis.get("hasVideo"):
+                                logger.debug(f"Останнє повідомлення від @{user} не є відео ({msg_analysis.get('reason')}). Реакція не потрібна.")
+                                continue
+
+                            full_url = msg_analysis.get("directUrl")
+                            if not full_url and msg_analysis.get("isSharedCard"):
+                                # Якщо це картка відео без прямого лінка - натискаємо на неї щоб отримати точний URL
+                                shared_elem = last_msg.locator('[data-e2e="dm-new-shared-video"]').first
+                                if await shared_elem.count() > 0:
+                                    try:
+                                        await shared_elem.click()
+                                        await page.wait_for_timeout(2000)
+                                        if "/video/" in page.url:
+                                            full_url = page.url
+                                            await page.go_back()
+                                            await page.wait_for_timeout(1500)
+                                    except Exception as nav_e:
+                                        logger.debug(f"Не вдалося відкрити картку відео: {nav_e}")
+
+                            if not full_url:
+                                msg_id = msg_analysis.get("msgId")
+                                if msg_id:
+                                    full_url = f"https://www.tiktok.com/msg/{msg_id}"
+
+                            if not full_url or full_url in responded_urls:
+                                continue
                             logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
     
                             # Генеруємо реакцію через Gemini AI (з урахуванням чи це дівчина)
