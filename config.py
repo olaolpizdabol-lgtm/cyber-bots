@@ -1,9 +1,20 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Завантажуємо змінні оточення
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    env_path = Path(__file__).resolve().parent / ".env"
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip("'\"")
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
 
 BASE_DIR = Path(__file__).resolve().parent
 
