@@ -30,9 +30,12 @@ class FacebookPublisher(BasePublisher):
         if len(caption) > 2000:
             caption = caption[:1996] + "..."
 
+        token = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", FB_PAGE_ACCESS_TOKEN).strip()
+        page_id = os.getenv("FACEBOOK_PAGE_ID", FB_PAGE_ID).strip()
+
         has_creds = bool(
-            FB_PAGE_ACCESS_TOKEN and not FB_PAGE_ACCESS_TOKEN.startswith("your_") and
-            FB_PAGE_ID and not FB_PAGE_ID.startswith("your_")
+            token and not token.startswith("your_") and
+            page_id and not page_id.startswith("your_")
         )
 
         if not has_creds and not DRY_RUN_MODE:
@@ -59,10 +62,10 @@ class FacebookPublisher(BasePublisher):
                 # Відео публікується у Facebook Reels
                 v_path = Path(media_paths[0])
                 file_size = v_path.stat().st_size
-                init_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/video_reels"
+                init_url = f"https://graph.facebook.com/v21.0/{page_id}/video_reels"
                 init_res = requests.post(
                     init_url,
-                    params={"access_token": FB_PAGE_ACCESS_TOKEN, "upload_phase": "start"},
+                    params={"access_token": token, "upload_phase": "start"},
                     proxies=proxies,
                     timeout=15
                 ).json()
@@ -76,14 +79,14 @@ class FacebookPublisher(BasePublisher):
                     video_data = f.read()
 
                 upload_headers = {
-                    "Authorization": f"OAuth {FB_PAGE_ACCESS_TOKEN}",
+                    "Authorization": f"OAuth {token}",
                     "offset": "0",
                     "file_size": str(file_size)
                 }
                 requests.post(upload_url, headers=upload_headers, data=video_data, proxies=proxies, timeout=60)
 
                 finish_data = {
-                    "access_token": FB_PAGE_ACCESS_TOKEN,
+                    "access_token": token,
                     "upload_phase": "finish",
                     "video_id": video_id,
                     "description": caption,
@@ -94,7 +97,7 @@ class FacebookPublisher(BasePublisher):
 
             elif content_type in (ContentType.PHOTO, ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
                 # Одиночне фото або альбом фото
-                photo_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/photos"
+                photo_url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
                 with open(media_paths[0], "rb") as pf:
                     res = requests.post(
                         photo_url,
