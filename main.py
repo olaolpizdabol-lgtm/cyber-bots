@@ -56,7 +56,7 @@ async def main():
     # Реєструємо хендлери
     dp.include_router(bot_router)
 
-    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.startswith("123456789:"):
+    if not token or token.startswith("123456789:"):
         logger.info(
             "Бот готовий до роботи. Для запуску Telegram опитування додайте валідний токен у .env."
         )

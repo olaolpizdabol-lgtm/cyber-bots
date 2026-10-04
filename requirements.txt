@@ -16,7 +16,6 @@ google-auth-httplib2>=0.1.1
 
 # Instagram (Mobile Private API Emulation - Anti-Ban)
 instagrapi>=2.1.3
-moviepy>=2.0.0
 
 # TikTok & Web Automation / Stealth
 requests>=2.31.0

@@ -615,24 +615,24 @@ def build_preview_text(post_id: int, c_type: ContentType, data: dict) -> str:
     )
 
     if c_type == ContentType.VIDEO:
-        text += f"🔴 <b>Shorts:</b> <code>{html.escape(yt_title)}</code> [{len(yt_title)}/100 симв]\n\n"
-        text += f"🟣 <b>Reels / TikTok / FB:</b> [{len(caption)}/2200 симв]\n<i>{html.escape(caption_preview)}</i>\n\n"
+        text += f"🔴 <b>Shorts:</b> «{html.escape(yt_title)}» <i>[{len(yt_title)}/100]</i>\n\n"
+        text += f"🟣 <b>Reels / TikTok / FB:</b> <i>[{len(caption)}/2200]</i>\n<i>{html.escape(caption_preview)}</i>\n\n"
         if tw_post:
-            text += f"𝕏 <b>X:</b> [{len(tw_post)}/240 симв] <code>{html.escape(tw_post[:100])}...</code>\n"
+            text += f"𝕏 <b>X:</b> <i>[{len(tw_post)}/240]</i>\n<i>{html.escape(tw_post[:120])}{'...' if len(tw_post) > 120 else ''}</i>\n\n"
         if th_post:
-            text += f"🧵 <b>Threads:</b> [{len(th_post)}/400 симв] <code>{html.escape(th_post[:100])}...</code>\n"
+            text += f"🧵 <b>Threads:</b> <i>[{len(th_post)}/400]</i>\n<i>{html.escape(th_post[:120])}{'...' if len(th_post) > 120 else ''}</i>\n\n"
         if bsky_post:
-            text += f"🦋 <b>Bluesky:</b> [{len(bsky_post)}/250 симв] <code>{html.escape(bsky_post[:100])}...</code>\n\n"
+            text += f"🦋 <b>Bluesky:</b> <i>[{len(bsky_post)}/250]</i>\n<i>{html.escape(bsky_post[:120])}{'...' if len(bsky_post) > 120 else ''}</i>\n\n"
     elif c_type in (ContentType.PHOTO, ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
-        text += f"📸 <b>Опис для Instagram, TikTok, Threads, FB:</b> [{len(caption)} симв]\n<i>{html.escape(caption_preview)}</i>\n\n"
+        text += f"📸 <b>Опис для Instagram, TikTok, Threads, FB:</b> <i>[{len(caption)} симв]</i>\n<i>{html.escape(caption_preview)}</i>\n\n"
         if tw_post:
-            text += f"𝕏 <b>X (Twitter):</b> [{len(tw_post)}/240 симв] <code>{html.escape(tw_post[:100])}...</code>\n"
+            text += f"𝕏 <b>X:</b> <i>[{len(tw_post)}/240]</i>\n<i>{html.escape(tw_post[:120])}{'...' if len(tw_post) > 120 else ''}</i>\n\n"
         if bsky_post:
-            text += f"🦋 <b>Bluesky:</b> [{len(bsky_post)}/250 симв] <code>{html.escape(bsky_post[:100])}...</code>\n\n"
+            text += f"🦋 <b>Bluesky:</b> <i>[{len(bsky_post)}/250]</i>\n<i>{html.escape(bsky_post[:120])}{'...' if len(bsky_post) > 120 else ''}</i>\n\n"
     elif c_type == ContentType.TEXT:
-        text += f"𝕏 <b>X (Twitter):</b> [{len(tw_post)}/240 симв]\n<code>{html.escape(tw_post)}</code>\n\n"
-        text += f"🧵 <b>Threads:</b> [{len(th_post)}/400 симв]\n<code>{html.escape(th_post)}</code>\n\n"
-        text += f"🦋 <b>Bluesky:</b> [{len(bsky_post)}/250 симв]\n<code>{html.escape(bsky_post)}</code>\n\n"
+        text += f"𝕏 <b>X:</b> <i>[{len(tw_post)}/240]</i>\n<i>{html.escape(tw_post)}</i>\n\n"
+        text += f"🧵 <b>Threads:</b> <i>[{len(th_post)}/400]</i>\n<i>{html.escape(th_post)}</i>\n\n"
+        text += f"🦋 <b>Bluesky:</b> <i>[{len(bsky_post)}/250]</i>\n<i>{html.escape(bsky_post)}</i>\n\n"
 
     if hashtags:
         text += f"🏷 <b>Хештеги:</b> {html.escape(hashtags)}\n\n"
@@ -864,10 +864,13 @@ async def format_and_send_publish_results(msg: Message, post_id: int, results: d
     for plat, res in results.items():
         icon = icons.get(plat, "🌐")
         if res.success:
-            link = f"<a href='{res.url}'>Переглянути</a>" if res.url else "OK"
-            text += f"{icon} <b>{res.platform}:</b> ✅ Успішно! {link}\n"
+            link = f"<a href='{res.url}'>Переглянути</a>" if res.url else "Опубліковано"
+            text += f"{icon} <b>{res.platform}:</b> ✅ Успішно! ({link})\n"
         else:
-            text += f"{icon} <b>{res.platform}:</b> ❌ <code>{html.escape(security_guard.sanitize_error(str(res.error)))}</code>\n"
+            err_msg = security_guard.sanitize_error(str(res.error or "Помилка"))
+            if len(err_msg) > 160:
+                err_msg = err_msg[:157] + "..."
+            text += f"{icon} <b>{res.platform}:</b> ❌ <i>{html.escape(err_msg)}</i>\n"
 
     await msg.edit_text(
         text,
