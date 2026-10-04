@@ -116,7 +116,7 @@ class GeminiService:
             for key in self.api_keys:
                 if key and not key.startswith("AIzaSyYour"):
                     try:
-                        c = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=10000))
+                        c = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=60000))
                         self._clients.append(c)
                     except Exception as e:
                         logger.error(f"Помилка створення Gemini клієнта: {e}")
@@ -151,18 +151,21 @@ class GeminiService:
         self,
         contents: Any,
         preferred_model: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        client_override: Optional[Any] = None
     ) -> Optional[Any]:
         """
         Універсальна відмовостійка генерація з ротацією ключів та каскадом моделей:
         1. Спробувати preferred_model (за замовчуванням gemini-3.5-flash).
-        2. Якщо 504 DEADLINE_EXCEEDED, 503 UNAVAILABLE чи 404 NOT_FOUND —
-           автоматично пробувати каскад: gemini-3.5-flash-lite -> gemini-3.8-flash -> gemini-3.1-flash-lite.
+        2. Якщо 504 DEADLINE_EXCEEDED, 503 UNAVAILABLE чи 404/403 —
+           автоматично пробувати каскад: gemini-3.8-flash -> gemini-3.5-flash-lite -> gemini-3.1-flash-lite.
         3. Якщо 429 RESOURCE_EXHAUSTED — ротувати ключ і повторити.
+        4. Якщо передано client_override (для завантажених файлів) — використовувати цей клієнт,
+           щоб уникнути помилки 403 PERMISSION_DENIED між різними API ключами.
         """
         target_model = preferred_model or self.model_name
         models_cascade = [target_model]
-        for alt in ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"]:
+        for alt in ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]:
             if alt not in models_cascade:
                 models_cascade.append(alt)
 
@@ -178,6 +181,24 @@ class GeminiService:
                 return None
 
         if not self._clients:
+            return None
+
+        # Якщо передано клієнт, який володіє завантаженим файлом (щоб не зловити 403 між ключами)
+        if client_override:
+            for m in models_cascade:
+                try:
+                    kwargs = {}
+                    if config:
+                        kwargs["config"] = config
+                    resp = client_override.models.generate_content(model=m, contents=contents, **kwargs)
+                    if resp and (getattr(resp, "text", None) or getattr(resp, "candidates", None)):
+                        return resp
+                except Exception as e:
+                    err_str = str(e)
+                    logger.warning(f"Gemini client_override ({m}) помилка: {err_str[:100]}")
+                    if "403" in err_str or "404" in err_str:
+                        continue
+                    continue
             return None
 
         max_key_attempts = len(self._clients)
@@ -289,6 +310,7 @@ class GeminiService:
 """
 
         uploaded_files = []
+        uploading_client = None
         try:
             contents = [system_instruction]
 
@@ -296,12 +318,13 @@ class GeminiService:
                 for p in media_paths:
                     if p.lower().endswith((".mp4", ".mov", ".mkv", ".avi")):
                         if getattr(self, "is_new_sdk", False) and self.client:
-                            v_file = self.client.files.upload(file=p)
+                            uploading_client = self.client
+                            v_file = uploading_client.files.upload(file=p)
                             while v_file.state == "PROCESSING":
                                 time.sleep(2)
-                                v_file = self.client.files.get(name=v_file.name)
+                                v_file = uploading_client.files.get(name=v_file.name)
                             contents.append(v_file)
-                            uploaded_files.append(v_file.name)
+                            uploaded_files.append((uploading_client, v_file.name))
                         else:
                             import google.generativeai as legacy_genai
                             v_file = legacy_genai.upload_file(path=p)
@@ -318,7 +341,8 @@ class GeminiService:
 
             response = self.generate_content(
                 contents=contents,
-                config={"response_mime_type": "application/json"}
+                config={"response_mime_type": "application/json"},
+                client_override=uploading_client
             )
             if not response or not getattr(response, "text", None):
                 raise RuntimeError("Gemini не повернув відповіді")
@@ -336,12 +360,11 @@ class GeminiService:
             logger.error(f"Помилка Gemini: {e}")
             return self._generate_fallback(content_type, raw_text)
         finally:
-            if getattr(self, "is_new_sdk", False) and self.client:
-                for fn in uploaded_files:
-                    try:
-                        self.client.files.delete(name=fn)
-                    except Exception:
-                        pass
+            for c_obj, fn in uploaded_files:
+                try:
+                    c_obj.files.delete(name=fn)
+                except Exception:
+                    pass
 
     def condense_text(
         self,

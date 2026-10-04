@@ -109,7 +109,7 @@ class FacebookPublisher(BasePublisher):
                 with open(media_paths[0], "rb") as pf:
                     res = _post(
                         photo_url,
-                        data={"caption": caption, "access_token": FB_PAGE_ACCESS_TOKEN},
+                        data={"caption": caption, "access_token": token},
                         files={"source": pf},
                         timeout=30
                     ).json()
@@ -118,10 +118,10 @@ class FacebookPublisher(BasePublisher):
 
             elif content_type == ContentType.TEXT:
                 # Текстовий пост на сторінку
-                feed_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/feed"
+                feed_url = f"https://graph.facebook.com/v21.0/{page_id}/feed"
                 res = _post(
                     feed_url,
-                    data={"message": caption, "access_token": FB_PAGE_ACCESS_TOKEN},
+                    data={"message": caption, "access_token": token},
                     timeout=15
                 ).json()
                 post_id = res.get("id")
@@ -131,7 +131,11 @@ class FacebookPublisher(BasePublisher):
 
         except Exception as e:
             from core.security_guard import security_guard
-            err_clean = security_guard.sanitize_error(str(e))
+            err_raw = str(e)
+            if "Session has expired" in err_raw or ("OAuthException" in err_raw and "190" in err_raw):
+                err_clean = "Facebook Access Token протерміновано (Session expired). Оновіть FACEBOOK_PAGE_ACCESS_TOKEN у Railway."
+            else:
+                err_clean = security_guard.sanitize_error(err_raw)
             logger.error(f"Помилка Facebook: {err_clean}")
             return PublishResult(success=False, platform=self.platform_name, error=err_clean)
 
