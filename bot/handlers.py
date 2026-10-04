@@ -267,7 +267,7 @@ async def handle_media_group(message: Message, bot: Bot, album: Optional[List[Me
 
     except Exception as e:
         logger.error(f"Помилка каруселі: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ <b>Помилка:</b> <code>{html.escape(security_guard.sanitize_error(str(e)))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Помилка:</b> <i>{html.escape(security_guard.sanitize_error(str(e)))}</i>", parse_mode="HTML")
 
 
 # ---------------------------------------------------------
@@ -348,7 +348,7 @@ async def handle_video_upload(message: Message, bot: Bot):
 
     except Exception as e:
         logger.error(f"Помилка обробки відео: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ <b>Помилка:</b> <code>{html.escape(security_guard.sanitize_error(str(e)))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Помилка:</b> <i>{html.escape(security_guard.sanitize_error(str(e)))}</i>", parse_mode="HTML")
 
 
 # ---------------------------------------------------------
@@ -438,7 +438,7 @@ async def handle_single_photo(message: Message, bot: Bot):
 
     except Exception as e:
         logger.error(f"Помилка фото: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ <b>Помилка:</b> <code>{html.escape(security_guard.sanitize_error(str(e)))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Помилка:</b> <i>{html.escape(security_guard.sanitize_error(str(e)))}</i>", parse_mode="HTML")
 
 
 # ---------------------------------------------------------
@@ -565,7 +565,7 @@ async def handle_text_post(message: Message):
         await send_prepared_preview(message, status_msg, data)
     except Exception as e:
         logger.error(f"Помилка текстового поста: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ <b>Помилка:</b> <code>{html.escape(security_guard.sanitize_error(str(e)))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Помилка:</b> <i>{html.escape(security_guard.sanitize_error(str(e)))}</i>", parse_mode="HTML")
 
 
 # ---------------------------------------------------------
@@ -732,7 +732,7 @@ async def callback_optimize_fix(call: CallbackQuery):
         )
     except Exception as e:
         logger.error(f"Помилка оптимізації відео: {e}")
-        await status_msg.edit_text(f"❌ Помилка оптимізації: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Помилка оптимізації:</b> <i>{html.escape(str(e))}</i>", parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("cond_menu:"))
@@ -848,7 +848,7 @@ async def callback_publish_single(call: CallbackQuery):
         await status_msg.edit_text(f"✅ <b>{plat_name}:</b> Успішно! {link}", parse_mode="HTML", disable_web_page_preview=True)
     else:
         err = res.error if res else "Помилка"
-        await status_msg.edit_text(f"❌ <b>{plat_name}:</b> <code>{html.escape(security_guard.sanitize_error(str(err)))}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>{plat_name}:</b> <i>{html.escape(security_guard.sanitize_error(str(err)))}</i>", parse_mode="HTML")
     await call.answer()
 
 

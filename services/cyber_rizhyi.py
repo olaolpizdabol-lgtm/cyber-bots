@@ -394,13 +394,13 @@ def get_dynamic_gang_shout(bot_name: str = "rizhyi", target_name: str = "кен�
     return random.choice(mixes)
 
 
-def clean_bot_reply(reply: str) -> str:
+def clean_bot_reply(reply: str, bot_persona: str = "") -> str:
     """
     Повне очищення згенерованої відповіді бота:
     - Зрізає сценарні префікси на зразок 'Саня Рижий (до Танєвський):'
     - Зрізає залишки імен 'Саня Рижий'
     - СТРОГО замінює чисті літературні слова ('знахабнів' -> 'ахуєл пес' / 'обнаглєл', 'вітос' -> 'вітьок')
-    - Зрізає всі '@' теги
+    - Зберігає реальні @теги кентів (не перетворює їх на 'я')
     - Зрізає знаки оклику '!'
     - Фільтрує цензурні слова (лушпиння, дзеркало, біоробот)
     """
@@ -502,8 +502,11 @@ def clean_bot_reply(reply: str) -> str:
         reply = re.sub(pattern, teen, reply, flags=re.IGNORECASE)
 
     # 3. Прибираємо тільки випадкові теги самого себе, а реальні @теги кентів ЗБЕРІГАЄМО
-    for self_tag in ["@la_coste228", "@cyber_red_head_bot"]:
-        reply = re.sub(re.escape(self_tag), "я", reply, flags=re.IGNORECASE)
+    if bot_persona == "rizhyi":
+        reply = re.sub(r'@(?:la_coste228|cyber_red_head_bot)\b', '', reply, flags=re.IGNORECASE)
+    elif bot_persona == "turikov":
+        reply = re.sub(r'@(?:turikov_bot|cyber_turikov_bot)\b', '', reply, flags=re.IGNORECASE)
+    reply = re.sub(r' {2,}', ' ', reply)
 
     # 4. Видаляємо знаки оклику '!'
     reply = reply.replace("!", "")

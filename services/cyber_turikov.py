@@ -225,6 +225,28 @@ class CyberTurikovService:
 
     def _get_smart_offline_reply(self, message_text: str, chat_id: int) -> str:
         txt_low = (message_text or "").lower()
+        if any(k in txt_low for k in ["танєвськ", "вусат", "hzsho"]):
+            return self._choose_fresh(chat_id, [
+                "@hzshopusati танєвський бери вуса і підвалюй",
+                "@hzshopusati вусатий бігом у столову номер 1 борщик стигне",
+                "@hzshopusati танєвський збрив вуса чи сциш",
+                "танєвський шо ти там біля формаркету мутиш"
+            ])
+        if any(k in txt_low for k in ["столов", "борщ", "їст", "поїсти", "жрат", "барабул", "прайс"]):
+            return self._choose_fresh(chat_id, [
+                "го в столову номер 1 борщик поїмо там найс прайс не дорого",
+                "дуже хочу барабулю фрі для родини",
+                "в столовій номер 1 найс прайс за борщ, нащо той дорогий мак",
+                "підтягуйтесь у столову номер 1 борщ стигне"
+            ])
+        if any(k in txt_low for k in ["південно", "кільцев", "майдан", "формаркет", "жовтнев", "тайстр", "макдональдс"]):
+            return self._choose_fresh(chat_id, [
+                "я на самокаті до формаркету підлітаю",
+                "хто на південно-кільцевій щас підтягуйтесь",
+                "го на майдан перетремо за справи",
+                "збирайтесь біля жовтневого парку, хто заснув той пес",
+                "нащо дорогий макдональдс, краще в столову номер 1"
+            ])
         if any(k in txt_low for k in ["богдан", "бодя", "банан"]):
             return self._choose_fresh(chat_id, [
                 "богдан банан ха ха ха",
@@ -232,12 +254,12 @@ class CyberTurikovService:
                 "бодя банан",
                 "хахаха богдан банан"
             ])
-        if any(k in txt_low for k in ["комп", "кс", "cs", "cs2", "ноут", "лагає", "фпс", "fps"]):
+        if any(k in txt_low for k in ["комп", "ноут", "лагає", "фпс", "fps"]):
             return self._choose_fresh(chat_id, [
                 "в мене компа нема нахуй він нада",
                 "комп для задротів",
-                "в мене нема компа я на вулиці гуляю",
-                "краще в карти на площадці зіграти ніж за компом сидіти"
+                "в мене нема компа я на вулиці ганяю на самокаті",
+                "купи нормальний комп бомж"
             ])
         if "газ" in txt_low and len(txt_low) < 10:
             return self._choose_fresh(chat_id, ["ти унітаз", "газуй звідси", "газ у пол"])
@@ -263,10 +285,9 @@ class CyberTurikovService:
                 "шо шо",
                 "на шошо підійди"
             ])
-        if "карти" in txt_low or "площадк" in txt_low:
+        if "карти" in txt_low:
             return self._choose_fresh(chat_id, [
-                "на площадці якраз в карти пограємо",
-                "го в карти на площадку",
+                "біля тайстри в карти розпишемо",
                 "я карти взяв",
                 "хто в карти буде"
             ])
@@ -279,8 +300,9 @@ class CyberTurikovService:
             ])
         if "гуляти" in txt_low or "хто гуляє" in txt_low:
             return self._choose_fresh(chat_id, [
-                "а хто буде гулять?",
-                "будеш сьгодні гуляти",
+                "я на самокаті біля формаркету",
+                "краще в столову номер 1 борщик поїсти",
+                "хто на південно-кільцевій підтягуйтесь",
                 "я 5 мин и выхожу"
             ])
         if "де ти" in txt_low or "ти де" in txt_low:
@@ -288,7 +310,7 @@ class CyberTurikovService:
                 "я на вул",
                 "лежу на кроваті",
                 "я ща буду іти додому",
-                "на площадці"
+                "до формаркету підлітаю на самокаті"
             ])
         return self._choose_fresh(chat_id, REAL_TURIKOV_REPLIES)
 
@@ -651,7 +673,7 @@ class CyberTurikovService:
         recent_users = get_recent_chat_users(chat_id, limit=8, exclude_bots=True)
         crew_names = [
             "бодя", "діма", "саня рижий", "хомяк", "коля", "міша", "давід",
-            "вітьок", "ілюха", "смолзі"
+            "вітьок", "танєвський", "ілюха", "смолзі"
         ]
         target_name = random.choice(crew_names)
         if recent_users and random.random() < 0.6:
@@ -661,7 +683,7 @@ class CyberTurikovService:
             tag_to_name = {
                 "twdht": "діма", "smo1zi": "саня туріков", "vad1mk4k": "хомяк",
                 "chernivtsizov1958": "коля", "mxsdt": "міша", "davvidka1": "давід",
-                "zelenskiy404": "вітьок", "for4ik333": "ілюха", "bodya_qq": "бодя",
+                "zelenskiy404": "вітьок", "hzshopusati": "танєвський", "for4ik333": "ілюха", "bodya_qq": "бодя",
                 "invicible11": "тімур", "la_coste228": "саня рижий"
             }
             if u in tag_to_name:
@@ -682,6 +704,9 @@ class CyberTurikovService:
             ["@cyber_red_head_bot @vad1mk4k @chernivtsizov1958 @mxsdt збирайтесь біля жовтневого парку", "хто замовк той пес"],
             ["@davvidka1 @cyber_red_head_bot @bodya_qq давід веди в столову номер 1", "борщик поїмо там найс прайс, і барабулю фрі для родини"],
             ["@cyber_red_head_bot @twdht @bodya_qq хто біля формаркету?", "чи ви всі на південно-кільцевій засіли?"],
+            ["@hzshopusati @cyber_red_head_bot @bodya_qq танєвський бери вуса і підвалюй", "ми в столовій номер 1 барабулю фрі чекаємо"],
+            ["@hzshopusati @twdht @davvidka1 вусатий ти де подівся?", "бігом у столову номер 1 борщик стигне"],
+            ["@hzshopusati танєвський шо ти біля формаркету мутиш?", "збрив вуса чи сциш підійти?"],
             [f"{target_name} привіт пупсик"],
             [f"{target_name} скажи газ"],
             [f"{target_name} ти де"],
@@ -738,7 +763,12 @@ class CyberTurikovService:
             full_txt = " ".join(opt)
             if not any(t in full_txt for t in recent_tags[-3:]):
                 valid_options.append(opt)
-        chosen = random.choice(valid_options if valid_options else options)
+
+        # 60% часу - динамічний мікс із 2-5 кентів, локацій Чернівців та Столової №1
+        if random.random() < 0.60:
+            chosen = get_dynamic_gang_shout(bot_name="turikov", target_name=target_name)
+        else:
+            chosen = random.choice(valid_options if valid_options else options)
         clean_chosen = [clean_bot_reply(s) for s in chosen if clean_bot_reply(s)]
         return clean_chosen, target_name
 
@@ -787,16 +817,16 @@ class CyberTurikovService:
                 task_desc = (
                     f"У чаті була бесіда, але всі замовкли: {convo}. "
                     f"Ти Саня Туріков (з телефона на самокаті). "
-                    f"ПИЗДОШ ЖОРСТКО НЕЙМОВІРНО! ТЕГАЙ кентів пачками (2-5 пацанів одразу через @юзернейм: @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
-                    f"згадуй Чернівці: Південно-Кільцева, Майдан, Формаркет, Жовтневий парк, Макдональдс або Столова №1 (борщик поїсти, найс прайс не дорого, барабуля фрі для родини)! "
+                    f"ПИЗДОШ ЖОРСТКО НЕЙМОВІРНО! ТЕГАЙ кентів пачками (2-5 пацанів одразу через @юзернейм: @hzshopusati, @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
+                    f"згадуй Чернівці: Південно-Кільцева, Майдан, Формаркет, Жовтневий парк, Макдональдс або Столова №1 (борщик поїсти, найс прайс не дорого, барабуля фрі для родини), клич Танєвського (@hzshopusati)! "
                     f"(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
                     f"{avoid_str}1-2 короткі пацанські репліки. Без '!'"
                 )
             else:
                 task_desc = (
                     f"Продовж останню розмову або підколи по темі: {convo}. "
-                    f"ТЕГАЙ кентів пачками (2-5 пацанів одразу: @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
-                    f"згадуй Південно-Кільцеву, Майдан, Формаркет, Жовтневий парк, Мак або Столову №1 (борщик, найс прайс не дорого, барабуля фрі для родини)! "
+                    f"ТЕГАЙ кентів пачками (2-5 пацанів одразу: @hzshopusati, @cyber_red_head_bot, @bodya_qq, @twdht, @davvidka1, @vad1mk4k, @zelenskiy404), "
+                    f"згадуй Південно-Кільцеву, Майдан, Формаркет, Жовтневий парк, Мак або Столову №1 (борщик, найс прайс не дорого, барабуля фрі для родини), клич вусатого Танєвського! "
                     f"(СТРОГО ЗАБОРОНЕНО спамити про кс чи прогулянки/площадки!) "
                     f"{avoid_str}1-2 короткі пацанські репліки. Без '!'"
                 )
