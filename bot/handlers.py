@@ -282,7 +282,8 @@ async def handle_video_upload(message: Message, bot: Bot):
     try:
         video_obj = message.video or message.document
         file_size = getattr(video_obj, "file_size", 0) or 0
-        if file_size > 20 * 1024 * 1024:
+        is_local_server = getattr(getattr(bot, "session", None), "api", None) and getattr(bot.session.api, "is_local", False)
+        if file_size > 20 * 1024 * 1024 and not is_local_server:
             size_mb = file_size / (1024 * 1024)
             await status_msg.edit_text(
                 f"⚠️ <b>Відео завелике ({size_mb:.1f} МБ)!</b>\n\n"

@@ -45,7 +45,10 @@ async def main():
             "або обидва боти разом через 'python run_all_bots.py'."
         )
 
-    bot = Bot(token=token if token else "000000000:dummy")
+    from core.local_telegram_server import local_tg_server
+    local_session = await local_tg_server.start_server_if_configured()
+
+    bot = Bot(token=token if token else "000000000:dummy", session=local_session)
     dp = Dispatcher(storage=MemoryStorage())
 
     # Реєструємо AlbumMiddleware для коректної обробки медіагруп (каруселей/альбомів)

@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     playwright install chromium
 
+# Офіційний бінарний сервер telegram-bot-api (підтримка файлів до 2 ГБ прямо в чаті)
+COPY --from=aiogram/telegram-bot-api:latest /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
+
 COPY . .
 
 RUN mkdir -p data downloads temp credentials
