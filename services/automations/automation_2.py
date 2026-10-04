@@ -251,8 +251,32 @@ class TikTokStreakService:
     async def _send_via_playwright(self, username: str, message_text: str, session_id: str) -> Tuple[bool, Optional[str]]:
         """
         Автоматизована відправка Direct Message через Playwright Chromium у фоновому браузері.
-        Використовує async_playwright для сумісності з asyncio event loop бота.
+        Підтримує авто-перемикання на пряме з'єднання при збоях проксі тунелю.
         """
+        configured_proxy = proxy_manager.get_playwright_proxy()
+        proxy_configs = [configured_proxy, None] if configured_proxy else [None]
+
+        last_err = None
+        for p_cfg in proxy_configs:
+            try:
+                success, err = await self._send_single_dm_attempt(username, message_text, session_id, p_cfg)
+                if success:
+                    return True, None
+                last_err = err
+                if p_cfg is not None and any(w in str(err).lower() for w in ["tunnel", "proxy", "connection", "err_"]):
+                    logger.warning(f"Проксі не зміг підключитися ({err}). Автоматично перемикаємо на пряме з'єднання...")
+                    continue
+                return False, err
+            except Exception as e:
+                last_err = str(e)
+                if p_cfg is not None:
+                    logger.warning(f"Збій проксі ({e}), пробуємо пряме з'єднання...")
+                    continue
+                return False, last_err
+
+        return False, last_err
+
+    async def _send_single_dm_attempt(self, username: str, message_text: str, session_id: str, proxy_cfg: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
@@ -263,8 +287,6 @@ class TikTokStreakService:
             has_stealth = True
         except ImportError:
             has_stealth = False
-
-        proxy_cfg = proxy_manager.get_playwright_proxy()
 
         try:
             async with async_playwright() as p:
@@ -279,21 +301,11 @@ class TikTokStreakService:
                     "--no-first-run",
                     "--no-default-browser-check"
                 ]
-                try:
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        proxy=proxy_cfg,
-                        args=launch_args
-                    )
-                except Exception as launch_err:
-                    if proxy_cfg:
-                        logger.warning(f"Помилка запуску Chromium з проксі ({launch_err}), пробуємо без проксі...")
-                        browser = await p.chromium.launch(
-                            headless=True,
-                            args=launch_args
-                        )
-                    else:
-                        raise
+                browser = await p.chromium.launch(
+                    headless=True,
+                    proxy=proxy_cfg,
+                    args=launch_args
+                )
 
                 try:
                     state_file = DATA_DIR / "tiktok_state.json"
