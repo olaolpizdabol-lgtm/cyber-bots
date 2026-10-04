@@ -271,10 +271,40 @@ async def handle_media_group(message: Message, bot: Bot, album: Optional[List[Me
 
 
 # ---------------------------------------------------------
-# 2. ОБРОБКА ВІДЕО (ВЕРТИКАЛЬНИХ РОЛИКІВ)
+# 2. ОБРОБКА ВІДЕО (ВЕРТИКАЛЬНИХ РОЛИКІВ ТА ДОКУМЕНТІВ)
 # ---------------------------------------------------------
 
-@router.message(F.video | (F.document & F.document.mime_type.startswith("video/")))
+def is_video_message(message: Message) -> bool:
+    """Визначає, чи є повідомлення відео (як медіа або як документ)"""
+    if message.video:
+        return True
+    if message.document:
+        doc = message.document
+        mime = (doc.mime_type or "").lower()
+        if mime.startswith("video/"):
+            return True
+        name = (doc.file_name or "").lower()
+        if name.endswith((".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".3gp", ".flv")):
+            return True
+    return False
+
+
+def is_photo_message(message: Message) -> bool:
+    """Визначає, чи є повідомлення фото (як медіа або як документ)"""
+    if message.photo:
+        return True
+    if message.document:
+        doc = message.document
+        mime = (doc.mime_type or "").lower()
+        if mime.startswith("image/"):
+            return True
+        name = (doc.file_name or "").lower()
+        if name.endswith((".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp")):
+            return True
+    return False
+
+
+@router.message(is_video_message)
 async def handle_video_upload(message: Message, bot: Bot):
     if not is_user_allowed(message.from_user.id):
         return
@@ -293,7 +323,7 @@ async def handle_video_upload(message: Message, bot: Bot):
                 f"💡 <b>Як надіслати:</b>\n"
                 f"1. <b>Надішліть як звичайне «Відео», а не як «Файл/Документ»:</b>\n"
                 f"   При виборі як медіа/відео Telegram сам оптимізує ролик до ~8–12 МБ зі збереженням якості!\n"
-                f"2. Або стисніть/експортуйте відео з бітрейтом до 20 МБ.\n"
+                f"2. Або скиньте посилання (Google Drive / Dropbox / direct URL) прямо сюди в чат.\n"
                 f"3. Або натисніть <b>«🔄 Взяти останнє відео з бази і запостити»</b>, щоб протестувати публікацію прямо зараз!",
                 parse_mode="HTML"
             )
@@ -302,7 +332,11 @@ async def handle_video_upload(message: Message, bot: Bot):
         file_id = video_obj.file_id
         file_info = await bot.get_file(file_id)
 
-        file_ext = Path(file_info.file_path).suffix or ".mp4"
+        file_ext = Path(file_info.file_path or "").suffix or ""
+        if not file_ext or len(file_ext) > 5:
+            doc_name = getattr(video_obj, "file_name", "") or ""
+            file_ext = Path(doc_name).suffix or ".mp4"
+
         local_filename = f"vid_{message.from_user.id}_{message.message_id}{file_ext}"
         local_path = DOWNLOADS_DIR / local_filename
 
@@ -321,7 +355,7 @@ async def handle_video_upload(message: Message, bot: Bot):
 # 3. ОБРОБКА ОДИНОЧНОГО ФОТО
 # ---------------------------------------------------------
 
-@router.message(F.photo | (F.document & F.document.mime_type.startswith("image/")))
+@router.message(is_photo_message)
 async def handle_single_photo(message: Message, bot: Bot):
     # 1. Якщо це повідомлення в групі - Кібер Рижий аналізує через Gemini та відповідає!
     if message.chat.type in ("group", "supergroup"):

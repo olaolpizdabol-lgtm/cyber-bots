@@ -46,10 +46,8 @@ async def main():
             "або обидва боти разом через 'python run_all_bots.py'."
         )
 
-    from core.local_telegram_server import local_tg_server
-    local_session = await local_tg_server.start_server_if_configured()
-
-    bot = Bot(token=token if token else "000000000:dummy", session=local_session)
+    # Надійне офіційне підключення до Telegram Cloud API (100% доставка повідомлень)
+    bot = Bot(token=token if token else "000000000:dummy")
     dp = Dispatcher(storage=MemoryStorage())
 
     # Реєструємо AlbumMiddleware для коректної обробки медіагруп (каруселей/альбомів)
@@ -131,7 +129,7 @@ async def main():
     scheduler_task = asyncio.create_task(streak_scheduler_background_task())
 
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(drop_pending_updates=False)
         await dp.start_polling(bot)
     finally:
         scheduler_task.cancel()

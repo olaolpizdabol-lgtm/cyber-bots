@@ -825,7 +825,7 @@ async def main():
     logger.info(f"🚀 Бот «Кібер Рижий» (@{bot_info.username}) успішно запущено!")
     logger.info(f"⚡ Модель: {cyber_rizhyi_service.model} | Пам'ять: активна | Відповідати на всі: {CYBER_RIZHYI_RESPOND_ALL_GROUP_MSGS}")
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(drop_pending_updates=False)
     # Передзавантаження аватарок відомих учасників чату при старті (фон, не блокує)
     asyncio.ensure_future(preload_known_avatars(bot))
     worker_task = asyncio.create_task(spontaneous_rizhyi_worker(bot))

@@ -29,6 +29,21 @@ logging.basicConfig(
 logger = logging.getLogger("multi_bot_runner")
 
 
+async def run_supervised(name: str, coroutine_func):
+    """Супервізор: перезапускає бота при збоях, не даючи впасти іншим ботам"""
+    while True:
+        try:
+            logger.info(f"▶️ Запуск {name}...")
+            await coroutine_func()
+            logger.info(f"ℹ️ {name} завершив роботу коректно.")
+            break
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"❌ Збій у {name}: {e}. Перезапуск через 5 сек...", exc_info=True)
+            await asyncio.sleep(5)
+
+
 async def run_both():
     from core.railway_sync import restore_sessions_from_env
     restore_sessions_from_env()
@@ -45,19 +60,19 @@ async def run_both():
 
     if ch_valid:
         logger.info("✅ Запуск Бота 1: «Канал Автоматизація» (TikTok Вогники, автопостинг)...")
-        tasks.append(asyncio.create_task(channel_main_module.main()))
+        tasks.append(asyncio.create_task(run_supervised("«Канал Автоматизація»", channel_main_module.main)))
     else:
         logger.warning("⚠️ Бот 1 («Канал Автоматизація»): Токен не вказано або є тестовим. Пропускаємо.")
 
     if rz_valid:
         logger.info("✅ Запуск Бота 2: «Кібер Рижий»...")
-        tasks.append(asyncio.create_task(rizhyi_main_module.main()))
+        tasks.append(asyncio.create_task(run_supervised("«Кібер Рижий»", rizhyi_main_module.main)))
     else:
         logger.warning("⚠️ Бот 2 («Кібер Рижий»): CYBER_RIZHYI_BOT_TOKEN не вказано або є тестовим. Пропускаємо.")
 
     if tk_valid:
         logger.info("✅ Запуск Бота 3: «Кібер Саня Туріков»...")
-        tasks.append(asyncio.create_task(turikov_main_module.main()))
+        tasks.append(asyncio.create_task(run_supervised("«Кібер Саня Туріков»", turikov_main_module.main)))
     else:
         logger.warning("⚠️ Бот 3 («Кібер Саня Туріков»): CYBER_TURIKOV_BOT_TOKEN не вказано. Пропускаємо.")
 
@@ -72,7 +87,7 @@ async def run_both():
         return
 
     logger.info(f"🚀 Запущено {len(tasks)} автоматизацій паралельно.")
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
