@@ -160,15 +160,24 @@ class TikTokPublisher(BasePublisher):
                                 except Exception:
                                     page.wait_for_timeout(15000)
 
-                            # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо)
+                            # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо) та joyride overlay
                             for _ in range(6):
                                 dismissed = False
+                                try:
+                                    # Видаляємо joyride onboarding tour overlays, які можуть перехоплювати кліки
+                                    page.evaluate("""() => {
+                                        document.querySelectorAll('#react-joyride-portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => el.remove());
+                                    }""")
+                                except Exception:
+                                    pass
+
                                 for scope in [target_scope, page]:
                                     for btn_text in [
                                         "Turn on", "Увімкнути",
                                         "Got it", "Зрозуміло",
                                         "Cancel", "Скасувати",
                                         "Close", "Закрити",
+                                        "Skip", "Пропустити",
                                         "Not now", "Не зараз"
                                     ]:
                                         loc = scope.locator(f'button:has-text("{btn_text}")')
@@ -220,7 +229,10 @@ class TikTokPublisher(BasePublisher):
                                             page.keyboard.type(caption[:2000], delay=15)
                                             page.wait_for_timeout(500)
                                             page.keyboard.press("Space")
-                                            page.wait_for_timeout(800)
+                                            page.wait_for_timeout(400)
+                                            # Закриваємо випадаюче меню автопідказки хештегів
+                                            page.keyboard.press("Escape")
+                                            page.wait_for_timeout(500)
                                             cap_typed = True
                                             logger.info("TikTok: опис успішно введено")
                                             break
