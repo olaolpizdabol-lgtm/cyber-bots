@@ -82,12 +82,22 @@ class TikTokPublisher(BasePublisher):
             for use_proxy in proxy_modes:
                 launch_kwargs = {
                     "headless": True,
-                    "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-software-rasterizer",
+                        "--no-zygote",
+                        "--mute-audio",
+                        "--disable-blink-features=AutomationControlled",
+                        "--renderer-process-limit=1",
+                        "--no-first-run",
+                        "--no-default-browser-check"
+                    ]
                 }
                 if use_proxy and proxy_cfg:
                     launch_kwargs["proxy"] = proxy_cfg
-                if chromium_bin:
-                    launch_kwargs["executable_path"] = chromium_bin
 
                 try:
                     with sync_playwright() as p:
@@ -118,43 +128,61 @@ class TikTokPublisher(BasePublisher):
                             page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
                             page.wait_for_timeout(4000)
 
-                            # 1. Завантажуємо файл
+                            # 1. Завантажуємо файл (перевіряємо головну сторінку та iframe)
+                            target_scope = page
                             file_input = page.locator('input[type="file"]')
+                            try:
+                                if file_input.count() == 0:
+                                    for frame in page.frames:
+                                        try:
+                                            f_inp = frame.locator('input[type="file"]')
+                                            if f_inp.count() > 0:
+                                                file_input = f_inp
+                                                target_scope = frame
+                                                break
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+
                             if file_input.count() > 0 and media_paths:
                                 file_input.first.set_input_files(media_paths[0])
                                 logger.info("TikTok: файл відео передано, чекаємо завершення обробки...")
 
-                                # 2. Чекаємо поки зникне прогрес-бар обробки (до 60 сек)
+                                # 2. Чекаємо поки зникне прогрес-бар обробки або з'явиться поле підпису
                                 try:
-                                    page.wait_for_selector(
+                                    target_scope.wait_for_selector(
                                         'div[contenteditable="true"][data-placeholder], '
                                         'div[class*="caption"] [contenteditable="true"], '
                                         'div[data-e2e="upload-caption"]',
-                                        timeout=60000
+                                        timeout=45000
                                     )
                                 except Exception:
-                                    page.wait_for_timeout(25000)
+                                    page.wait_for_timeout(15000)
 
                             # 2.5. Закриваємо popup-модалки TikTok
                             for _ in range(4):
                                 closed = False
-                                for close_sel in [
-                                    'button:has-text("Cancel")',
-                                    'button:has-text("Got it")',
-                                    'button[aria-label="Close"]',
-                                    '[data-e2e="modal-close-btn"]',
-                                    '.TUXModal-overlay ~ * button:has-text("×")',
-                                    'div[class*="modal"] button:has-text("×")',
-                                ]:
-                                    try:
-                                        modal_btn = page.locator(close_sel)
-                                        if modal_btn.count() > 0 and modal_btn.first.is_visible():
-                                            modal_btn.first.click(force=True)
-                                            page.wait_for_timeout(800)
-                                            closed = True
-                                            break
-                                    except Exception:
-                                        continue
+                                for scope in [target_scope, page]:
+                                    for close_sel in [
+                                        'button:has-text("Cancel")',
+                                        'button:has-text("Got it")',
+                                        'button[aria-label="Close"]',
+                                        '[data-e2e="modal-close-btn"]',
+                                        '.TUXModal-overlay ~ * button:has-text("×")',
+                                        'div[class*="modal"] button:has-text("×")',
+                                    ]:
+                                        try:
+                                            modal_btn = scope.locator(close_sel)
+                                            if modal_btn.count() > 0 and modal_btn.first.is_visible():
+                                                modal_btn.first.click(force=True)
+                                                page.wait_for_timeout(800)
+                                                closed = True
+                                                break
+                                        except Exception:
+                                            continue
+                                    if closed:
+                                        break
                                 try:
                                     overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
                                     if overlay.count() > 0:
@@ -174,34 +202,53 @@ class TikTokPublisher(BasePublisher):
                                 'div[contenteditable="true"][data-placeholder]',
                                 'div[contenteditable="true"]',
                             ]
-                            for sel in caption_selectors:
-                                cap_loc = page.locator(sel)
-                                if cap_loc.count() > 0:
+                            for scope in [target_scope, page]:
+                                cap_typed = False
+                                for sel in caption_selectors:
                                     try:
-                                        cap_loc.first.click(force=True)
-                                        page.wait_for_timeout(500)
-                                        page.keyboard.press("Meta+a")
-                                        page.keyboard.press("Control+a")
-                                        page.keyboard.press("Backspace")
-                                        page.keyboard.type(caption[:2000], delay=15)
-                                        page.wait_for_timeout(500)
-                                        page.keyboard.press("Space")
-                                        page.wait_for_timeout(800)
-                                        break
+                                        cap_loc = scope.locator(sel)
+                                        if cap_loc.count() > 0:
+                                            cap_loc.first.click(force=True)
+                                            page.wait_for_timeout(500)
+                                            page.keyboard.press("Meta+a")
+                                            page.keyboard.press("Control+a")
+                                            page.keyboard.press("Backspace")
+                                            page.keyboard.type(caption[:2000], delay=15)
+                                            page.wait_for_timeout(500)
+                                            page.keyboard.press("Space")
+                                            page.wait_for_timeout(800)
+                                            cap_typed = True
+                                            break
                                     except Exception:
                                         continue
+                                if cap_typed:
+                                    break
 
                             # 4. Натискаємо кнопку Post
-                            page.wait_for_timeout(1500)
-                            post_btn = page.locator(
-                                'button:has-text("Post"), '
-                                'button:has-text("Опублікувати"), '
-                                'button[data-e2e="post-button"]'
-                            )
-                            if post_btn.count() > 0:
-                                post_btn.first.click(force=True)
-                                logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
-                                page.wait_for_timeout(8000)
+                            page.wait_for_timeout(2000)
+                            for scope in [target_scope, page]:
+                                try:
+                                    post_btn = scope.locator(
+                                        'button:has-text("Post"), '
+                                        'button:has-text("Опублікувати"), '
+                                        'button[data-e2e="post-button"]'
+                                    )
+                                    if post_btn.count() > 0:
+                                        for _ in range(15):
+                                            try:
+                                                is_disabled = post_btn.first.get_attribute("disabled") is not None
+                                                if not is_disabled:
+                                                    break
+                                            except Exception:
+                                                pass
+                                            page.wait_for_timeout(2000)
+
+                                        post_btn.first.click(force=True)
+                                        logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
+                                        page.wait_for_timeout(8000)
+                                        break
+                                except Exception:
+                                    continue
 
                             if state_file.exists():
                                 try:
