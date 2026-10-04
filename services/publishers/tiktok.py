@@ -160,28 +160,32 @@ class TikTokPublisher(BasePublisher):
                                 except Exception:
                                     page.wait_for_timeout(15000)
 
-                            # 2.5. Закриваємо popup-модалки TikTok
-                            for _ in range(4):
-                                closed = False
+                            # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо)
+                            for _ in range(6):
+                                dismissed = False
                                 for scope in [target_scope, page]:
-                                    for close_sel in [
-                                        'button:has-text("Cancel")',
-                                        'button:has-text("Got it")',
-                                        'button[aria-label="Close"]',
-                                        '[data-e2e="modal-close-btn"]',
-                                        '.TUXModal-overlay ~ * button:has-text("×")',
-                                        'div[class*="modal"] button:has-text("×")',
+                                    for btn_text in [
+                                        "Turn on", "Увімкнути",
+                                        "Got it", "Зрозуміло",
+                                        "Cancel", "Скасувати",
+                                        "Close", "Закрити",
+                                        "Not now", "Не зараз"
                                     ]:
-                                        try:
-                                            modal_btn = scope.locator(close_sel)
-                                            if modal_btn.count() > 0 and modal_btn.first.is_visible():
-                                                modal_btn.first.click(force=True)
-                                                page.wait_for_timeout(800)
-                                                closed = True
-                                                break
-                                        except Exception:
-                                            continue
-                                    if closed:
+                                        loc = scope.locator(f'button:has-text("{btn_text}")')
+                                        for i in range(loc.count()):
+                                            try:
+                                                b = loc.nth(i)
+                                                if b.is_visible():
+                                                    logger.info(f"TikTok: закриваємо модалку кнопкою '{btn_text}'")
+                                                    b.click(force=True)
+                                                    page.wait_for_timeout(1000)
+                                                    dismissed = True
+                                                    break
+                                            except Exception:
+                                                continue
+                                        if dismissed:
+                                            break
+                                    if dismissed:
                                         break
                                 try:
                                     overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
@@ -190,7 +194,7 @@ class TikTokPublisher(BasePublisher):
                                         page.wait_for_timeout(600)
                                 except Exception:
                                     pass
-                                if not closed:
+                                if not dismissed:
                                     break
 
                             page.wait_for_timeout(1000)
@@ -218,6 +222,7 @@ class TikTokPublisher(BasePublisher):
                                             page.keyboard.press("Space")
                                             page.wait_for_timeout(800)
                                             cap_typed = True
+                                            logger.info("TikTok: опис успішно введено")
                                             break
                                     except Exception:
                                         continue
@@ -226,29 +231,48 @@ class TikTokPublisher(BasePublisher):
 
                             # 4. Натискаємо кнопку Post
                             page.wait_for_timeout(2000)
+                            post_clicked = False
                             for scope in [target_scope, page]:
                                 try:
+                                    # Пріоритет: точна первинна кнопка Post
                                     post_btn = scope.locator(
-                                        'button:has-text("Post"), '
-                                        'button:has-text("Опублікувати"), '
+                                        'button.Button__root--type-primary:has-text("Post"), '
+                                        'button.Button__root--type-primary:has-text("Опублікувати"), '
+                                        'button[data-e2e="post-button"]:has-text("Post"), '
                                         'button[data-e2e="post-button"]'
                                     )
-                                    if post_btn.count() > 0:
-                                        for _ in range(15):
+                                    if post_btn.count() == 0:
+                                        # Fallback перебір видимих кнопок
+                                        all_btns = scope.locator('button')
+                                        for i in range(all_btns.count()):
+                                            b = all_btns.nth(i)
+                                            if b.inner_text().strip() in ["Post", "Опублікувати"] and b.is_visible():
+                                                post_btn = b
+                                                break
+
+                                    if post_btn and post_btn.count() > 0:
+                                        for _ in range(20):
                                             try:
                                                 is_disabled = post_btn.first.get_attribute("disabled") is not None
                                                 if not is_disabled:
                                                     break
                                             except Exception:
                                                 pass
-                                            page.wait_for_timeout(2000)
+                                            page.wait_for_timeout(1500)
 
+                                        post_btn.first.scroll_into_view_if_needed()
+                                        page.wait_for_timeout(500)
                                         post_btn.first.click(force=True)
-                                        logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
-                                        page.wait_for_timeout(8000)
+                                        logger.info("TikTok: успішно натиснуто кнопку Post, очікуємо публікації...")
+                                        post_clicked = True
+                                        page.wait_for_timeout(10000)
                                         break
-                                except Exception:
+                                except Exception as e:
+                                    logger.warning(f"TikTok: помилка при пошуку кнопки Post: {e}")
                                     continue
+
+                            if not post_clicked:
+                                raise RuntimeError("Не вдалося знайти або натиснути кнопку Post у TikTok Studio")
 
                             if state_file.exists():
                                 try:
@@ -281,7 +305,7 @@ class TikTokPublisher(BasePublisher):
             logger.info(f"TikTok публікація ({content_type.value}) через Creator Studio...")
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_do_upload)
-                return future.result(timeout=180)
+                return future.result(timeout=240)
         except Exception as e:
             from core.security_guard import security_guard
             err_clean = security_guard.sanitize_error(str(e))
