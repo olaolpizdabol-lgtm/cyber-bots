@@ -23,6 +23,7 @@ from core.database import (
     get_recent_posts,
     get_last_published_post,
     update_post_metadata,
+    update_post_media_paths,
     get_streak_targets,
     get_girlfriend_target,
     set_girlfriend_target,
@@ -35,6 +36,7 @@ from core.database import (
     get_recent_tiktok_reactions
 )
 from core.security_guard import security_guard
+from core.media_processor import media_processor
 from services.gemini_ai import sanitize_typography, gemini_service, SEO_PROMPT_PRESETS
 from services.automations.auto_poster import (
     auto_poster,
@@ -502,7 +504,7 @@ async def handle_text_post(message: Message):
         status_msg = await message.answer("🌐 <b>Виявлено посилання на відео!</b> Завантажуємо на сервер (без лімітів Telegram)...", parse_mode="HTML")
         downloaded = download_video_from_url(text_content)
         if downloaded:
-            await status_msg.edit_text("🧠 <b>Відео завантажено!</b> FFmpeg стискає, Gemini 3.5 створює опис...", parse_mode="HTML")
+            await status_msg.edit_text("🧠 <b>Відео завантажено!</b> Перевіряємо якість, Gemini створює описи...", parse_mode="HTML")
             try:
                 data = auto_poster.process_incoming_video(downloaded)
                 await send_prepared_preview(message, status_msg, data)
@@ -533,8 +535,31 @@ async def handle_text_post(message: Message):
 
 
 # ---------------------------------------------------------
-# ВІДОБРАЖЕННЯ ПРЕВ'Ю ПЕРЕД ПУБЛІКАЦІЄЮ (З ПІДРАХУНКОМ СИМВОЛІВ)
+# ВІДОБРАЖЕННЯ ПРЕВ'Ю ПЕРЕД ПУБЛІКАЦІЄЮ (З ПЕРЕВІРКОЮ ПРОБЛЕМ)
 # ---------------------------------------------------------
+
+def get_video_path_from_data(data: dict) -> Optional[str]:
+    """Знаходить шлях до відеофайлу з даних або словника поста"""
+    for key in ("clean_video_path", "video_path"):
+        val = data.get(key)
+        if val and isinstance(val, str) and Path(val).exists():
+            return val
+    for list_key in ("media_paths", "media_paths_list"):
+        val = data.get(list_key)
+        if val and isinstance(val, list) and len(val) > 0:
+            if isinstance(val[0], str) and Path(val[0]).exists():
+                return val[0]
+    return None
+
+
+def check_post_issues(c_type: ContentType, data: dict) -> Dict[str, Any]:
+    """Перевіряє контент на технічні проблеми (тривалість < 3с, горизонтальний формат, кодек)"""
+    if c_type == ContentType.VIDEO:
+        v_path = get_video_path_from_data(data)
+        if v_path:
+            return media_processor.check_video_issues(v_path)
+    return {"issues": [], "has_issues": False, "info": {}}
+
 
 def build_preview_text(post_id: int, c_type: ContentType, data: dict) -> str:
     format_title = FORMAT_TITLES.get(c_type, "Контент")
@@ -576,22 +601,38 @@ def build_preview_text(post_id: int, c_type: ContentType, data: dict) -> str:
         text += f"🦋 <b>Bluesky:</b> [{len(bsky_post)}/250 симв]\n<code>{html.escape(bsky_post)}</code>\n\n"
 
     if hashtags:
-        text += f"🏷 <b>Хештеги:</b> {html.escape(hashtags)}\n"
+        text += f"🏷 <b>Хештеги:</b> {html.escape(hashtags)}\n\n"
 
-    text += "🛡 <b>Захист:</b> Метадані очищено, унікальний хеш, US/NY IP для чутливих мереж, дефіси '-' (без довгих тире).\n\n"
-    text += "👇 <b>Оберіть спосіб публікації або скоротіть текст:</b>"
+    # Перевірка на проблеми (без примусових спотворень контенту)
+    issues_res = check_post_issues(c_type, data)
+    issues = issues_res.get("issues", [])
+
+    if issues:
+        text += "⚠️ <b>Виявлено нюанси у відео:</b>\n"
+        for iss in issues:
+            text += f"• {iss}\n"
+        text += "\n❓ <b>Ви впевнені, що потрібно залити як є?</b>\n\n"
+        text += "👇 <b>Оберіть дію:</b> підтвердіть залив як є або натисніть «Оптимізувати»:"
+    else:
+        if c_type == ContentType.VIDEO:
+            text += "✅ <b>Перевірка якості:</b> 100% оригінальний файл (без втрати якості, 9:16 та H.264).\n\n"
+        else:
+            text += "✅ <b>Перевірка якості:</b> Оригінальні файли збережено без змін.\n\n"
+        text += "👇 <b>Оберіть спосіб публікації або скоротіть текст:</b>"
     return text
 
 
 async def send_prepared_preview(message: Message, status_msg: Message, data: dict):
     post_id = data["post_id"]
     c_type = data["content_type"]
+    issues_res = check_post_issues(c_type, data)
+    has_issues = issues_res.get("has_issues", False)
     text = build_preview_text(post_id, c_type, data)
 
     await status_msg.delete()
     await message.answer(
         text,
-        reply_markup=get_publish_keyboard(post_id, c_type),
+        reply_markup=get_publish_keyboard(post_id, c_type, has_issues=has_issues),
         parse_mode="HTML"
     )
 
@@ -603,17 +644,62 @@ async def send_post_preview_from_dict(message: Message, post: dict):
     except Exception:
         c_type = ContentType.VIDEO
 
+    issues_res = check_post_issues(c_type, post)
+    has_issues = issues_res.get("has_issues", False)
     text = build_preview_text(post_id, c_type, post)
     await message.answer(
         text,
-        reply_markup=get_publish_keyboard(post_id, c_type),
+        reply_markup=get_publish_keyboard(post_id, c_type, has_issues=has_issues),
         parse_mode="HTML"
     )
 
 
 # ---------------------------------------------------------
-# CALLBACKS: СКОРОЧЕННЯ ТЕКСТІВ (CONDENSATION)
+# CALLBACKS: СКОРОЧЕННЯ ТЕКСТІВ ТА ОПТИМІЗАЦІЯ ВІДЕО
 # ---------------------------------------------------------
+
+@router.callback_query(F.data.startswith("opt_fix:"))
+async def callback_optimize_fix(call: CallbackQuery):
+    """Обробник кнопки оптимізації при виявленні проблем у відео"""
+    post_id = int(call.data.split(":")[1])
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено", show_alert=True)
+        return
+
+    v_path = get_video_path_from_data(post)
+    if not v_path or not Path(v_path).exists():
+        await call.answer("Відеофайл не знайдено на сервері!", show_alert=True)
+        return
+
+    await call.answer("⏳ Оптимізуємо відео...", show_alert=False)
+    status_msg = await call.message.answer(
+        "🛠 <b>FFmpeg оптимізує відео за вашим запитом:</b>\n"
+        "• Масштабування до 1080x1920 (9:16)\n"
+        "• Чистий еталонний кодек H.264 / AAC\n"
+        "• Перевірка тривалості (>= 3с)...",
+        parse_mode="HTML"
+    )
+
+    try:
+        opt_path = media_processor.clean_and_prepare_video(v_path, force_optimize=True)
+        update_post_media_paths(post_id, opt_path, [opt_path])
+        media_processor.extract_thumbnail(opt_path)
+
+        updated_post = get_post_by_id(post_id)
+        c_type = ContentType.VIDEO
+        new_text = build_preview_text(post_id, c_type, updated_post)
+
+        await status_msg.delete()
+        await call.message.edit_text(
+            f"✨ <b>Відео успішно оптимізовано!</b> Усі нюанси виправлено (1080x1920, H.264).\n\n" + new_text,
+            reply_markup=get_publish_keyboard(post_id, c_type, has_issues=False),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Помилка оптимізації відео: {e}")
+        await status_msg.edit_text(f"❌ Помилка оптимізації: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
+
 
 @router.callback_query(F.data.startswith("cond_menu:"))
 async def callback_condense_menu(call: CallbackQuery):
@@ -642,8 +728,10 @@ async def callback_condense_single(call: CallbackQuery):
     except Exception:
         c_type = ContentType.VIDEO
 
+    issues_res = check_post_issues(c_type, updated_post)
+    has_issues = issues_res.get("has_issues", False)
     new_text = build_preview_text(post_id, c_type, updated_post)
-    await call.message.edit_text(new_text, reply_markup=get_publish_keyboard(post_id, c_type), parse_mode="HTML")
+    await call.message.edit_text(new_text, reply_markup=get_publish_keyboard(post_id, c_type, has_issues=has_issues), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("cond_all:"))
@@ -657,8 +745,10 @@ async def callback_condense_all(call: CallbackQuery):
     except Exception:
         c_type = ContentType.VIDEO
 
+    issues_res = check_post_issues(c_type, updated_post)
+    has_issues = issues_res.get("has_issues", False)
     new_text = build_preview_text(post_id, c_type, updated_post)
-    await call.message.edit_text(new_text, reply_markup=get_publish_keyboard(post_id, c_type), parse_mode="HTML")
+    await call.message.edit_text(new_text, reply_markup=get_publish_keyboard(post_id, c_type, has_issues=has_issues), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("back_pub:"))
@@ -674,8 +764,10 @@ async def callback_back_to_publish(call: CallbackQuery):
     except Exception:
         c_type = ContentType.VIDEO
 
+    issues_res = check_post_issues(c_type, post)
+    has_issues = issues_res.get("has_issues", False)
     text = build_preview_text(post_id, c_type, post)
-    await call.message.edit_text(text, reply_markup=get_publish_keyboard(post_id, c_type), parse_mode="HTML")
+    await call.message.edit_text(text, reply_markup=get_publish_keyboard(post_id, c_type, has_issues=has_issues), parse_mode="HTML")
     await call.answer()
 
 

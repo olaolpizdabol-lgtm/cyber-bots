@@ -364,6 +364,16 @@ def update_post_status(post_id: int, status: str):
         conn.commit()
 
 
+def update_post_media_paths(post_id: int, clean_video_path: str, media_paths: List[str]):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE posts SET clean_video_path = ?, video_path = ?, media_paths = ? WHERE id = ?",
+            (clean_video_path, clean_video_path, json.dumps(media_paths), post_id)
+        )
+        conn.commit()
+
+
 def update_post_platform_stats(post_id: int, platform: str, views: int, likes: int):
     view_col_map = {
         "youtube": ("yt_views", "yt_likes"),

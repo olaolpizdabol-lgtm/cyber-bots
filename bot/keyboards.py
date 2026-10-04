@@ -28,24 +28,40 @@ PLATFORM_EMOJIS = {
 }
 
 
-def get_publish_keyboard(post_id: int, content_type: ContentType) -> InlineKeyboardMarkup:
-    """Генерує клавіатуру публікації залежно від формату контенту"""
+def get_publish_keyboard(post_id: int, content_type: ContentType, has_issues: bool = False) -> InlineKeyboardMarkup:
+    """Генерує клавіатуру публікації залежно від формату контенту та наявності проблем"""
     supported = FORMAT_SUPPORTED_PLATFORMS.get(content_type, [])
     buttons = []
 
-    # Головна кнопка: публікація на всі сумісні платформи
-    buttons.append([
-        InlineKeyboardButton(
-            text=f"🚀 Опублікувати у всі сумісні ({len(supported)} платформ)",
-            callback_data=f"pub_compat:{post_id}"
-        )
-    ])
+    # Головна кнопка (з підтвердженням якщо виявлено проблему)
+    if has_issues:
+        buttons.append([
+            InlineKeyboardButton(
+                text="⚠️ Так, залити як є (у всі сумісні)",
+                callback_data=f"pub_compat:{post_id}"
+            )
+        ])
+        if content_type == ContentType.VIDEO:
+            buttons.append([
+                InlineKeyboardButton(
+                    text="🛠 Оптимізувати (1080x1920 / H.264)",
+                    callback_data=f"opt_fix:{post_id}"
+                )
+            ])
+    else:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🚀 Опублікувати у всі сумісні ({len(supported)} платформ)",
+                callback_data=f"pub_compat:{post_id}"
+            )
+        ])
 
     # Якщо це відео - додаємо швидку кнопку для Рівня 1 (Top 5)
     if content_type == ContentType.VIDEO:
+        top5_text = "🔥 Рівень 1 (як є: TT, IG, YT, FB, Snap)" if has_issues else "🔥 Рівень 1 (Top 5: TT, IG, YT, FB, Snap)"
         buttons.append([
             InlineKeyboardButton(
-                text="🔥 Рівень 1 (Top 5: TT, IG, YT, FB, Snap)",
+                text=top5_text,
                 callback_data=f"pub_tier1:{post_id}"
             )
         ])

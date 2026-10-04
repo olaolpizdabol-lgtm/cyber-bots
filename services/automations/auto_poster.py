@@ -274,10 +274,10 @@ class AutoPosterService:
             if not publisher:
                 continue
 
-            # 1. Захист від тіньового бану: рандомізований Jitter між викликами API різних мереж
+            # Невелика пауза між викликами API різних мереж
             if results:
-                jitter = random.uniform(2.0, 4.5)
-                logger.info(f"🛡 Anti-Shadowban Jitter: очікування {jitter:.2f} сек перед публікацією на {plat_key}...")
+                jitter = random.uniform(0.5, 1.0)
+                logger.info(f"Пауза {jitter:.2f} сек перед публікацією на {plat_key}...")
                 time.sleep(jitter)
 
             # 2. Pre-flight перевірка безпеки та IP (US/NY для чутливих мереж)

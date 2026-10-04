@@ -110,9 +110,9 @@ CYBER_RIZHYI_RESPOND_ALL_GROUP_MSGS = os.getenv("CYBER_RIZHYI_RESPOND_ALL_GROUP_
 CYBER_RIZHYI_BOT_TOKEN = os.getenv("CYBER_RIZHYI_BOT_TOKEN", "").strip()
 CYBER_TURIKOV_BOT_TOKEN = os.getenv("CYBER_TURIKOV_BOT_TOKEN", "").strip()
 
-# Anti-Detection & Safeguards
-ANTI_DETECTION_CLEANING = os.getenv("ANTI_DETECTION_CLEANING", "true").lower() in ("true", "1", "yes")
-STRICT_PROXY_CHECK = os.getenv("STRICT_PROXY_CHECK", "true").lower() in ("true", "1", "yes")
+# Anti-Detection & Safeguards (вимкнено за замовчуванням: контент заливається як є)
+ANTI_DETECTION_CLEANING = os.getenv("ANTI_DETECTION_CLEANING", "false").lower() in ("true", "1", "yes")
+STRICT_PROXY_CHECK = os.getenv("STRICT_PROXY_CHECK", "false").lower() in ("true", "1", "yes")
 DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "false").lower() in ("true", "1", "yes")
 
 # Database Path

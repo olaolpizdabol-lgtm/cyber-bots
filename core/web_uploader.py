@@ -220,7 +220,7 @@ async def handle_upload(request: web.Request) -> web.Response:
             try:
                 status_msg = await bot.send_message(
                     user_id,
-                    "🧠 <b>Відео отримано без лімітів!</b> FFmpeg нормалізує якість, Gemini 3.5 створює опис...",
+                    "🧠 <b>Відео отримано без лімітів!</b> Перевіряємо якість, Gemini 3.5 створює описи...",
                     parse_mode="HTML"
                 )
                 data = auto_poster.process_incoming_video(saved_path)
