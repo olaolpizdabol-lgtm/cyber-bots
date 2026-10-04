@@ -39,7 +39,14 @@ class LocalTelegramServerManager:
         return bool(self.api_id and self.api_hash and self.api_id.isdigit())
 
     def has_binary(self) -> bool:
-        return Path(self.binary_path).exists() and os.access(self.binary_path, os.X_OK)
+        p = Path(self.binary_path)
+        if p.exists():
+            try:
+                os.chmod(self.binary_path, 0o755)
+            except Exception:
+                pass
+            return True
+        return False
 
     async def start_server_if_configured(self) -> Optional[AiohttpSession]:
         if not self.is_configured():
