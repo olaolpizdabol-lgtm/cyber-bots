@@ -716,9 +716,9 @@ async def callback_optimize_fix(call: CallbackQuery):
     )
 
     try:
-        opt_path = media_processor.clean_and_prepare_video(v_path, force_optimize=True)
+        opt_path = await asyncio.to_thread(media_processor.clean_and_prepare_video, v_path, force_optimize=True)
         update_post_media_paths(post_id, opt_path, [opt_path])
-        media_processor.extract_thumbnail(opt_path)
+        await asyncio.to_thread(media_processor.extract_thumbnail, opt_path)
 
         updated_post = get_post_by_id(post_id)
         c_type = ContentType.VIDEO
