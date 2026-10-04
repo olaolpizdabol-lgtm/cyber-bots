@@ -656,206 +656,203 @@ class TikTokStreakService:
         existing_reactions = get_recent_tiktok_reactions(limit=200)
         responded_urls = {r.get("video_url") for r in existing_reactions if r.get("video_url")}
 
-        proxy_cfg = proxy_manager.get_playwright_proxy()
+        configured_proxy = proxy_manager.get_playwright_proxy()
+        proxy_configs = [configured_proxy, None] if configured_proxy else [None]
         processed = []
 
-        try:
-            async with async_playwright() as p:
-                launch_args = [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
-                    "--no-zygote",
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-first-run",
-                    "--no-default-browser-check"
-                ]
-                try:
+        for p_cfg in proxy_configs:
+            try:
+                async with async_playwright() as p:
+                    launch_args = [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-software-rasterizer",
+                        "--no-zygote",
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check"
+                    ]
                     browser = await p.chromium.launch(
                         headless=True,
-                        proxy=proxy_cfg,
+                        proxy=p_cfg,
                         args=launch_args
                     )
-                except Exception as launch_err:
-                    if proxy_cfg:
-                        logger.warning(f"Помилка запуску з проксі для реакцій ({launch_err}), пробуємо без проксі...")
-                        browser = await p.chromium.launch(
-                            headless=True,
-                            args=launch_args
-                        )
-                    else:
-                        raise
-                try:
-                    state_file = DATA_DIR / "tiktok_state.json"
-                    cookies_file = DATA_DIR / "tiktok_cookies.json"
-                    session_id = self.get_streaks_session_id()
+                    try:
+                        state_file = DATA_DIR / "tiktok_state.json"
+                        cookies_file = DATA_DIR / "tiktok_cookies.json"
+                        session_id = self.get_streaks_session_id()
 
-                    context_kwargs = {
-                        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                        "viewport": {"width": 1280, "height": 800},
-                        "locale": "uk-UA"
-                    }
-                    if state_file.exists():
-                        context_kwargs["storage_state"] = str(state_file)
+                        context_kwargs = {
+                            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                            "viewport": {"width": 1280, "height": 800},
+                            "locale": "uk-UA"
+                        }
+                        if state_file.exists():
+                            context_kwargs["storage_state"] = str(state_file)
 
-                    context = await browser.new_context(**context_kwargs)
+                        context = await browser.new_context(**context_kwargs)
 
-                    if cookies_file.exists():
+                        if cookies_file.exists():
+                            try:
+                                with open(cookies_file, "r", encoding="utf-8") as cf:
+                                    raw_cookies = json.load(cf)
+                                    if isinstance(raw_cookies, list):
+                                        await context.add_cookies(raw_cookies)
+                            except Exception:
+                                pass
+                        elif not state_file.exists() and session_id:
+                            await context.add_cookies([
+                                {"name": "sessionid", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
+                                {"name": "sessionid_ss", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
+                            ])
+
+                        page = await context.new_page()
+
+                        logger.info("Відкриваємо TikTok Messages для перевірки надісланих відео...")
                         try:
-                            with open(cookies_file, "r", encoding="utf-8") as cf:
-                                raw_cookies = json.load(cf)
-                                if isinstance(raw_cookies, list):
-                                    await context.add_cookies(raw_cookies)
+                            await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
+                        except Exception:
+                            await page.goto("https://www.tiktok.com/messages", timeout=40000)
+                        await page.wait_for_timeout(4000)
+
+                        KNOWN_DISPLAY_NAMES = {
+                            "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
+                            "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
+                            "davidka223": ["davidkaaa", "davidka223", "Давід"],
+                            "lesko.new": ["Лесько", "lesko.new", "lesko"],
+                            "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
+                            "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
+                        }
+    
+                        for target in targets:
+                            user = target["username"].lower()
+                            is_gf = bool(target.get("is_girlfriend"))
+                            nick = target.get("nickname") or user
+    
+                            aliases = KNOWN_DISPLAY_NAMES.get(user, [user])
+                            if nick and nick not in aliases:
+                                aliases.append(nick)
+    
+                            chat_target = None
+                            for alias in aliases:
+                                row = page.locator(f'div[data-e2e="dm-new-conversation-item"]:has-text("{alias}")')
+                                if await row.count() > 0:
+                                    chat_target = row.first
+                                    break
+                                loc = page.locator(f'text="{alias}", [href*="/{alias}"]')
+                                if await loc.count() > 0:
+                                    chat_target = loc.first
+                                    break
+    
+                            if not chat_target:
+                                continue
+    
+                            await chat_target.click(force=True)
+                            await page.wait_for_timeout(2500)
+    
+                            # Перевіряємо повідомлення у поточному відкритому чаті
+                            video_links = page.locator('a[href*="/video/"]')
+                            v_cnt = await video_links.count()
+                            if v_cnt == 0:
+                                continue
+    
+                            # Знаходимо останнє відео в чаті
+                            last_video_elem = video_links.last
+                            href = await last_video_elem.get_attribute("href")
+                            if not href:
+                                continue
+    
+                            full_url = href if href.startswith("http") else f"https://www.tiktok.com{href}"
+    
+                            # Якщо вже реагували на це відео — пропускаємо
+                            if full_url in responded_urls:
+                                continue
+    
+                            # Перевіряємо чи останнє повідомлення не надіслане НАМИ (якщо останній говорив я — не повторюємо)
+                            try:
+                                # Отримуємо батьківський елемент повідомлення та перевіряємо чи воно вирівняне вправо (наше)
+                                is_outgoing = await last_video_elem.evaluate(
+                                    """el => {
+                                        const parentMsg = el.closest('[data-e2e="chat-item"]') || el.closest('div[class*="Message"]');
+                                        if (!parentMsg) return false;
+                                        const style = window.getComputedStyle(parentMsg);
+                                        const parentStyle = window.getComputedStyle(parentMsg.parentElement || parentMsg);
+                                        return style.justifyContent === 'flex-end' || 
+                                               style.alignItems === 'flex-end' ||
+                                               parentStyle.justifyContent === 'flex-end' ||
+                                               parentMsg.className.includes('Right') ||
+                                               parentMsg.querySelector('[class*="AvatarRight"]') !== null;
+                                    }"""
+                                )
+                                if is_outgoing:
+                                    logger.info(f"Відео {full_url} надіслано нами (outgoing), реакція не потрібна.")
+                                    continue
+                            except Exception as eval_err:
+                                logger.debug(f"Перевірка is_outgoing: {eval_err}")
+    
+                            logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
+    
+                            # Генеруємо реакцію через Gemini AI (з урахуванням чи це дівчина)
+                            reaction_res = tiktok_reactions_service.process_tiktok_link(
+                                url=full_url,
+                                is_girlfriend=is_gf
+                            )
+                            reaction_text = reaction_res.get("reaction") or ("Ахаха це розрив 😂❤️" if is_gf else "одааа, чисто сігма мув 😎")
+    
+                            # Знаходимо поле вводу чату та надсилаємо реакцію
+                            chat_input = page.locator(
+                                'div.public-DraftEditor-content[contenteditable="true"], '
+                                '[data-e2e="chat-input"] [contenteditable="true"], '
+                                'div[contenteditable="true"][role="textbox"], '
+                                'div[contenteditable="true"]'
+                            )
+                            if await chat_input.count() > 0:
+                                inp = chat_input.first
+                                await inp.click(force=True)
+                                await page.wait_for_timeout(400)
+                                try:
+                                    await page.keyboard.type(reaction_text, delay=25)
+                                except Exception:
+                                    await inp.fill(reaction_text)
+                                await page.wait_for_timeout(600)
+                                await page.keyboard.press("Enter")
+                                await page.wait_for_timeout(2500)
+    
+                                responded_urls.add(full_url)
+                                logger.info(f"✅ Реакцію Gemini успішно надіслано до @{user}: «{reaction_text}»")
+    
+                                # Сповіщення адміну в Telegram
+                                tag = "❤️ 👸 Кохана" if is_gf else "🔥 Друг"
+                                self._notify_admin_telegram(
+                                    f"🎬 <b>Відреагував на TikTok відео через Gemini!</b>\n"
+                                    f"{tag}: <b>@{user}</b>\n"
+                                    f"🔗 Відео: <a href='{full_url}'>Дивитись відео</a>\n"
+                                    f"💬 Реакція: <i>«{reaction_text}»</i>"
+                                )
+    
+                                processed.append({
+                                    "username": user,
+                                    "is_girlfriend": is_gf,
+                                    "video_url": full_url,
+                                    "reaction": reaction_text
+                                })
+    
+                        # Оновлюємо та зберігаємо стан сесії
+                        try:
+                            await context.storage_state(path=str(DATA_DIR / "tiktok_state.json"))
                         except Exception:
                             pass
-                    elif not state_file.exists() and session_id:
-                        await context.add_cookies([
-                            {"name": "sessionid", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
-                            {"name": "sessionid_ss", "value": session_id, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
-                        ])
-
-                    page = await context.new_page()
-
-                    logger.info("Відкриваємо TikTok Messages для перевірки надісланих відео...")
-                    try:
-                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
-                    except Exception:
-                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(3500)
-
-                    KNOWN_DISPLAY_NAMES = {
-                        "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
-                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
-                        "davidka223": ["davidkaaa", "davidka223", "Давід"],
-                        "lesko.new": ["Лесько", "lesko.new", "lesko"],
-                        "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
-                        "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
-                    }
-
-                    for target in targets:
-                        user = target["username"].lower()
-                        is_gf = bool(target.get("is_girlfriend"))
-                        nick = target.get("nickname") or user
-
-                        aliases = KNOWN_DISPLAY_NAMES.get(user, [user])
-                        if nick and nick not in aliases:
-                            aliases.append(nick)
-
-                        chat_target = None
-                        for alias in aliases:
-                            row = page.locator(f'div[data-e2e="dm-new-conversation-item"]:has-text("{alias}")')
-                            if await row.count() > 0:
-                                chat_target = row.first
-                                break
-                            loc = page.locator(f'text="{alias}", [href*="/{alias}"]')
-                            if await loc.count() > 0:
-                                chat_target = loc.first
-                                break
-
-                        if not chat_target:
-                            continue
-
-                        await chat_target.click(force=True)
-                        await page.wait_for_timeout(2500)
-
-                        # Перевіряємо повідомлення у поточному відкритому чаті
-                        video_links = page.locator('a[href*="/video/"]')
-                        v_cnt = await video_links.count()
-                        if v_cnt == 0:
-                            continue
-
-                        # Знаходимо останнє відео в чаті
-                        last_video_elem = video_links.last
-                        href = await last_video_elem.get_attribute("href")
-                        if not href:
-                            continue
-
-                        full_url = href if href.startswith("http") else f"https://www.tiktok.com{href}"
-
-                        # Якщо вже реагували на це відео — пропускаємо
-                        if full_url in responded_urls:
-                            continue
-
-                        # Перевіряємо чи останнє повідомлення не надіслане НАМИ (якщо останній говорив я — не повторюємо)
-                        try:
-                            # Отримуємо батьківський елемент повідомлення та перевіряємо чи воно вирівняне вправо (наше)
-                            is_outgoing = await last_video_elem.evaluate(
-                                """el => {
-                                    const parentMsg = el.closest('[data-e2e="chat-item"]') || el.closest('div[class*="Message"]');
-                                    if (!parentMsg) return false;
-                                    const style = window.getComputedStyle(parentMsg);
-                                    const parentStyle = window.getComputedStyle(parentMsg.parentElement || parentMsg);
-                                    return style.justifyContent === 'flex-end' || 
-                                           style.alignItems === 'flex-end' ||
-                                           parentStyle.justifyContent === 'flex-end' ||
-                                           parentMsg.className.includes('Right') ||
-                                           parentMsg.querySelector('[class*="AvatarRight"]') !== null;
-                                }"""
-                            )
-                            if is_outgoing:
-                                logger.info(f"Відео {full_url} надіслано нами (outgoing), реакція не потрібна.")
-                                continue
-                        except Exception as eval_err:
-                            logger.debug(f"Перевірка is_outgoing: {eval_err}")
-
-                        logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
-
-                        # Генеруємо реакцію через Gemini AI (з урахуванням чи це дівчина)
-                        reaction_res = tiktok_reactions_service.process_tiktok_link(
-                            url=full_url,
-                            is_girlfriend=is_gf
-                        )
-                        reaction_text = reaction_res.get("reaction") or ("Ахаха це розрив 😂❤️" if is_gf else "одааа, чисто сігма мув 😎")
-
-                        # Знаходимо поле вводу чату та надсилаємо реакцію
-                        chat_input = page.locator(
-                            'div.public-DraftEditor-content[contenteditable="true"], '
-                            '[data-e2e="chat-input"] [contenteditable="true"], '
-                            'div[contenteditable="true"][role="textbox"], '
-                            'div[contenteditable="true"]'
-                        )
-                        if await chat_input.count() > 0:
-                            inp = chat_input.first
-                            await inp.click(force=True)
-                            await page.wait_for_timeout(400)
-                            try:
-                                await page.keyboard.type(reaction_text, delay=25)
-                            except Exception:
-                                await inp.fill(reaction_text)
-                            await page.wait_for_timeout(600)
-                            await page.keyboard.press("Enter")
-                            await page.wait_for_timeout(2500)
-
-                            responded_urls.add(full_url)
-                            logger.info(f"✅ Реакцію Gemini успішно надіслано до @{user}: «{reaction_text}»")
-
-                            # Сповіщення адміну в Telegram
-                            tag = "❤️ 👸 Кохана" if is_gf else "🔥 Друг"
-                            self._notify_admin_telegram(
-                                f"🎬 <b>Відреагував на TikTok відео через Gemini!</b>\n"
-                                f"{tag}: <b>@{user}</b>\n"
-                                f"🔗 Відео: <a href='{full_url}'>Дивитись відео</a>\n"
-                                f"💬 Реакція: <i>«{reaction_text}»</i>"
-                            )
-
-                            processed.append({
-                                "username": user,
-                                "is_girlfriend": is_gf,
-                                "video_url": full_url,
-                                "reaction": reaction_text
-                            })
-
-                    # Оновлюємо та зберігаємо стан сесії
-                    try:
-                        await context.storage_state(path=str(DATA_DIR / "tiktok_state.json"))
-                    except Exception:
-                        pass
-                finally:
-                    await browser.close()
-        except Exception as e:
-            logger.error(f"Помилка при перевірці надісланих відео: {e}", exc_info=True)
+                    finally:
+                        await browser.close()
+                    break
+            except Exception as e:
+                if p_cfg is not None and any(w in str(e).lower() for w in ["tunnel", "proxy", "connection", "err_"]):
+                    logger.warning(f"Проксі не підійшов для перевірки відео ({e}). Перемикаємо на пряме з'єднання...")
+                    continue
+                logger.error(f"Помилка при перевірці надісланих відео: {e}", exc_info=True)
+                break
 
         return processed
 
