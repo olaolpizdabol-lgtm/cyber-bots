@@ -1,8 +1,12 @@
 import os
+import json
+import re
 import asyncio
 import html
 import logging
 from pathlib import Path
+from datetime import datetime, timedelta, time, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, CommandStart
@@ -34,7 +38,11 @@ from core.database import (
     get_streak_stats,
     get_cyber_rizhyi_chat_history,
     get_cyber_rizhyi_user_memory,
-    get_recent_tiktok_reactions
+    get_recent_tiktok_reactions,
+    schedule_post,
+    cancel_scheduled_post,
+    get_all_scheduled_posts,
+    get_due_scheduled_posts
 )
 from core.security_guard import security_guard
 from core.media_processor import media_processor
@@ -42,6 +50,7 @@ from services.gemini_ai import sanitize_typography, gemini_service, SEO_PROMPT_P
 from services.automations.auto_poster import (
     auto_poster,
     TIER_1_PLATFORMS,
+    ALL_PLATFORMS,
     PUBLISHERS
 )
 from services.automations.automation_2 import tiktok_streak_service
@@ -53,8 +62,13 @@ from services.proxy_manager import (
     PLATFORM_IP_DETAILS
 )
 from bot.keyboards import (
+    PLATFORM_EMOJIS,
     get_publish_keyboard,
     get_condense_keyboard,
+    get_schedule_menu_keyboard,
+    get_schedule_target_keyboard,
+    get_scheduled_post_card_keyboard,
+    get_scheduled_posts_list_keyboard,
     get_main_menu_keyboard,
     get_main_reply_keyboard,
     get_prompt_management_keyboard,
@@ -77,6 +91,7 @@ class BotStates(StatesGroup):
     waiting_for_tiktok_reaction_url = State()
     waiting_for_rizhyi_test_input = State()
     waiting_for_rizhyi_photo_test = State()
+    waiting_for_post_schedule_time = State()
 
 
 # ---------------------------------------------------------
@@ -154,6 +169,14 @@ async def reply_btn_stats(message: Message):
     if not is_user_allowed(message.from_user.id):
         return
     await show_stats_message(message)
+
+
+@router.message(F.text == "📅 Заплановані пости")
+@router.message(Command("scheduled"))
+async def reply_btn_scheduled(message: Message):
+    if not is_user_allowed(message.from_user.id):
+        return
+    await show_scheduled_posts_message(message)
 
 
 @router.message(F.text == "🌐 Перевірити Проксі")
@@ -920,6 +943,391 @@ async def callback_post_analytics(call: CallbackQuery):
     await call.answer()
 
 
+# ---------------------------------------------------------
+# CALLBACKS ТА ОБРОБНИКИ: ПЛАНУВАННЯ ПУБЛІКАЦІЙ
+# ---------------------------------------------------------
+
+def build_scheduled_posts_overview(posts: List[dict]) -> str:
+    if not posts:
+        return (
+            "📅 <b>Немає запланованих постів.</b>\n\n"
+            "Щоб запланувати публікацію:\n"
+            "1. Надішліть відео або фото у цей чат.\n"
+            "2. У картці передперегляду натисніть <b>«⏰ Запланувати публікацію»</b>.\n"
+            "3. Оберіть час або вкажіть його вручну.\n\n"
+            "Бот сам автоматично опублікує контент у призначений час та надішле звіт!"
+        )
+
+    text = f"📅 <b>Заплановані публікації ({len(posts)}):</b>\n\n"
+    for idx, p in enumerate(posts, 1):
+        pid = p["id"]
+        c_type = p.get("content_type", "video")
+        c_icon = "🎬" if c_type == "video" else ("📚" if c_type == "carousel" else "📸")
+        sched_time = p.get("scheduled_at", "скоро")
+        targets = p.get("target_platforms_list") or []
+        targets_str = f"{len(targets)} платформ" if targets else "всі сумісні"
+        title = (p.get("yt_title") or p.get("ig_caption") or p.get("tt_caption") or "Без назви")[:40]
+        text += f"{idx}. {c_icon} <b>Пост #{pid}</b>\n"
+        text += f"   ⏰ <b>Час:</b> {sched_time} (Київ)\n"
+        text += f"   🎯 <b>Ціль:</b> {targets_str}\n"
+        text += f"   📝 <i>{html.escape(title)}...</i>\n\n"
+    text += "Натисніть на пост нижче, щоб переглянути деталі або скасувати розклад 👇"
+    return text
+
+
+async def show_scheduled_posts_message(message: Message):
+    posts = get_all_scheduled_posts()
+    text = build_scheduled_posts_overview(posts)
+    if posts:
+        kb = get_scheduled_posts_list_keyboard(posts)
+    else:
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 Головне меню", callback_data="main_menu")]
+        ])
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+async def show_scheduled_posts_callback(call: CallbackQuery):
+    posts = get_all_scheduled_posts()
+    text = build_scheduled_posts_overview(posts)
+    if posts:
+        kb = get_scheduled_posts_list_keyboard(posts)
+    else:
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 Головне меню", callback_data="main_menu")]
+        ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data == "list_scheduled")
+async def callback_list_scheduled(call: CallbackQuery):
+    await show_scheduled_posts_callback(call)
+
+
+@router.callback_query(F.data.startswith("sched_view:"))
+async def callback_sched_view(call: CallbackQuery):
+    post_id = int(call.data.split(":")[1])
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+    c_type = post.get("content_type", "video")
+    c_icon = "🎬" if c_type == "video" else ("📚" if c_type == "carousel" else "📸")
+    sched_time = post.get("scheduled_at", "не вказано")
+    targets = []
+    if post.get("target_platforms"):
+        try:
+            targets = json.loads(post["target_platforms"])
+        except Exception:
+            pass
+    targets_str = ", ".join(targets) if targets else "всі сумісні"
+    title = (post.get("yt_title") or post.get("ig_caption") or post.get("tt_caption") or "Без назви")[:100]
+
+    text = (
+        f"📌 <b>Запланований пост #{post_id}</b> {c_icon}\n\n"
+        f"⏰ <b>Час публікації:</b> {sched_time} (Київ)\n"
+        f"🎯 <b>Платформи:</b> {targets_str}\n"
+        f"📝 <b>Заголовок/Опис:</b>\n<i>{html.escape(title)}</i>\n\n"
+        f"Оберіть дію:"
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=get_scheduled_post_card_keyboard(post_id),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sched_menu:"))
+async def callback_sched_menu(call: CallbackQuery):
+    post_id = int(call.data.split(":")[1])
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+
+    text = (
+        f"⏰ <b>Планування публікації поста #{post_id}</b>\n\n"
+        f"Оберіть бажаний час публікації за київським часом:\n"
+        f"• Швидкі варіанти відкладення (+15 хв, +30 хв, +1 год, +2 год, +3 год, +6 год)\n"
+        f"• Фіксований час на завтра (10:00 або 18:00)\n"
+        f"• Власноруч вказати точний час і дату\n\n"
+        f"У призначений час бот автоматично опублікує пост та надішле звіт."
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=get_schedule_menu_keyboard(post_id),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sched_rel:"))
+async def callback_sched_rel(call: CallbackQuery):
+    parts = call.data.split(":")
+    post_id = int(parts[1])
+    minutes = int(parts[2])
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+
+    try:
+        kyiv_tz = ZoneInfo("Europe/Kyiv")
+    except Exception:
+        kyiv_tz = timezone(timedelta(hours=3))
+
+    target_dt = datetime.now(kyiv_tz) + timedelta(minutes=minutes)
+    target_ts = int(target_dt.timestamp())
+    time_display = target_dt.strftime("%d.%m.%Y о %H:%M")
+
+    is_video = post.get("content_type", "video") == "video"
+    text = (
+        f"⏰ <b>Обраний час:</b> {time_display} (Київ)\n"
+        f"📌 <b>Пост #{post_id}</b>\n\n"
+        f"Оберіть платформу або пул мереж для публікації:"
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=get_schedule_target_keyboard(post_id, target_ts, is_video=is_video),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sched_abs:"))
+async def callback_sched_abs(call: CallbackQuery):
+    parts = call.data.split(":")
+    post_id = int(parts[1])
+    preset = parts[2]
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+
+    try:
+        kyiv_tz = ZoneInfo("Europe/Kyiv")
+    except Exception:
+        kyiv_tz = timezone(timedelta(hours=3))
+
+    now_kyiv = datetime.now(kyiv_tz)
+    tomorrow_date = (now_kyiv + timedelta(days=1)).date()
+    target_time = time(10, 0) if preset == "tom_10" else time(18, 0)
+    target_dt = datetime.combine(tomorrow_date, target_time, tzinfo=kyiv_tz)
+    target_ts = int(target_dt.timestamp())
+    time_display = target_dt.strftime("%d.%m.%Y о %H:%M")
+
+    is_video = post.get("content_type", "video") == "video"
+    text = (
+        f"⏰ <b>Обраний час:</b> {time_display} (Київ)\n"
+        f"📌 <b>Пост #{post_id}</b>\n\n"
+        f"Оберіть платформу або пул мереж для публікації:"
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=get_schedule_target_keyboard(post_id, target_ts, is_video=is_video),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sched_custom:"))
+async def callback_sched_custom(call: CallbackQuery, state: FSMContext):
+    post_id = int(call.data.split(":")[1])
+    await state.update_data(schedule_post_id=post_id)
+    await state.set_state(BotStates.waiting_for_post_schedule_time)
+
+    await call.message.answer(
+        f"✍️ <b>Вкажіть точний час для публікації поста #{post_id}:</b>\n\n"
+        f"Приклади формату (за київським часом):\n"
+        f"• Тільки час на сьогодні/завтра: <code>18:30</code> або <code>09:15</code>\n"
+        f"• Дата та час: <code>2026-10-05 14:00</code> або <code>05.10 14:00</code>\n\n"
+        f"Надішліть повідомлення з часом або напишіть <code>/cancel</code> для скасування.",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_post_schedule_time)
+async def process_custom_schedule_time(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if text.lower() in ["/cancel", "скасувати", "відміна"]:
+        await state.clear()
+        await message.answer("❌ Введення часу скасовано.", reply_markup=get_main_reply_keyboard())
+        return
+
+    data = await state.get_data()
+    post_id = data.get("schedule_post_id")
+    if not post_id:
+        await state.clear()
+        await message.answer("Помилка сесії планування. Спробуйте знову.")
+        return
+
+    post = get_post_by_id(post_id)
+    if not post:
+        await state.clear()
+        await message.answer("Пост не знайдено.")
+        return
+
+    try:
+        kyiv_tz = ZoneInfo("Europe/Kyiv")
+    except Exception:
+        kyiv_tz = timezone(timedelta(hours=3))
+
+    now_kyiv = datetime.now(kyiv_tz)
+    target_dt = None
+
+    # 1. Формат "HH:MM" (e.g. 18:30)
+    match_time = re.match(r"^(\d{1,2}):(\d{2})$", text)
+    if match_time:
+        hour, minute = int(match_time.group(1)), int(match_time.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            target_dt = datetime.combine(now_kyiv.date(), time(hour, minute), tzinfo=kyiv_tz)
+            if target_dt <= now_kyiv:
+                target_dt += timedelta(days=1)
+
+    # 2. Формат "DD.MM HH:MM" (e.g. 05.10 14:00)
+    if not target_dt:
+        match_dm_hm = re.match(r"^(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})$", text)
+        if match_dm_hm:
+            d, m, hour, minute = int(match_dm_hm.group(1)), int(match_dm_hm.group(2)), int(match_dm_hm.group(3)), int(match_dm_hm.group(4))
+            try:
+                target_dt = datetime(now_kyiv.year, m, d, hour, minute, tzinfo=kyiv_tz)
+                if target_dt <= now_kyiv:
+                    target_dt = datetime(now_kyiv.year + 1, m, d, hour, minute, tzinfo=kyiv_tz)
+            except ValueError:
+                pass
+
+    # 3. Формат "YYYY-MM-DD HH:MM" або "DD.MM.YYYY HH:MM"
+    if not target_dt:
+        for fmt in ["%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M"]:
+            try:
+                naive_dt = datetime.strptime(text, fmt)
+                target_dt = naive_dt.replace(tzinfo=kyiv_tz)
+                break
+            except ValueError:
+                pass
+
+    if not target_dt or target_dt <= now_kyiv:
+        await message.answer(
+            "⚠️ <b>Не вдалося розпізнати час або він у минулому!</b>\n\n"
+            "Будь ласка, вкажіть час у форматі:\n"
+            "• <code>18:30</code> (сьогодні або завтра)\n"
+            "• <code>05.10 14:00</code> (день.місяць час)\n"
+            "• <code>2026-10-05 14:00</code>\n\n"
+            "Або надішліть <code>/cancel</code> для скасування.",
+            parse_mode="HTML"
+        )
+        return
+
+    await state.clear()
+    target_ts = int(target_dt.timestamp())
+    time_display = target_dt.strftime("%d.%m.%Y о %H:%M")
+    is_video = post.get("content_type", "video") == "video"
+
+    await message.answer(
+        f"⏰ <b>Обраний час:</b> {time_display} (Київ)\n"
+        f"📌 <b>Пост #{post_id}</b>\n\n"
+        f"Оберіть платформу або пул мереж для публікації:",
+        reply_markup=get_schedule_target_keyboard(post_id, target_ts, is_video=is_video),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("sched_apply:"))
+async def callback_sched_apply(call: CallbackQuery):
+    parts = call.data.split(":")
+    post_id = int(parts[1])
+    target_ts = float(parts[2])
+    target_type = parts[3]
+
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+
+    try:
+        kyiv_tz = ZoneInfo("Europe/Kyiv")
+    except Exception:
+        kyiv_tz = timezone(timedelta(hours=3))
+
+    target_dt = datetime.fromtimestamp(target_ts, tz=kyiv_tz)
+    time_display = target_dt.strftime("%d.%m.%Y о %H:%M")
+
+    c_type_str = post.get("content_type", "video")
+    try:
+        c_type = ContentType(c_type_str)
+    except Exception:
+        c_type = ContentType.VIDEO
+
+    if target_type == "tier1":
+        platforms = [p for p in TIER_1_PLATFORMS if p in FORMAT_SUPPORTED_PLATFORMS.get(c_type, [])]
+    else:
+        platforms = FORMAT_SUPPORTED_PLATFORMS.get(c_type, ALL_PLATFORMS)
+
+    chat_id = call.message.chat.id
+    schedule_post(post_id, target_dt, platforms, chat_id=chat_id)
+
+    plat_names = [PLATFORM_EMOJIS.get(p, p) for p in platforms]
+    plat_str = ", ".join(plat_names)
+
+    text = (
+        f"✅ <b>Публікацію поста #{post_id} успішно заплановано!</b>\n\n"
+        f"📅 <b>Час публікації:</b> {time_display} (Київ)\n"
+        f"🎯 <b>Платформи ({len(platforms)}):</b> {plat_str}\n\n"
+        f"Бот автоматично запустить фонову публікацію у призначений час та надішле звіт сюди в чат."
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=get_scheduled_post_card_keyboard(post_id),
+        parse_mode="HTML"
+    )
+    await call.answer("Заплановано!")
+
+
+@router.callback_query(F.data.startswith("sched_now:"))
+async def callback_sched_now(call: CallbackQuery):
+    post_id = int(call.data.split(":")[1])
+    post = get_post_by_id(post_id)
+    if not post:
+        await call.answer("Пост не знайдено!", show_alert=True)
+        return
+
+    cancel_scheduled_post(post_id)
+    target_platforms = None
+    if post.get("target_platforms"):
+        try:
+            target_platforms = json.loads(post["target_platforms"])
+        except Exception:
+            target_platforms = None
+
+    await call.message.edit_reply_markup(reply_markup=None)
+    status_msg = await call.message.answer(f"🚀 <b>Миттєва публікація запланованого поста #{post_id}...</b>", parse_mode="HTML")
+
+    results = await asyncio.to_thread(auto_poster.publish_post, post_id, target_platforms)
+    await format_and_send_publish_results(status_msg, post_id, results)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sched_cancel:"))
+async def callback_sched_cancel(call: CallbackQuery):
+    post_id = int(call.data.split(":")[1])
+    cancel_scheduled_post(post_id)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    await call.message.edit_text(
+        f"❌ <b>Розклад для поста #{post_id} скасовано.</b>\nПост переведено у статус чернетки.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад до публікації", callback_data=f"back_pub:{post_id}")],
+            [InlineKeyboardButton(text="📅 До запланованих", callback_data="list_scheduled")]
+        ]),
+        parse_mode="HTML"
+    )
+    await call.answer("Скасовано!")
+
+
 @router.callback_query(F.data.startswith("regen:"))
 async def callback_regenerate(call: CallbackQuery):
     post_id = int(call.data.split(":")[1])
@@ -1333,7 +1741,7 @@ async def callback_history(call: CallbackQuery):
     await call.answer()
 
 
-@router.callback_query(F.data == "menu_back")
+@router.callback_query(F.data.in_(["menu_back", "main_menu"]))
 async def callback_back(call: CallbackQuery):
     await call.message.answer("Головне меню:", reply_markup=get_main_menu_keyboard())
     await call.answer()

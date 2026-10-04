@@ -101,7 +101,9 @@ def init_db():
             ("tw_post", "TEXT"), ("tw_tweet_id", "TEXT"), ("tw_views", "INTEGER DEFAULT 0"), ("tw_likes", "INTEGER DEFAULT 0"),
             ("threads_post", "TEXT"), ("threads_media_id", "TEXT"), ("threads_views", "INTEGER DEFAULT 0"), ("threads_likes", "INTEGER DEFAULT 0"),
             ("pin_title", "TEXT"), ("pin_desc", "TEXT"), ("pin_id", "TEXT"), ("pin_views", "INTEGER DEFAULT 0"), ("pin_likes", "INTEGER DEFAULT 0"),
-            ("bsky_post", "TEXT"), ("bsky_uri", "TEXT"), ("bsky_views", "INTEGER DEFAULT 0"), ("bsky_likes", "INTEGER DEFAULT 0")
+            ("bsky_post", "TEXT"), ("bsky_uri", "TEXT"), ("bsky_views", "INTEGER DEFAULT 0"), ("bsky_likes", "INTEGER DEFAULT 0"),
+            ("scheduled_at", "TEXT"), ("scheduled_timestamp", "REAL"),
+            ("target_platforms", "TEXT"), ("scheduled_by_chat_id", "INTEGER")
         ]
         for col_name, col_def in cols_to_ensure:
             if col_name not in existing_cols:
@@ -434,6 +436,101 @@ def get_recent_posts(limit: int = 5) -> List[Dict[str, Any]]:
         cursor.execute("SELECT * FROM posts ORDER BY id DESC LIMIT ?", (limit,))
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+def schedule_post(
+    post_id: int,
+    scheduled_dt: datetime,
+    target_platforms: List[str],
+    chat_id: Optional[int] = None
+):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        iso_str = scheduled_dt.strftime("%Y-%m-%d %H:%M:%S")
+        ts = scheduled_dt.timestamp()
+        platforms_json = json.dumps(target_platforms)
+        cursor.execute("""
+            UPDATE posts 
+            SET status = 'scheduled',
+                scheduled_at = ?,
+                scheduled_timestamp = ?,
+                target_platforms = ?,
+                scheduled_by_chat_id = ?
+            WHERE id = ?
+        """, (iso_str, ts, platforms_json, chat_id, post_id))
+        conn.commit()
+
+
+def cancel_scheduled_post(post_id: int):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE posts 
+            SET status = 'draft',
+                scheduled_at = NULL,
+                scheduled_timestamp = NULL
+            WHERE id = ?
+        """, (post_id,))
+        conn.commit()
+
+
+def get_due_scheduled_posts() -> List[Dict[str, Any]]:
+    import time
+    now_ts = time.time()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM posts 
+            WHERE status = 'scheduled' 
+              AND (
+                (scheduled_timestamp IS NOT NULL AND scheduled_timestamp <= ?)
+                OR (scheduled_timestamp IS NULL AND scheduled_at IS NOT NULL AND scheduled_at <= datetime('now'))
+              )
+            ORDER BY id ASC
+        """, (now_ts,))
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("media_paths"):
+                try:
+                    d["media_paths_list"] = json.loads(d["media_paths"])
+                except Exception:
+                    d["media_paths_list"] = []
+            else:
+                d["media_paths_list"] = []
+            if d.get("target_platforms"):
+                try:
+                    d["target_platforms_list"] = json.loads(d["target_platforms"])
+                except Exception:
+                    d["target_platforms_list"] = None
+            else:
+                d["target_platforms_list"] = None
+            result.append(d)
+        return result
+
+
+def get_all_scheduled_posts() -> List[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM posts 
+            WHERE status = 'scheduled'
+            ORDER BY scheduled_timestamp ASC, scheduled_at ASC
+        """)
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("target_platforms"):
+                try:
+                    d["target_platforms_list"] = json.loads(d["target_platforms"])
+                except Exception:
+                    d["target_platforms_list"] = None
+            else:
+                d["target_platforms_list"] = None
+            result.append(d)
+        return result
 
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:

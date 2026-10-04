@@ -142,6 +142,72 @@ async def main():
             except Exception as e:
                 logger.error(f"Помилка фонового планувальника вогників: {e}")
 
+    async def post_scheduler_background_task():
+        logger.info("Фоновий планувальник публікацій контенту активний (перевірка кожні 20 сек).")
+        from core.database import get_due_scheduled_posts, update_post_status
+        from services.automations.auto_poster import auto_poster
+        from core.security_guard import security_guard
+        from bot.keyboards import get_publish_result_keyboard
+        import html
+
+        icons = {
+            "tiktok": "⚫️", "instagram": "🟣", "youtube": "🔴",
+            "facebook": "🔵", "snapchat": "🟡", "twitter": "𝕏",
+            "threads": "🧵", "pinterest": "📌", "bluesky": "🦋",
+            "telegram": "💬"
+        }
+
+        while True:
+            try:
+                await asyncio.sleep(20)
+                due_posts = get_due_scheduled_posts()
+                if not due_posts:
+                    continue
+
+                for post in due_posts:
+                    post_id = post["id"]
+                    logger.info(f"⏰ Настав час публікації запланованого поста #{post_id}!")
+                    update_post_status(post_id, "publishing")
+
+                    target_platforms = post.get("target_platforms_list")
+                    chat_id = post.get("scheduled_by_chat_id")
+
+                    results = await asyncio.to_thread(auto_poster.publish_post, post_id, target_platforms)
+
+                    has_failures = any(not res.success for res in results.values()) if results else False
+                    report_text = f"⏰ <b>Запланований пост #{post_id} опубліковано!</b>\n\n"
+                    for plat, res in results.items():
+                        icon = icons.get(plat, "🌐")
+                        if res.success:
+                            link = f"<a href='{res.url}'>Переглянути</a>" if res.url else "Опубліковано"
+                            report_text += f"{icon} <b>{res.platform}:</b> ✅ Успішно! ({link})\n"
+                        else:
+                            err_msg = security_guard.sanitize_error(str(res.error or "Помилка"))
+                            if len(err_msg) > 160:
+                                err_msg = err_msg[:157] + "..."
+                            report_text += f"{icon} <b>{res.platform}:</b> ❌ <i>{html.escape(err_msg)}</i>\n"
+
+                    recipients = [chat_id] if chat_id else ALLOWED_USER_IDS
+                    for uid in recipients:
+                        if not uid:
+                            continue
+                        try:
+                            await bot.send_message(
+                                uid,
+                                report_text,
+                                reply_markup=get_publish_result_keyboard(post_id, has_failures=has_failures),
+                                parse_mode="HTML",
+                                disable_web_page_preview=True
+                            )
+                        except Exception as send_err:
+                            logger.warning(f"Не вдалося надіслати звіт публікації користувачу {uid}: {send_err}")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Помилка фонового планувальника публікацій: {e}")
+
+    post_scheduler_task = asyncio.create_task(post_scheduler_background_task())
     scheduler_task = asyncio.create_task(streak_scheduler_background_task())
 
     try:
@@ -149,6 +215,7 @@ async def main():
         await dp.start_polling(bot)
     finally:
         scheduler_task.cancel()
+        post_scheduler_task.cancel()
         await bot.session.close()
 
 

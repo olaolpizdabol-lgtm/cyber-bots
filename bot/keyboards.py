@@ -7,8 +7,9 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🚀 Пост на ВСІ платформи (YT+IG+TT+TG)")],
-            [KeyboardButton(text="🔥 TikTok Вогники"), KeyboardButton(text="📊 Перегляди / Статистика")],
-            [KeyboardButton(text="🤖 Головне меню"), KeyboardButton(text="🌐 Перевірити Проксі")]
+            [KeyboardButton(text="📅 Заплановані пости"), KeyboardButton(text="📊 Перегляди / Статистика")],
+            [KeyboardButton(text="🔥 TikTok Вогники"), KeyboardButton(text="🌐 Перевірити Проксі")],
+            [KeyboardButton(text="🤖 Головне меню")]
         ],
         resize_keyboard=True,
         persistent=True
@@ -80,6 +81,14 @@ def get_publish_keyboard(post_id: int, content_type: ContentType, has_issues: bo
 
     buttons.extend(platform_rows)
 
+    # Опція планування публікації
+    buttons.append([
+        InlineKeyboardButton(
+            text="⏰ Запланувати публікацію",
+            callback_data=f"sched_menu:{post_id}"
+        )
+    ])
+
     # Опція скорочення тексту під ліміти символів
     buttons.append([
         InlineKeyboardButton(
@@ -118,6 +127,86 @@ def get_condense_keyboard(post_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def get_schedule_menu_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """Клавіатура вибору часу планування публікації"""
+    buttons = [
+        [
+            InlineKeyboardButton(text="⚡️ +15 хв", callback_data=f"sched_rel:{post_id}:15"),
+            InlineKeyboardButton(text="⏳ +30 хв", callback_data=f"sched_rel:{post_id}:30"),
+            InlineKeyboardButton(text="⏰ +1 год", callback_data=f"sched_rel:{post_id}:60")
+        ],
+        [
+            InlineKeyboardButton(text="🕒 +2 год", callback_data=f"sched_rel:{post_id}:120"),
+            InlineKeyboardButton(text="🕓 +3 год", callback_data=f"sched_rel:{post_id}:180"),
+            InlineKeyboardButton(text="🕕 +6 год", callback_data=f"sched_rel:{post_id}:360")
+        ],
+        [
+            InlineKeyboardButton(text="🌅 Завтра 10:00", callback_data=f"sched_abs:{post_id}:tom_10"),
+            InlineKeyboardButton(text="🌆 Завтра 18:00", callback_data=f"sched_abs:{post_id}:tom_18")
+        ],
+        [
+            InlineKeyboardButton(text="✍️ Вказати точний час", callback_data=f"sched_custom:{post_id}")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад до публікації", callback_data=f"back_pub:{post_id}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_schedule_target_keyboard(post_id: int, timestamp: int, is_video: bool = True) -> InlineKeyboardMarkup:
+    """Вибір куди запланувати (Рівень 1 Top 5 чи всі сумісні)"""
+    buttons = []
+    if is_video:
+        buttons.append([
+            InlineKeyboardButton(
+                text="🔥 Рівень 1 (Top 5: TT, IG, YT, FB, Snap)",
+                callback_data=f"sched_apply:{post_id}:{timestamp}:tier1"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(
+            text="🚀 Всі сумісні платформи",
+            callback_data=f"sched_apply:{post_id}:{timestamp}:compat"
+        )
+    ])
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Змінити час", callback_data=f"sched_menu:{post_id}")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_scheduled_post_card_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """Дії над запланованим постом"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🚀 Опублікувати зараз", callback_data=f"sched_now:{post_id}"),
+            InlineKeyboardButton(text="❌ Скасувати розклад", callback_data=f"sched_cancel:{post_id}")
+        ],
+        [
+            InlineKeyboardButton(text="📅 До списку запланованих", callback_data="list_scheduled")
+        ]
+    ])
+
+
+def get_scheduled_posts_list_keyboard(posts: List[dict]) -> InlineKeyboardMarkup:
+    """Список запланованих постів"""
+    buttons = []
+    for p in posts:
+        pid = p["id"]
+        time_str = p.get("scheduled_at", "скоро")
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"📌 Пост #{pid} • {time_str}",
+                callback_data=f"sched_view:{pid}"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="🤖 Головне меню", callback_data="main_menu")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Головне меню"""
     buttons = [
@@ -145,7 +234,11 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
-                text="📊 Перегляди останнього відео / поста",
+                text="📅 Заплановані пости",
+                callback_data="list_scheduled"
+            ),
+            InlineKeyboardButton(
+                text="📊 Перегляди / Статистика",
                 callback_data="menu_stats"
             )
         ],
