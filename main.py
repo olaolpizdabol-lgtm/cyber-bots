@@ -80,8 +80,8 @@ async def main():
     logger.info("Запуск Telegram бота (polling) з підтримкою ВСІХ форматів контенту та TikTok вогників...")
     
     # Запускаємо фоновий планувальник вогників
-    from datetime import datetime
-    from core.database import get_setting
+    from datetime import datetime, timezone, timedelta
+    from core.database import get_setting, set_setting
     from services.automations.automation_2 import tiktok_streak_service
     from config import ALLOWED_USER_IDS
 
@@ -92,21 +92,37 @@ async def main():
         while True:
             try:
                 await asyncio.sleep(45)
-                now = datetime.now()
-                today_str = now.strftime("%Y-%m-%d")
-                current_hm = now.strftime("%H:%M")
-                sched_time = get_setting("tiktok_streak_schedule_time", "10:00")
+                try:
+                    from zoneinfo import ZoneInfo
+                    kyiv_tz = ZoneInfo("Europe/Kyiv")
+                    now_kyiv = datetime.now(kyiv_tz)
+                except Exception:
+                    kyiv_tz = timezone(timedelta(hours=3))
+                    now_kyiv = datetime.now(kyiv_tz)
 
-                if current_hm == sched_time and last_dispatched_date != today_str:
-                    logger.info(f"⏰ Настав час розкладу ({sched_time}): запуск щоденної відправки вогників...")
-                    res = await tiktok_streak_service.run_streaks_dispatch()
+                today_str = now_kyiv.strftime("%Y-%m-%d")
+                current_hm = now_kyiv.strftime("%H:%M")
+                sched_time = get_setting("tiktok_streak_schedule_time", "10:00")
+                last_db_date = get_setting("last_streak_dispatch_date", "")
+
+                # Запускаємо якщо настав час розкладу і сьогодні ще не відправляли
+                should_run = False
+                if last_dispatched_date != today_str and last_db_date != today_str:
+                    if current_hm >= sched_time and now_kyiv.hour < 23:
+                        should_run = True
+
+                if should_run:
+                    logger.info(f"⏰ Настав час розкладу ({sched_time}, зараз {current_hm} Київ): запуск щоденної відправки вогників...")
                     last_dispatched_date = today_str
+                    set_setting("last_streak_dispatch_date", today_str)
+                    res = await tiktok_streak_service.run_streaks_dispatch()
                     if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:
                         for uid in ALLOWED_USER_IDS:
                             try:
                                 await bot.send_message(
                                     uid,
                                     f"🔥 <b>Щоденний звіт TikTok вогників!</b>\n"
+                                    f"Час: {current_hm} (Київ)\n"
                                     f"Успішно опрацьовано: {res['sent_count']} контактів.",
                                     parse_mode="HTML"
                                 )
@@ -114,8 +130,8 @@ async def main():
                                 pass
 
                 # Періодична перевірка вхідних TikTok відео кожні 15 хвилин
-                if now.minute % 15 == 0 and last_react_check_minute != now.minute:
-                    last_react_check_minute = now.minute
+                if now_kyiv.minute % 15 == 0 and last_react_check_minute != now_kyiv.minute:
+                    last_react_check_minute = now_kyiv.minute
                     try:
                         logger.info("🔍 Фонова перевірка скинутих TikTok відео у чатах...")
                         await tiktok_streak_service.check_and_react_to_shared_videos()

@@ -105,10 +105,13 @@ class TikTokStreakService:
         self._ensure_girlfriend_initialized()
 
     def _ensure_girlfriend_initialized(self):
-        """Ініціалізує акаунт дівчини з .env якщо він ще не в БД"""
-        if TIKTOK_GIRLFRIEND_USERNAME and not get_girlfriend_target():
-            logger.info(f"Ініціалізація акаунта дівчини з .env: @{TIKTOK_GIRLFRIEND_USERNAME}")
-            set_girlfriend_target(TIKTOK_GIRLFRIEND_USERNAME, "Кохана")
+        """Ініціалізує акаунт дівчини з .env якщо він ще не в БД або якщо змінився"""
+        if TIKTOK_GIRLFRIEND_USERNAME:
+            clean_gf = TIKTOK_GIRLFRIEND_USERNAME.strip().lstrip("@")
+            current_gf = get_girlfriend_target()
+            if not current_gf or current_gf.get("username", "").lower() != clean_gf.lower():
+                logger.info(f"Синхронізація акаунта дівчини з .env: @{clean_gf}")
+                set_girlfriend_target(clean_gf, "Кохана")
 
     def _get_time_of_day_context(self) -> Tuple[str, str]:
         """Визначає поточний час доби для контекстного привітання"""
@@ -190,11 +193,42 @@ class TikTokStreakService:
         return sanitize_typography(format_friend_weather_streak_message())
 
     def get_streaks_session_id(self) -> str:
-        """Повертає sessionid окремого акаунта вогників (з БД або .env)"""
-        return get_setting("tiktok_streaks_session_id", TIKTOK_STREAKS_SESSION_ID)
+        """Повертає sessionid окремого акаунта вогників (з БД, .env або tiktok_state.json)"""
+        sess = get_setting("tiktok_streaks_session_id", TIKTOK_STREAKS_SESSION_ID)
+        if sess and not sess.startswith("your_") and not sess.startswith("mock_"):
+            return sess
+
+        # Спробуємо витягнути з tiktok_state.json
+        state_file = DATA_DIR / "tiktok_state.json"
+        if state_file.exists():
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+                    for cookie in state_data.get("cookies", []):
+                        if cookie.get("name") == "sessionid" and cookie.get("value"):
+                            return cookie["value"]
+            except Exception as e:
+                logger.debug(f"Не вдалося зчитати sessionid з {state_file}: {e}")
+
+        cookies_file = DATA_DIR / "tiktok_cookies.json"
+        if cookies_file.exists():
+            try:
+                with open(cookies_file, "r", encoding="utf-8") as f:
+                    cookies_data = json.load(f)
+                    if isinstance(cookies_data, list):
+                        for cookie in cookies_data:
+                            if cookie.get("name") == "sessionid" and cookie.get("value"):
+                                return cookie["value"]
+            except Exception as e:
+                logger.debug(f"Не вдалося зчитати sessionid з {cookies_file}: {e}")
+
+        return ""
 
     def is_streaks_session_configured(self) -> bool:
-        """Перевіряє чи налаштовано окремий sessionid для вогників"""
+        """Перевіряє чи налаштовано сесію для вогників (через sessionid або збережений tiktok_state.json)"""
+        state_file = DATA_DIR / "tiktok_state.json"
+        if state_file.exists():
+            return True
         sess = self.get_streaks_session_id()
         return bool(sess and not sess.startswith("your_") and not sess.startswith("mock_"))
 
@@ -238,15 +272,29 @@ class TikTokStreakService:
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--no-zygote",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
                     "--no-default-browser-check"
                 ]
-                browser = await p.chromium.launch(
-                    headless=True,
-                    proxy=proxy_cfg,
-                    args=launch_args
-                )
+                try:
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        proxy=proxy_cfg,
+                        args=launch_args
+                    )
+                except Exception as launch_err:
+                    if proxy_cfg:
+                        logger.warning(f"Помилка запуску Chromium з проксі ({launch_err}), пробуємо без проксі...")
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=launch_args
+                        )
+                    else:
+                        raise
+
                 try:
                     state_file = DATA_DIR / "tiktok_state.json"
                     cookies_file = DATA_DIR / "tiktok_cookies.json"
@@ -284,59 +332,56 @@ class TikTokStreakService:
                         except Exception:
                             pass
 
-                    # Йдемо напряму в /messages — TikTok показує список чатів
-                    logger.info(f"Відкриваємо TikTok Messages inbox для пошуку @{username}...")
-                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
-                    await page.wait_for_timeout(3000)
-
-                    # 1. Спершу відкриваємо повноцінний розділ повідомлень TikTok
+                    # 1. Відкриваємо розділ повідомлень TikTok
                     logger.info(f"Відкриваємо повідомлення TikTok для діалогу з @{username}...")
-                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    try:
+                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    except Exception:
+                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(3500)
 
                     if "login" in page.url.lower():
                         return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
 
                     # Шукаємо контакт у списку чатів
-                    # Може бути по нікнейму, імені чи посиланню
-                    chat_target = page.locator(
-                        f'[href*="/{username}"], '
-                        f'div:has-text("{username}"), '
-                        f'p:has-text("{username}"), '
-                        f'span:has-text("{username}")'
-                    )
-
-                    # Спеціальний мапінг display name для контактів у списку чатів
                     KNOWN_DISPLAY_NAMES = {
                         "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
-                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii"],
+                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
                         "davidka223": ["davidkaaa", "davidka223", "Давід"],
                         "lesko.new": ["Лесько", "lesko.new", "lesko"],
                         "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
                         "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
                     }
 
-                    if await chat_target.count() == 0 and username.lower() in KNOWN_DISPLAY_NAMES:
-                        for alias in KNOWN_DISPLAY_NAMES[username.lower()]:
-                            loc = page.locator(f'text="{alias}"')
-                            if await loc.count() > 0:
-                                chat_target = loc
-                                break
+                    aliases = KNOWN_DISPLAY_NAMES.get(username.lower(), [username])
+                    target_row = None
+                    for alias in aliases:
+                        row = page.locator(f'div[data-e2e="dm-new-conversation-item"]:has-text("{alias}")')
+                        if await row.count() > 0:
+                            target_row = row.first
+                            break
+                        txt_loc = page.locator(f'[data-e2e="dm-new-conversation-list"] :text-is("{alias}")')
+                        if await txt_loc.count() > 0:
+                            target_row = txt_loc.first
+                            break
 
                     target_found = False
-                    if await chat_target.count() > 0:
+                    if target_row:
                         logger.info(f"Знайдено контакт @{username} у списку повідомлень, відкриваємо...")
-                        await chat_target.first.click(force=True)
+                        await target_row.click(force=True)
                         await page.wait_for_timeout(3000)
                         target_found = True
                     else:
                         # 2. Якщо контакту немає серед недавніх — переходимо на прямий профіль
                         logger.info(f"Контакт не знайдено в недавніх чатах, переходимо на профіль @{username}...")
-                        await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="networkidle")
+                        try:
+                            await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="networkidle")
+                        except Exception:
+                            await page.goto(f"https://www.tiktok.com/@{username}", timeout=40000, wait_until="domcontentloaded")
                         await page.wait_for_timeout(3500)
 
                         if "login" in page.url.lower():
-                            return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
+                            return False, "❌ TikTok сесія не авторизована."
 
                         # Закриваємо pop-up сповіщення якщо є
                         close_btns = page.locator('button[aria-label="Close"], button:has-text("✕"), button[data-e2e="toast-close"]')
@@ -361,13 +406,17 @@ class TikTokStreakService:
                             except Exception:
                                 pass
 
-                        drawer_item = page.locator(f'[href*="/{username}"], div:has-text("{username}")').first
+                        drawer_item = page.locator(f'div[data-e2e="dm-new-conversation-item"]:has-text("{username}"), div:has-text("{username}")').first
                         if await drawer_item.count() > 0:
-                            await drawer_item.click(force=True)
-                            await page.wait_for_timeout(2500)
+                            try:
+                                await drawer_item.click(force=True)
+                                await page.wait_for_timeout(2500)
+                            except Exception:
+                                pass
 
                     # 3. Шукаємо поле вводу (TikTok DM chat input)
                     chat_input = page.locator(
+                        'div.public-DraftEditor-content[contenteditable="true"], '
                         '[data-e2e="chat-input"] [contenteditable="true"], '
                         '[contenteditable="true"][role="textbox"], '
                         '[contenteditable="true"]'
@@ -378,20 +427,22 @@ class TikTokStreakService:
                     except Exception:
                         pass
 
-                    await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
-
                     if await chat_input.count() == 0:
+                        try:
+                            await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
+                        except Exception:
+                            pass
                         return False, "⚠️ Чат відкрився, але поле вводу тексту не знайдено"
 
                     input_field = chat_input.first
                     await input_field.click(force=True)
                     await page.wait_for_timeout(500)
 
-                    # Вводимо повідомлення
+                    # Вводимо повідомлення у Draft.js через keyboard.type
                     try:
-                        await input_field.fill(message_text)
+                        await page.keyboard.type(message_text, delay=25)
                     except Exception:
-                        await page.keyboard.type(message_text, delay=30)
+                        await input_field.fill(message_text)
                     await page.wait_for_timeout(800)
 
                     # Натискаємо Enter для відправки
@@ -415,28 +466,34 @@ class TikTokStreakService:
 
     async def send_tiktok_direct_message(self, username: str, message_text: str) -> Tuple[bool, Optional[str]]:
         """
-        Відправляє Direct Message у TikTok з окремого акаунта вогників.
-        Включає перевірку проксі, захист сесії, Playwright-автоматизацію та Telegram пінг-фолбек.
+        Відправляє Direct Message у TikTok з акаунта вогників.
+        Включає перевірку сесії, Playwright-автоматизацію та Telegram сповіщення.
         """
         clean_user = username.strip().lstrip("@")
         clean_text = sanitize_typography(message_text)
         session_id = self.get_streaks_session_id()
 
-        # 1. Перевірка наявності облікових даних або Demo/Dry-Run
-        if DRY_RUN_MODE or not session_id or session_id.startswith("your_"):
-            logger.info(f"🧪 [DRY-RUN / ОЧІКУВАННЯ КЛЮЧІВ] TikTok DM -> @{clean_user}: '{clean_text}'")
-            return True, "Демо-режим: повідомлення сформовано успішно (очікує введення окремого TIKTOK_STREAKS_SESSION_ID)"
+        # 1. Перевірка наявності збереженої сесії або Demo/Dry-Run
+        state_file = DATA_DIR / "tiktok_state.json"
+        has_session = state_file.exists() or bool(session_id and not session_id.startswith("your_") and not session_id.startswith("mock_"))
 
-        # 2. Безпека: перевірка US/NY проксі для реального TikTok
+        if DRY_RUN_MODE or not has_session:
+            logger.info(f"🧪 [DRY-RUN / ОЧІКУВАННЯ КЛЮЧІВ] TikTok DM -> @{clean_user}: '{clean_text}'")
+            return True, "Демо-режим: повідомлення сформовано успішно (очікує збереженої сесії або TIKTOK_STREAKS_SESSION_ID)"
+
+        # 2. Безпека: перевірка US/NY проксі (не блокуємо якщо STRICT_PROXY_CHECK вимкнено)
         is_safe, safety_msg = proxy_manager.verify_platform_safety("tiktok")
         if not is_safe:
-            logger.warning(f"Захист від блокування TikTok: {safety_msg}")
-            self._notify_admin_telegram(
-                f"⛔️ <b>TikTok Вогник заблоковано захистом: @{clean_user}</b>\n"
-                f"Причина: {safety_msg}\n"
-                f"💬 Повідомлення: <code>{clean_text}</code>"
-            )
-            return False, safety_msg
+            if STRICT_PROXY_CHECK:
+                logger.warning(f"Захист від блокування TikTok: {safety_msg}")
+                self._notify_admin_telegram(
+                    f"⛔️ <b>TikTok Вогник заблоковано захистом: @{clean_user}</b>\n"
+                    f"Причина: {safety_msg}\n"
+                    f"💬 Повідомлення: <code>{clean_text}</code>"
+                )
+                return False, safety_msg
+            else:
+                logger.warning(f"Попередження проксі для TikTok: {safety_msg}. Продовжуємо відправку.")
 
         # 3. Реальна відправка через Playwright Chromium
         logger.info(f"Спроба автоматичної відправки TikTok вогника до @{clean_user} через Playwright...")
@@ -591,15 +648,30 @@ class TikTokStreakService:
             async with async_playwright() as p:
                 launch_args = [
                     "--no-sandbox",
+                    "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--no-zygote",
                     "--disable-blink-features=AutomationControlled",
-                    "--disable-infobars"
+                    "--no-first-run",
+                    "--no-default-browser-check"
                 ]
-                browser = await p.chromium.launch(
-                    headless=True,
-                    proxy=proxy_cfg,
-                    args=launch_args
-                )
+                try:
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        proxy=proxy_cfg,
+                        args=launch_args
+                    )
+                except Exception as launch_err:
+                    if proxy_cfg:
+                        logger.warning(f"Помилка запуску з проксі для реакцій ({launch_err}), пробуємо без проксі...")
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=launch_args
+                        )
+                    else:
+                        raise
                 try:
                     state_file = DATA_DIR / "tiktok_state.json"
                     cookies_file = DATA_DIR / "tiktok_cookies.json"
@@ -632,12 +704,15 @@ class TikTokStreakService:
                     page = await context.new_page()
 
                     logger.info("Відкриваємо TikTok Messages для перевірки надісланих відео...")
-                    await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    try:
+                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
+                    except Exception:
+                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(3500)
 
                     KNOWN_DISPLAY_NAMES = {
                         "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
-                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii"],
+                        "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
                         "davidka223": ["davidkaaa", "davidka223", "Давід"],
                         "lesko.new": ["Лесько", "lesko.new", "lesko"],
                         "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
@@ -655,6 +730,10 @@ class TikTokStreakService:
 
                         chat_target = None
                         for alias in aliases:
+                            row = page.locator(f'div[data-e2e="dm-new-conversation-item"]:has-text("{alias}")')
+                            if await row.count() > 0:
+                                chat_target = row.first
+                                break
                             loc = page.locator(f'text="{alias}", [href*="/{alias}"]')
                             if await loc.count() > 0:
                                 chat_target = loc.first
@@ -717,19 +796,19 @@ class TikTokStreakService:
 
                         # Знаходимо поле вводу чату та надсилаємо реакцію
                         chat_input = page.locator(
+                            'div.public-DraftEditor-content[contenteditable="true"], '
                             '[data-e2e="chat-input"] [contenteditable="true"], '
                             'div[contenteditable="true"][role="textbox"], '
-                            'div[contenteditable="true"], '
-                            '[placeholder*="Відправити повідомлення"]'
+                            'div[contenteditable="true"]'
                         )
                         if await chat_input.count() > 0:
                             inp = chat_input.first
                             await inp.click(force=True)
                             await page.wait_for_timeout(400)
                             try:
-                                await inp.fill(reaction_text)
+                                await page.keyboard.type(reaction_text, delay=25)
                             except Exception:
-                                await page.keyboard.type(reaction_text, delay=35)
+                                await inp.fill(reaction_text)
                             await page.wait_for_timeout(600)
                             await page.keyboard.press("Enter")
                             await page.wait_for_timeout(2500)
