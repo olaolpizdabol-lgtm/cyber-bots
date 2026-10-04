@@ -335,10 +335,10 @@ class TikTokStreakService:
                     # 1. Відкриваємо розділ повідомлень TikTok
                     logger.info(f"Відкриваємо повідомлення TikTok для діалогу з @{username}...")
                     try:
-                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="networkidle")
-                    except Exception:
                         await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(3500)
+                    except Exception:
+                        await page.goto("https://www.tiktok.com/messages", timeout=40000)
+                    await page.wait_for_timeout(4000)
 
                     if "login" in page.url.lower():
                         return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
@@ -518,11 +518,11 @@ class TikTokStreakService:
             )
             return False, err
 
-    async def run_streaks_dispatch(self, force_all: bool = False) -> Dict[str, Any]:
+    async def run_streaks_dispatch(self, force_all: bool = False, friends_only: bool = False) -> Dict[str, Any]:
         """
         Головний цикл щоденної відправки вогників:
         - Знаходить акаунт дівчини та надсилає їй теплі повідомлення з сердечками (❤️).
-        - Знаходить усіх друзів із вогниками та надсилає їм вогник (🔥).
+        - Знаходить усіх друзів із вогниками та надсилає їм вогник (🔥) з погодою в Чернівцях.
         - Дотримується рандомізованого інтервалу (3-7 сек) між відправками для захисту від підозр.
         """
         targets = get_streak_targets(active_only=True)
@@ -530,6 +530,9 @@ class TikTokStreakService:
             # Якщо список порожній, але дівчина задана в конфігу
             self._ensure_girlfriend_initialized()
             targets = get_streak_targets(active_only=True)
+
+        if friends_only:
+            targets = [t for t in targets if not t.get("is_girlfriend")]
 
         if not targets:
             return {
