@@ -57,16 +57,24 @@ class FacebookPublisher(BasePublisher):
 
         proxies = proxy_manager.get_requests_proxies()
 
+        def _post(url, **kwargs):
+            if proxies:
+                try:
+                    return requests.post(url, proxies=proxies, **kwargs)
+                except Exception as pe:
+                    logger.warning(f"Facebook: збій проксі ({pe}), перемикаємось на пряме з'єднання...")
+                    return requests.post(url, proxies=None, **kwargs)
+            return requests.post(url, proxies=None, **kwargs)
+
         try:
             if content_type == ContentType.VIDEO:
                 # Відео публікується у Facebook Reels
                 v_path = Path(media_paths[0])
                 file_size = v_path.stat().st_size
                 init_url = f"https://graph.facebook.com/v21.0/{page_id}/video_reels"
-                init_res = requests.post(
+                init_res = _post(
                     init_url,
                     params={"access_token": token, "upload_phase": "start"},
-                    proxies=proxies,
                     timeout=15
                 ).json()
 
@@ -83,7 +91,7 @@ class FacebookPublisher(BasePublisher):
                     "offset": "0",
                     "file_size": str(file_size)
                 }
-                requests.post(upload_url, headers=upload_headers, data=video_data, proxies=proxies, timeout=60)
+                _post(upload_url, headers=upload_headers, data=video_data, timeout=60)
 
                 finish_data = {
                     "access_token": token,
@@ -92,18 +100,17 @@ class FacebookPublisher(BasePublisher):
                     "description": caption,
                     "video_state": "PUBLISHED"
                 }
-                requests.post(init_url, data=finish_data, proxies=proxies, timeout=15)
+                _post(init_url, data=finish_data, timeout=15)
                 return PublishResult(success=True, platform=self.platform_name, external_id=str(video_id), url=f"https://facebook.com/reel/{video_id}")
 
             elif content_type in (ContentType.PHOTO, ContentType.CAROUSEL, ContentType.MIXED_CAROUSEL):
                 # Одиночне фото або альбом фото
                 photo_url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
                 with open(media_paths[0], "rb") as pf:
-                    res = requests.post(
+                    res = _post(
                         photo_url,
                         data={"caption": caption, "access_token": FB_PAGE_ACCESS_TOKEN},
                         files={"source": pf},
-                        proxies=proxies,
                         timeout=30
                     ).json()
                 post_id = res.get("id") or res.get("post_id")
@@ -112,10 +119,9 @@ class FacebookPublisher(BasePublisher):
             elif content_type == ContentType.TEXT:
                 # Текстовий пост на сторінку
                 feed_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/feed"
-                res = requests.post(
+                res = _post(
                     feed_url,
                     data={"message": caption, "access_token": FB_PAGE_ACCESS_TOKEN},
-                    proxies=proxies,
                     timeout=15
                 ).json()
                 post_id = res.get("id")

@@ -88,10 +88,8 @@ class TikTokPublisher(BasePublisher):
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
                         "--disable-software-rasterizer",
-                        "--no-zygote",
                         "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
-                        "--renderer-process-limit=1",
                         "--no-first-run",
                         "--no-default-browser-check"
                     ]

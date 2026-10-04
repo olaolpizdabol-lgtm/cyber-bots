@@ -183,6 +183,7 @@ class MediaProcessor:
             "-profile:v", "high",
             "-level", "4.2",
             "-pix_fmt", "yuv420p",
+            "-threads", "2",
             "-c:a", "aac",
             "-b:a", "192k",
             "-ar", "44100",

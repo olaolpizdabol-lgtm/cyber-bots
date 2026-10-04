@@ -835,28 +835,38 @@ async def callback_back_to_publish(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pub_compat:"))
 async def callback_publish_compat(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     post_id = int(call.data.split(":")[1])
     await call.message.edit_reply_markup(reply_markup=None)
     status_msg = await call.message.answer(f"🚀 <b>Публікація #{post_id} у всі сумісні платформи розпочалась...</b>")
 
     results = await asyncio.to_thread(auto_poster.publish_post, post_id)
     await format_and_send_publish_results(status_msg, post_id, results)
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("pub_tier1:"))
 async def callback_publish_tier1(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     post_id = int(call.data.split(":")[1])
     await call.message.edit_reply_markup(reply_markup=None)
     status_msg = await call.message.answer(f"🔥 <b>Публікація #{post_id} у Рівень 1 (Top 5: TT, IG, YT, FB, Snap)...</b>")
 
     results = await asyncio.to_thread(auto_poster.publish_post, post_id, TIER_1_PLATFORMS)
     await format_and_send_publish_results(status_msg, post_id, results)
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("pub_p:"))
 async def callback_publish_single(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     parts = call.data.split(":")
     post_id = int(parts[1])
     platform = parts[2]
@@ -873,7 +883,6 @@ async def callback_publish_single(call: CallbackQuery):
     else:
         err = res.error if res else "Помилка"
         await status_msg.edit_text(f"❌ <b>{plat_name}:</b> <i>{html.escape(security_guard.sanitize_error(str(err)))}</i>", parse_mode="HTML")
-    await call.answer()
 
 
 async def format_and_send_publish_results(msg: Message, post_id: int, results: dict):
@@ -906,6 +915,10 @@ async def format_and_send_publish_results(msg: Message, post_id: int, results: d
 
 @router.callback_query(F.data.startswith("retry_failed:"))
 async def callback_retry_failed(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     post_id = int(call.data.split(":")[1])
     status_msg = await call.message.answer(f"🔄 <b>Повторна публікація поста #{post_id} на непройдених мережах...</b>", parse_mode="HTML")
     res_dict = await asyncio.to_thread(auto_poster.retry_failed_platforms, post_id)
@@ -914,7 +927,6 @@ async def callback_retry_failed(call: CallbackQuery):
         await status_msg.edit_text(f"ℹ️ {res_dict.get('message', 'Усі платформи вже опубліковані!')}")
     else:
         await format_and_send_publish_results(status_msg, post_id, results)
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("post_analytics:"))
@@ -1290,10 +1302,17 @@ async def callback_sched_apply(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sched_now:"))
 async def callback_sched_now(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     post_id = int(call.data.split(":")[1])
     post = get_post_by_id(post_id)
     if not post:
-        await call.answer("Пост не знайдено!", show_alert=True)
+        try:
+            await call.answer("Пост не знайдено!", show_alert=True)
+        except Exception:
+            pass
         return
 
     cancel_scheduled_post(post_id)
@@ -1309,7 +1328,6 @@ async def callback_sched_now(call: CallbackQuery):
 
     results = await asyncio.to_thread(auto_poster.publish_post, post_id, target_platforms)
     await format_and_send_publish_results(status_msg, post_id, results)
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("sched_cancel:"))

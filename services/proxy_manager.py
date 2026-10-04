@@ -1,3 +1,4 @@
+import time
 import logging
 import urllib.parse
 from typing import Dict, Any, Optional, Tuple, List
@@ -79,35 +80,28 @@ class ProxyManager:
     def __init__(self):
         self.proxy_url = US_NY_PROXY_URL
         self.strict_check = STRICT_PROXY_CHECK
+        self._cached_health: Optional[Dict[str, Any]] = None
+        self._last_health_check: float = 0.0
 
     def is_platform_ip_dependent(self, platform: str) -> bool:
         """Перевіряє, чи потрібен обов'язковий US проксі для платформи"""
         return platform.lower() in IP_DEPENDENT_PLATFORMS
 
-    def get_requests_proxies(self) -> Optional[Dict[str, str]]:
-        """
-        Повертає словник проксі для бібліотеки requests.
-        Для SOCKS5 автоматично нормалізує до socks5h://, щоб запобігти DNS-витоку (DNS leak),
-        завдяки чому DNS запити резолвляться безпосередньо на стороні New York проксі.
-        """
+    def _build_raw_requests_proxies(self) -> Optional[Dict[str, str]]:
         if not self.proxy_url:
             return None
-
         url = self.proxy_url
         if url.startswith("socks5://"):
             url = url.replace("socks5://", "socks5h://", 1)
-
         return {
             "http": url,
             "https": url
         }
 
-    def get_playwright_proxy(self) -> Optional[Dict[str, str]]:
+    def _build_raw_playwright_proxy(self) -> Optional[Dict[str, str]]:
         if not self.proxy_url:
             return None
         parsed = urllib.parse.urlparse(self.proxy_url)
-        # Chromium не підтримує аутентифікацію для SOCKS5 (Browser does not support socks5 proxy authentication).
-        # Якщо вказано логін/пароль для socks5/socks5h, перемикаємо схему на http (Webshare та більшість проксі підтримують обидва протоколи на тому ж порту).
         if parsed.username and parsed.scheme.startswith("socks"):
             scheme = "http"
         else:
@@ -122,13 +116,56 @@ class ProxyManager:
             proxy_config["password"] = urllib.parse.unquote(parsed.password)
         return proxy_config
 
-    def check_proxy_health(self) -> Dict[str, Any]:
+    def is_proxy_alive(self) -> bool:
+        """Перевіряє доступність проксі без блокування"""
+        if not self.proxy_url:
+            return False
+        health = self.check_proxy_health()
+        return bool(health.get("ok"))
+
+    def get_requests_proxies(self, fallback_to_direct: bool = True) -> Optional[Dict[str, str]]:
         """
-        Перевіряє реальну вихідну IP-адресу, країну та місто через проксі.
-        Переконується що це дійсно США (New York).
+        Повертає словник проксі для бібліотеки requests.
+        Якщо проксі вичерпано/мертвий і STRICT_PROXY_CHECK=false,
+        автоматично повертає None (пряме з'єднання), щоб уникнути помилок публікації.
         """
         if not self.proxy_url:
-            return {
+            return None
+
+        if fallback_to_direct and not self.strict_check:
+            if not self.is_proxy_alive():
+                logger.info("Проксі недоступний або ліміт вичерпано. Перемикаємо requests на пряме підключення.")
+                return None
+
+        return self._build_raw_requests_proxies()
+
+    def get_playwright_proxy(self, fallback_to_direct: bool = True) -> Optional[Dict[str, str]]:
+        """
+        Повертає конфігурацію проксі для Playwright.
+        Якщо проксі вичерпано/мертвий і STRICT_PROXY_CHECK=false,
+        автоматично повертає None (пряме з'єднання).
+        """
+        if not self.proxy_url:
+            return None
+
+        if fallback_to_direct and not self.strict_check:
+            if not self.is_proxy_alive():
+                logger.info("Проксі недоступний або ліміт вичерпано. Перемикаємо Playwright на пряме підключення.")
+                return None
+
+        return self._build_raw_playwright_proxy()
+
+    def check_proxy_health(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Перевіряє реальну вихідну IP-адресу, країну та місто через проксі.
+        Кешує результат на 60 секунд, щоб не затримувати паралельні запити.
+        """
+        now = time.time()
+        if not force and self._cached_health and (now - self._last_health_check < 60.0):
+            return self._cached_health
+
+        if not self.proxy_url:
+            res = {
                 "ok": False,
                 "ip": "Direct Server IP",
                 "country": "Unknown",
@@ -139,13 +176,16 @@ class ProxyManager:
                 "is_ny": False,
                 "message": "⚠️ Проксі не налаштовано! (US_NY_PROXY_URL пустий)"
             }
+            self._cached_health = res
+            self._last_health_check = now
+            return res
 
-        proxies = self.get_requests_proxies()
+        proxies = self._build_raw_requests_proxies()
         try:
             resp = requests.get(
                 "http://ip-api.com/json?fields=status,message,country,countryCode,region,regionName,city,isp,query",
                 proxies=proxies,
-                timeout=12
+                timeout=8
             )
             data = resp.json()
             if data.get("status") == "success":
@@ -165,7 +205,7 @@ class ProxyManager:
                     f"⚠️ Проксі працює, але локація: {city}, {country} (бажано саме New York, US)"
                 )
 
-                return {
+                res = {
                     "ok": is_us,
                     "ip": ip,
                     "country": country,
@@ -177,7 +217,7 @@ class ProxyManager:
                     "message": msg
                 }
             else:
-                return {
+                res = {
                     "ok": False,
                     "ip": "Error",
                     "country": "",
@@ -189,8 +229,8 @@ class ProxyManager:
                     "message": f"❌ Помилка перевірки проксі: {data.get('message')}"
                 }
         except Exception as e:
-            logger.error(f"Помилка підключення до проксі: {e}")
-            return {
+            logger.warning(f"Помилка підключення до проксі або ліміт трафіку вичерпано: {e}")
+            res = {
                 "ok": False,
                 "ip": "Offline",
                 "country": "",
@@ -201,6 +241,10 @@ class ProxyManager:
                 "is_ny": False,
                 "message": f"❌ Не вдалося підключитися до проксі: {str(e)}"
             }
+
+        self._cached_health = res
+        self._last_health_check = now
+        return res
 
     def verify_platform_safety(self, platform: str) -> Tuple[bool, str]:
         """

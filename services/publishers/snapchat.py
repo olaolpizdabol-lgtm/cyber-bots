@@ -55,7 +55,18 @@ class SnapchatSpotlightPublisher(BasePublisher):
         if not headline and title:
             headline = title.split("#")[0].strip()[:36]
 
-        has_state = SNAPCHAT_STATE_FILE.exists()
+        has_state = False
+        if SNAPCHAT_STATE_FILE.exists():
+            try:
+                import json
+                with open(SNAPCHAT_STATE_FILE, "r", encoding="utf-8") as sf:
+                    s_data = json.load(sf)
+                cookie_names = {c.get("name") for c in s_data.get("cookies", [])}
+                if any(k in cookie_names for k in ["sc-a-nonce", "sc-a-session", "xs", "sessionid"]):
+                    has_state = True
+            except Exception:
+                has_state = False
+
         has_api_token = (
             bool(SNAPCHAT_ACCESS_TOKEN) and
             not SNAPCHAT_ACCESS_TOKEN.startswith("your_") and
@@ -65,11 +76,11 @@ class SnapchatSpotlightPublisher(BasePublisher):
         is_configured = has_state or has_api_token
 
         if not is_configured and not DRY_RUN_MODE:
-            logger.info("Snapchat Spotlight: сесія не знайдена у data/snapchat_state.json")
+            logger.info("Snapchat Spotlight: сесія не налаштована у data/snapchat_state.json")
             return PublishResult(
                 success=False,
                 platform=self.platform_name,
-                error="Не налаштовано (запустіть: .venv/bin/python scripts/export_snapchat_cookies.py)"
+                error="Не налаштовано (увійдіть у Snapchat у Chrome та експортуйте cookies)"
             )
 
         if DRY_RUN_MODE and not is_configured:
@@ -103,8 +114,9 @@ class SnapchatSpotlightPublisher(BasePublisher):
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
-                    "--renderer-process-limit=1",
                     "--no-first-run",
                     "--no-default-browser-check"
                 ]

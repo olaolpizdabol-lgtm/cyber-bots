@@ -296,7 +296,6 @@ class TikTokStreakService:
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
                     "--disable-software-rasterizer",
-                    "--no-zygote",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
                     "--no-default-browser-check"
@@ -669,7 +668,6 @@ class TikTokStreakService:
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
                         "--disable-software-rasterizer",
-                        "--no-zygote",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
                         "--no-default-browser-check"
