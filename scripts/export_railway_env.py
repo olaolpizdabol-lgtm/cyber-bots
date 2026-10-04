@@ -54,6 +54,7 @@ def main():
         ("credentials/instagram_session.json", "INSTAGRAM_SESSION_B64", False),
         ("data/tiktok_channel_state.json", "TIKTOK_CHANNEL_STATE_B64", True),
         ("data/tiktok_state.json", "TIKTOK_STATE_B64", True),
+        ("data/snapchat_state.json", "SNAPCHAT_STATE_B64", False),
     ]
 
     print("\n📦 Стиснення та кодування сесій:")
