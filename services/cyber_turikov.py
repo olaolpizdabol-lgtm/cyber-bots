@@ -33,7 +33,7 @@ from core.database import (
     get_random_cyber_media
 )
 from services.gemini_ai import gemini_service, sanitize_typography
-from services.cyber_routing import get_temporal_context
+from services.cyber_routing import get_temporal_context, get_sender_character_profile
 from services.cyber_rizhyi import is_ai_refusal, clean_bot_reply, get_contextual_insult_clapback, get_dynamic_gang_shout
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,16 @@ CYBER_TURIKOV_SYSTEM_PROMPT = """Ти - 16-річний Саня Туріков 
 Твій вайб: сидиш тільки з телефона, ганяєш по району на китайському електросамокаті з повним зарядом, п'єш маленьку колу, граєш у карти біля тайстри чи парку Шевченка.
 Твої кенти: Рижий (@la_coste228 / @cyber_red_head_bot), Бодя (@bodya_qq), Діма (@twdht), Давід (@davvidka1), Хомяк (@vad1mk4k), Коля (@chernivtsizov1958), Міша (@mxsdt), Тімур (@invicible11), Танєвський (@hzshopusati), Ілюха (@for4ik333).
 Головний клоун чату: Вітьок (@zelenskiy404) - додік з чужою ламбою на аві, якого кинула тьолка.
+
+СУВОРЕ ПРАВИЛО ЩОДО КЕНТІВ (ХТО Є ХТО - НЕ ПЛУТАТИ!):
+- ВІТЬОК (@zelenskiy404): ТІЛЬКИ ВІН клоун чату, який поставив чужу зелену Ламбу на аву і якого кинула дівчина! НІКОЛИ не приписуй ламбу іншим кентам (Боді, Дімі, Давіду тощо)!
+- ТАНЄВСЬКИЙ (@hzshopusati): ТІЛЬКИ ВІН вусатий! НІКОЛИ не питай про вуса у Боді, Вітька чи інших пацанів! Вуса є ТІЛЬКИ у Танєвського!
+- БОДЯ (@bodya_qq): Твій кент "богдан банан". Він НЕ Вітьок і НЕ Танєвський! У Боді НЕМАЄ ламби і НЕМАЄ вусів!
+- ДАВІД (@davvidka1): Шейх фейсбучний, заробив на шортсах у Facebook, у нього реальні бабки на відміну від Вітька!
+- РИЖИЙ (@la_coste228 / @cyber_red_head_bot): Твій бро задрот комнатний, комп лагає, ригав від печення, п'є квас!
+- ДІМА (@twdht): Проїбався, трубку не бере, буде в 4-5!
+- ХОМЯК (@vad1mk4k): Грає в танки!
+- КОЛЯ І МІША: Каратисти!
 
 ГОЛОВНЕ ЗАВДАННЯ:
 ПИЗДОШИТИ ЖОРСТКО НЕЙМОВІРНО! Не давати нікому спуску і тримати чат у максимальному розпалі!
@@ -366,23 +376,21 @@ class CyberTurikovService:
                 else:
                     history_prompts.append({"role": "user", "content": f"Саня Рижий: {bot_ans}"})
 
-        sender_name = first_name or username or "Кент"
-        u_clean = (username or "").lower().lstrip("@")
-        if u_clean in GANG_USERNAMES_MAP:
-            sender_name = GANG_USERNAMES_MAP[u_clean]
+        prof = get_sender_character_profile(username=username, first_name=first_name, user_id=user_id)
+        sender_name = prof["name"]
+        is_vitos = prof["is_vitos"]
 
         current_prompt = f"{sender_name}: {message_text}"
         if reply_to_text:
             current_prompt = f"[У відповідь на «{reply_to_text[:60]}»]\n{current_prompt}"
             
+        current_prompt += f"\n[{prof['instruction']}]"
+
         txt_low_turikov = (message_text or "").lower()
-        is_vitos = u_clean == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower() or "zelenskiy404" in txt_low_turikov
         is_robot_accusation = any(w in txt_low_turikov for w in ["робот", "бот", "штучний"])
         is_about_avatar = any(w in txt_low_turikov for w in ["ава", "аву", "аві", "фотк", "ламб", "машин", "вигляд", "оціни"])
 
-        if is_vitos:
-            current_prompt += "\n[Це Вітьок з чужою зеленою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-4 слова]"
-        elif is_robot_accusation:
+        if is_robot_accusation:
             current_prompt += "\n[Тебе назвали ботом чи роботом — скажи що ти на самокаті їздиш який нахуй бот! 1-4 слова]"
         elif is_about_avatar and sender_avatar_desc and sender_avatar_desc not in ("невідомо", "не вдалося завантажити аватарку"):
             current_prompt += f"\n[Ава {sender_name}: {sender_avatar_desc[:80]}. Підколи якщо доречно, але не копіюй слова]"

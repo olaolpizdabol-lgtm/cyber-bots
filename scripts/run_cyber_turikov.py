@@ -52,6 +52,7 @@ from services.cyber_routing import (
     is_message_addressed_to_bot,
     get_message_target,
     get_user_display_name,
+    get_sender_character_profile,
     RIZHYI_BOT_ID,
     TURIKOV_BOT_ID
 )
@@ -384,14 +385,11 @@ async def handle_text(message: Message, bot: Bot):
         except Exception:
             pass
 
-    sender_uname = (message.from_user.username or "").lower() if message.from_user else ""
-    sender_fname = (message.from_user.first_name or "").lower() if message.from_user else ""
-    is_vitos = (
-        sender_uname == "zelenskiy404"
-        or any(k in sender_fname for k in ["вітя", "вітьок", "зеленський"])
-        or target_name == "Вітьок"
-        or "@zelenskiy404" in text.lower()
-    )
+    sender_uname = (message.from_user.username or "") if message.from_user else ""
+    sender_fname = (message.from_user.first_name or "") if message.from_user else ""
+    sender_uid = message.from_user.id if message.from_user else 0
+    sender_prof = get_sender_character_profile(username=sender_uname, first_name=sender_fname, user_id=sender_uid)
+    is_vitos = sender_prof["is_vitos"]
 
     custom_instr = None
     if is_vitos:
@@ -400,6 +398,8 @@ async def handle_text(message: Message, bot: Bot):
             "Жорстко над ним угарай: 'Блять ти додік якого кинула дівчина ставиш ламбу на аву, з тебе даже в 11 школі угарають. Реальні бабки на ламбу є в Давіда (@davvidka1), він піднявся на фейсбуку'! "
             "Тегни @zelenskiy404 і @davvidka1. 1 коротка фраза."
         )
+    elif sender_prof.get("instruction"):
+        custom_instr = sender_prof["instruction"]
     elif is_group and random.random() < 0.18:
         custom_instr = (
             "Підтримай тему по-пацанськи. Якщо доречно, підколи або тегни когось із кентів: "
@@ -583,9 +583,12 @@ async def inter_bot_bridge_worker(bot: Bot):
 
                     sender_uid = ev.get("sender_user_id") or 1
                     sender_uname = ev.get("sender_username")
-                    sender_name = ev.get("sender_first_name") or "Кент"
+                    sender_fname = ev.get("sender_first_name") or "Кент"
 
-                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower() or "@zelenskiy404" in text.lower()
+                    sender_prof = get_sender_character_profile(username=sender_uname, first_name=sender_fname, user_id=sender_uid)
+                    sender_name = sender_prof["name"]
+                    is_vitos = sender_prof["is_vitos"]
+
                     if is_vitos:
                         relay_instruction = (
                             "Це пише Вітьок (@zelenskiy404)! Твій бро Рижий уже осадив його, тепер ТИ включайся і добивай! "
@@ -593,18 +596,11 @@ async def inter_bot_bridge_worker(bot: Bot):
                             "Тегни @zelenskiy404 і @davvidka1. Пиши 1 коротке живе повідомлення."
                         )
                     else:
-                        if random.random() < 0.20:
-                            relay_instruction = (
-                                f"Твій бро Рижий щойно відповів {sender_name} у групі. Підтримай тему по-пацанськи. "
-                                "Можеш контекстно підколоти чи тегнути @zelenskiy404 (що він додік з чужою ламбою на аві і його кинула дівчина, вся 11 школа угарає) чи тегнути @davvidka1 або @twdht. "
-                                "Пиши 1 коротке живе повідомлення."
-                            )
-                        else:
-                            relay_instruction = (
-                                f"Твій бро Рижий щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                                f"спокійно й дружньо підтримай тему по-пацанськи! "
-                                "Пиши 1 коротке живе повідомлення."
-                            )
+                        relay_instruction = (
+                            f"Твій бро Рижий щойно відповів {sender_name} у групі. {sender_prof['instruction']} "
+                            f"Включись у розмову разом з ним, спокійно й дружньо підтримай тему по-пацанськи! "
+                            "Пиши 1 коротке живе повідомлення."
+                        )
 
                     pkg = cyber_turikov_service.generate_reply_package(
                         chat_id=chat_id,

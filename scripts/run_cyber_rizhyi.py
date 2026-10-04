@@ -56,6 +56,7 @@ from services.cyber_routing import (
     is_message_addressed_to_bot,
     get_message_target,
     get_user_display_name,
+    get_sender_character_profile,
     RIZHYI_BOT_ID,
     TURIKOV_BOT_ID
 )
@@ -464,16 +465,13 @@ async def handle_text(message: Message, bot: Bot):
         return
 
     # 3. Відповідь активного персонажа (Саня Рижий чи Саня Туріков)
-    sender_uname = (message.from_user.username or "").lower() if message.from_user else ""
-    sender_fname = (message.from_user.first_name or "").lower() if message.from_user else ""
-    is_vitos = (
-        sender_uname == "zelenskiy404"
-        or any(k in sender_fname for k in ["вітя", "вітьок", "зеленський"])
-        or target_name == "Вітьок"
-        or "@zelenskiy404" in text.lower()
-    )
+    sender_uname = (message.from_user.username or "") if message.from_user else ""
+    sender_fname = (message.from_user.first_name or "") if message.from_user else ""
+    sender_uid = message.from_user.id if message.from_user else 0
+    sender_prof = get_sender_character_profile(username=sender_uname, first_name=sender_fname, user_id=sender_uid)
+    is_vitos = sender_prof["is_vitos"]
 
-    custom_instr = None
+    custom_instr = sender_prof.get("instruction")
     if is_vitos:
         custom_instr = "Це Вітьок з чужою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-5 слів"
 
@@ -686,9 +684,12 @@ async def inter_bot_bridge_worker(bot: Bot):
 
                     sender_uid = ev.get("sender_user_id") or 1
                     sender_uname = ev.get("sender_username")
-                    sender_name = ev.get("sender_first_name") or "Кент"
+                    sender_fname = ev.get("sender_first_name") or "Кент"
 
-                    is_vitos = sender_uname == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower()
+                    sender_prof = get_sender_character_profile(username=sender_uname, first_name=sender_fname, user_id=sender_uid)
+                    sender_name = sender_prof["name"]
+                    is_vitos = sender_prof["is_vitos"]
+
                     if is_vitos:
                         relay_instruction = (
                             "Це пише Вітьок (@zelenskiy404)! Твій бро Туріков уже осадив його, тепер ТИ включайся і добивай! "
@@ -700,8 +701,8 @@ async def inter_bot_bridge_worker(bot: Bot):
                         )
                     else:
                         relay_instruction = (
-                            f"Твій бро Туріков щойно відповів {sender_name} у групі. Включись у розмову разом з ним, "
-                            f"спокійно й дружньо підтримай тему по-пацанськи! Без агресії до друзів. "
+                            f"Твій бро Туріков щойно відповів {sender_name} у групі. {sender_prof['instruction']} "
+                            f"Включись у розмову разом з ним, спокійно й дружньо підтримай тему по-пацанськи! Без агресії до друзів. "
                             "Пиши 1 коротке повідомлення. Без '!' і без @ тегів!"
                         )
 

@@ -38,7 +38,7 @@ from core.database import (
     get_cyber_all_user_facts_for_prompt,
 )
 from services.gemini_ai import gemini_service, sanitize_typography
-from services.cyber_routing import get_temporal_context
+from services.cyber_routing import get_temporal_context, get_sender_character_profile
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,16 @@ GANG_USERNAMES_MAP = {
 CYBER_RIZHYI_SYSTEM_PROMPT = """Ти - 16-річний Саня (Рижий) з Чернівців у пацанському телеграм-чаті "ЄГОР БІРГЄР".
 Твої кенти: Бодя (@bodya_qq), Діма (@twdht), Саня Туріков (@smo1zi / @turikov_bot), Тімур (@invicible11), Міша (@mxsdt), Хомяк (@vad1mk4k), Коля Шахов (@chernivtsizov1958), Давід (@davvidka1), Танєвський (@hzshopusati), Ілюха (@for4ik333).
 Головний клоун чату: Вітьок (@zelenskiy404) - чмоня, який поставив чужу зелену Ламбу на аву і якого кинула дівчина, в 11 школі з нього всі ржуть.
+
+СУВОРЕ ПРАВИЛО ЩОДО КЕНТІВ (ХТО Є ХТО - НЕ ПЛУТАТИ!):
+- ВІТЬОК (@zelenskiy404): ТІЛЬКИ ВІН клоун чату, який поставив чужу зелену Ламбу на аву і якого кинула дівчина! НІКОЛИ не приписуй ламбу іншим кентам (Боді, Дімі, Давіду тощо)!
+- ТАНЄВСЬКИЙ (@hzshopusati): ТІЛЬКИ ВІН вусатий! НІКОЛИ не питай про вуса у Боді, Вітька чи інших пацанів! Вуса є ТІЛЬКИ у Танєвського!
+- БОДЯ (@bodya_qq): Твій найкращий кент "богдан банан". Він НЕ Вітьок і НЕ Танєвський! У Боді НЕМАЄ ламби і НЕМАЄ вусів!
+- ДАВІД (@davvidka1): Шейх фейсбучний, заробив на шортсах у Facebook, у нього реальні бабки на відміну від Вітька!
+- ТУРІКОВ (@smo1zi / @turikov_bot): Літає на китайському самокаті з повним зарядом і п'є маленьку колу!
+- ДІМА (@twdht): Проїбався, трубку не бере, буде в 4-5!
+- ХОМЯК (@vad1mk4k): Грає в танки!
+- КОЛЯ І МІША: Каратисти!
 
 ГОЛОВНЕ ЗАВДАННЯ:
 ПИЗДОШИТИ ЖОРСТКО НЕЙМОВІРНО! Не бути тюхтієм і не писати нудне "та чіл бро".
@@ -453,7 +463,8 @@ def clean_bot_reply(reply: str, bot_persona: str = "") -> str:
     if reply.strip().lower() in ["саня рижий", "саня туріков", "рижий", "туріков", "саня"]:
         return ""
 
-    # Прибираємо на початку рядка спам-звернення на кшталт 'бодя, '
+    # Прибираємо на початку рядка спам-звернення на кшталт 'бодя, ' або 'бодя: '
+    reply = re.sub(r'^\s*(?:бодя|богдан|міша|діма|вітьок|давід|танєвський|саня|туріков|рижий|кент)\s*[:,\-]\s*', '', reply, flags=re.IGNORECASE)
     for prefix in ["бодя, ", "бодя ", "богдан, ", "богдан ", "міша, ", "міша ", "діма, ", "діма ", "йо, ", "йо "]:
         if reply.lower().startswith(prefix):
             reply = reply[len(prefix):].strip()
@@ -823,29 +834,29 @@ class CyberRizhyiService:
             "пси", "пес", "псяра", "собак", "гавка", "чорт", "свин", "клоун"
         ])
 
-        sender_name = first_name or username or "Кент"
-        u_clean = (username or "").lower().lstrip("@")
-        if u_clean in GANG_USERNAMES_MAP:
-            sender_name = GANG_USERNAMES_MAP[u_clean]
+        # Отримуємо точний профіль відправника, щоб бот чітко знав хто пише і не плутав факти
+        prof = get_sender_character_profile(username=username, first_name=first_name, user_id=user_id)
+        sender_name = prof["name"]
+        is_vitos = prof["is_vitos"]
 
         s_low = f"{first_name or ''} {username or ''}".lower()
         txt_low = (message_text or "").lower()
-        is_bohdan = any(k in s_low for k in ["бод", "bodya", "bohdan"])
-        is_dima = any(k in s_low for k in ["дім", "дим", "dima", "dimon", "dmitr"])
-        is_misha = any(k in s_low for k in ["міш", "миш", "misha", "mikhail"])
+        is_bohdan = prof["key"] == "bodia" or any(k in s_low for k in ["бод", "bodya", "bohdan"])
+        is_dima = prof["key"] == "dima" or any(k in s_low for k in ["дім", "дим", "dima", "dimon", "dmitr"])
+        is_misha = prof["key"] == "misha" or any(k in s_low for k in ["міш", "миш", "misha", "mikhail"])
 
         current_prompt = f"{sender_name}: {message_text}"
         if reply_to_text:
             current_prompt = f"[У відповідь на «{reply_to_text[:60]}»]\n{current_prompt}"
 
+        # Обов'язкова інструкція про те, хто саме є автором повідомлення
+        current_prompt += f"\n[{prof['instruction']}]"
+
         txt_low_check = (message_text or "").lower()
-        is_vitos = u_clean == "zelenskiy404" or "вітя" in sender_name.lower() or "вітьок" in sender_name.lower() or "вітос" in sender_name.lower() or "zelenskiy404" in txt_low_check
         is_robot_accusation = any(w in txt_low_check for w in ["робот", "бот", "штучний"])
         is_about_avatar = any(w in txt_low_check for w in ["ава", "аву", "аві", "фотк", "ламб", "машин", "вигляд", "оціни"])
 
-        if is_vitos:
-            current_prompt += "\n[Це Вітьок з чужою зеленою ламбою на аві, якого кинула тьолка. Тільки над ним жорстко угарай! 1-5 слів]"
-        elif is_robot_accusation:
+        if is_robot_accusation:
             current_prompt += "\n[Тебе назвали ботом чи роботом — обурись по-пацанськи: 'який нахуй бот я живий', 'сам ти бот'. 1-5 слів]"
         elif is_about_avatar and sender_avatar_desc and sender_avatar_desc not in ("невідомо", "не вдалося завантажити аватарку"):
             current_prompt += f"\n[Ава {sender_name}: {sender_avatar_desc[:80]}. Підколи якщо доречно, але не копіюй слова]"
@@ -950,7 +961,8 @@ class CyberRizhyiService:
                     is_dima=is_dima,
                     is_misha=is_misha,
                     photo_desc=photo_desc or "",
-                    chat_id=chat_id
+                    chat_id=chat_id,
+                    sender_name=sender_name
                 )
             elif is_sex_joke:
                 reply = "ти шо єбанувся краще квасу випий"
@@ -973,7 +985,8 @@ class CyberRizhyiService:
             reply = self._get_smart_offline_reply(
                 message_text=message_text, has_photo=has_photo,
                 is_bohdan=is_bohdan, is_dima=is_dima, is_misha=is_misha,
-                photo_desc=photo_desc or "", chat_id=chat_id
+                photo_desc=photo_desc or "", chat_id=chat_id,
+                sender_name=sender_name
             )
             reply = clean_bot_reply(reply)
         elif reply.lower().strip() in recent[-4:]:
@@ -1102,7 +1115,8 @@ class CyberRizhyiService:
         is_dima: bool = False,
         is_misha: bool = False,
         photo_desc: str = "",
-        chat_id: int = 0
+        chat_id: int = 0,
+        sender_name: str = ""
     ) -> str:
         """Розумний вибір фрази з реального архіву Рижого для демо-режиму"""
         txt = (message_text or "").lower()
@@ -1116,7 +1130,7 @@ class CyberRizhyiService:
             "нах", "нахуй", "соси", "хуй", "шльондр", "гнид", "виродок", "тварь"
         ])
         if is_insult:
-            return get_contextual_insult_clapback(message_text, recent_replies=self._recent_replies_cache.get(chat_id, []))
+            return get_contextual_insult_clapback(message_text, recent_replies=self._recent_replies_cache.get(chat_id, []), sender_name=sender_name)
 
         if has_photo:
             # Розумна реакція на основі візуального опису фото

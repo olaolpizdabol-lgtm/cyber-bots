@@ -23,7 +23,7 @@ GANG_USERNAMES_MAP = {
     "mxsdt": "Мишко",
     "davvidka1": "Давід",
     "hzshopusati": "Танєвський",
-    "zelenskiy404": "Вітос",
+    "zelenskiy404": "Вітьок",
     "for4ik333": "Ілюха",
     "bodya_qq": "Бодя",
     "invicible11": "Тімур",
@@ -37,6 +37,142 @@ GANG_HUMAN_USERNAMES = {
     "la_coste228", "smo1zi", "twdht", "vad1mk4k", "chernivtsizov1958",
     "mxsdt", "davvidka1", "hzshopusati", "zelenskiy404", "for4ik333", "bodya_qq"
 }
+
+
+def get_sender_character_profile(
+    username: Optional[str] = None,
+    first_name: Optional[str] = None,
+    user_id: Optional[int] = None
+) -> dict:
+    """
+    Визначає точний профіль та персональну інструкцію для автора повідомлення.
+    СУВОРИЙ ЗАХИСТ ВІД ПЛУТАНИНИ:
+    - Бодя (@bodya_qq) — це друг 'богдан банан', у нього НЕМАЄ ламби і НЕМАЄ вусів!
+    - Вітьок (@zelenskiy404) — ТІЛЬКИ ВІН клоун з чужою зеленою ламбою на аві, якого кинула тьолка!
+    - Танєвський (@hzshopusati) — ТІЛЬКИ ВІН вусатий кент!
+    - Давід (@davvidka1) — ТІЛЬКИ ВІН шейх з Facebook шортсів!
+    """
+    u_clean = (username or "").lower().lstrip("@")
+    f_clean = (first_name or "").lower()
+
+    # 1. Вітьок (@zelenskiy404) — суворо ТІЛЬКИ якщо сам автор є Вітьком!
+    if u_clean == "zelenskiy404" or any(k in f_clean for k in ["вітя", "вітьок", "зеленський"]):
+        return {
+            "key": "vitos",
+            "name": "Вітьок",
+            "username": "zelenskiy404",
+            "is_vitos": True,
+            "instruction": "Тобі зараз пише Вітьок (@zelenskiy404)! Тільки над ним угарай, що він додік з чужою зеленою ламбою на аві, якого кинула дівчина і вся 11 школа з нього рже!"
+        }
+
+    # 2. Бодя (@bodya_qq) — друг 'богдан банан', НЕ Вітьок і НЕ Танєвський!
+    if u_clean == "bodya_qq" or any(k in f_clean for k in ["бодя", "богдан"]):
+        return {
+            "key": "bodia",
+            "name": "Бодя",
+            "username": "bodya_qq",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише твій найкращий кент Бодя (@bodya_qq) ('богдан банан')! ВІН НЕ ВІТЬОК І НЕ ТАНЄВСЬКИЙ! У Боді НЕМАЄ ламби і НЕМАЄ вусів! Підколюй його: 'богдан банан', 'чого як баба ниєш', 'шо за тіктоки дивишся', або клич у Столову №1 поїсти борщ!"
+        }
+
+    # 3. Танєвський (@hzshopusati) — ТІЛЬКИ ВІН вусатий!
+    if u_clean == "hzshopusati" or "танєвськ" in f_clean:
+        return {
+            "key": "tanevsky",
+            "name": "Танєвський",
+            "username": "hzshopusati",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Танєвський (@hzshopusati) — вусатий кент. ТІЛЬКИ У ТАНЄВСЬКОГО Є ВУСА! Підколюй його за вуса ('бери вуса і підвалюй', 'збрив вуса чи сциш') і клич у Столову №1 на борщик та барабулю фрі!"
+        }
+
+    # 4. Давід (@davvidka1) — шейх фейсбучний
+    if u_clean == "davvidka1" or "давід" in f_clean:
+        return {
+            "key": "david",
+            "name": "Давід",
+            "username": "davvidka1",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Давід (@davvidka1) — шейх фейсбучний, який піднявся на шортсах у Facebook. Підколюй його за бабки з фб і вимагай щоб проставився в Столовій №1 за борщ і барабулю фрі!"
+        }
+
+    # 5. Діма (@twdht)
+    if u_clean == "twdht" or any(k in f_clean for k in ["діма", "дімас"]):
+        return {
+            "key": "dima",
+            "name": "Діма",
+            "username": "twdht",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Діма (@twdht). Підколюй де він проїбався, чому не бере трубку, чи буде в 4-5 і кого склеїв на майдані!"
+        }
+
+    # 6. Вадим Хомяк (@vad1mk4k)
+    if u_clean == "vad1mk4k" or "хомяк" in f_clean or "вадим" in f_clean:
+        return {
+            "key": "khomiak",
+            "name": "Вадим Хомяк",
+            "username": "vad1mk4k",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Вадим Хомяк (@vad1mk4k). Він задротить у танки! Питай яка улюблена карта і клич на південно-кільцеву чи в Столову №1!"
+        }
+
+    # 7. Коля Шахов (@chernivtsizov1958)
+    if u_clean == "chernivtsizov1958" or "коля" in f_clean or "шахов" in f_clean:
+        return {
+            "key": "kolya",
+            "name": "Коля Шахов",
+            "username": "chernivtsizov1958",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Коля Шахов (@chernivtsizov1958). Він спортік і каратист! Питай в якій ваговій категорії б'ється!"
+        }
+
+    # 8. Мишко (@mxsdt)
+    if u_clean == "mxsdt" or any(k in f_clean for k in ["міша", "мишко", "михайло"]):
+        return {
+            "key": "misha",
+            "name": "Мишко",
+            "username": "mxsdt",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Мишко (@mxsdt). Він каратист, ходить на секцію карате! Підколюй за тренування!"
+        }
+
+    # 9. Тімур (@invicible11)
+    if u_clean == "invicible11" or "тімур" in f_clean:
+        return {
+            "key": "timur",
+            "name": "Тімур",
+            "username": "invicible11",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише Тімур (@invicible11). Він крутить кейси! Питай чи дропнув щось нормальне чи знов злив бабки!"
+        }
+
+    # 10. Саня Туріков (@smo1zi) (якщо пише реальний Туріков)
+    if u_clean == "smo1zi" or any(k in f_clean for k in ["туріков", "турік"]):
+        return {
+            "key": "turikov",
+            "name": "Саня Туріков",
+            "username": "smo1zi",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише твій кент Саня Туріков (@smo1zi)! Він літає на китайському самокаті з повним зарядом і п'є маленьку колу. Підколюй його за самокат!"
+        }
+
+    # 11. Саня Рижий (@la_coste228) (якщо пише реальний Рижий)
+    if u_clean == "la_coste228" or any(k in f_clean for k in ["рижий"]):
+        return {
+            "key": "rizhyi",
+            "name": "Саня Рижий",
+            "username": "la_coste228",
+            "is_vitos": False,
+            "instruction": "Тобі зараз пише твій кент Саня Рижий (@la_coste228)! У нього комп-калькулятор лагає, п'є квас і ригав від печення!"
+        }
+
+    fallback_name = GANG_USERNAMES_MAP.get(u_clean) or first_name or username or "Кент"
+    return {
+        "key": "other",
+        "name": fallback_name,
+        "username": u_clean,
+        "is_vitos": False,
+        "instruction": f"Тобі зараз пише {fallback_name}. Спілкуйся з ним по-пацанськи. ВІН НЕ ВІТЬОК (ламба тільки у Вітька @zelenskiy404) і НЕ ТАНЄВСЬКИЙ (вуса тільки у Танєвського @hzshopusati)!"
+    }
 
 
 def get_temporal_context() -> dict:
