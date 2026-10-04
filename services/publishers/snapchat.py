@@ -44,14 +44,21 @@ class SnapchatSpotlightPublisher(BasePublisher):
             not SNAPCHAT_ACCOUNT_ID.startswith("your_")
         )
 
-        if DRY_RUN_MODE or not is_configured:
-            logger.info(f"[DRY RUN / NO CREDS] Snapchat Spotlight: Title='{title}'")
+        if not is_configured and not DRY_RUN_MODE:
+            logger.info("Snapchat Spotlight: токени не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (SNAPCHAT_ACCESS_TOKEN у .env)"
+            )
+
+        if DRY_RUN_MODE and not is_configured:
+            logger.info(f"[DRY RUN] Snapchat Spotlight: Title='{title}'")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_snap_spotlight_202",
-                url="https://snapchat.com/spotlight/mock_snap_spotlight_202",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (SNAPCHAT credentials не налаштовано)"
+                url="https://snapchat.com/spotlight/mock_snap_spotlight_202"
             )
 
         proxies = proxy_manager.get_requests_proxies()

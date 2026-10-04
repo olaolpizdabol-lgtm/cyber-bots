@@ -139,8 +139,15 @@ class InstagramPublisher(BasePublisher):
             except Exception as e:
                 last_error = e
                 logger.warning(f"Спроба {attempt + 1}/{max_retries + 1} публікації в Instagram не вдалася: {e}")
+                err_str = str(e).lower()
+                if "proxy" in err_str or "transport" in err_str or "429" in err_str:
+                    logger.info("Instagram: помилка проксі (429/ProxyError), перемикаємось на пряме з'єднання...")
+                    try:
+                        client.set_proxy("")
+                    except Exception:
+                        pass
                 if attempt < max_retries:
-                    time.sleep(2.5 * (attempt + 1))
+                    time.sleep(2.0 * (attempt + 1))
 
         err_clean = security_guard.sanitize_error(str(last_error))
         logger.error(f"Помилка публікації в Instagram після ретраїв: {err_clean}")

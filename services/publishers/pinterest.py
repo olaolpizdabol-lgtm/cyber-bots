@@ -40,14 +40,26 @@ class PinterestPublisher(BasePublisher):
         if len(desc) > 500:
             desc = desc[:496] + "..."
 
-        if DRY_RUN_MODE or not PINTEREST_ACCESS_TOKEN or not PINTEREST_BOARD_ID or PINTEREST_ACCESS_TOKEN.startswith("your_"):
-            logger.info(f"[DRY RUN / NO CREDS] Pinterest: Format={content_type.value}, Items={len(media_paths)}")
+        has_creds = bool(
+            PINTEREST_ACCESS_TOKEN and not PINTEREST_ACCESS_TOKEN.startswith("your_") and
+            PINTEREST_BOARD_ID and not PINTEREST_BOARD_ID.startswith("your_")
+        )
+
+        if not has_creds and not DRY_RUN_MODE:
+            logger.info("Pinterest: токени не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (PINTEREST_ACCESS_TOKEN у .env)"
+            )
+
+        if DRY_RUN_MODE and not has_creds:
+            logger.info(f"[DRY RUN] Pinterest: Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_pin_505",
-                url="https://pinterest.com/pin/mock_pin_505",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (PINTEREST токени не налаштовано)"
+                url="https://pinterest.com/pin/mock_pin_505"
             )
 
         headers = {

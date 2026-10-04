@@ -29,14 +29,26 @@ class ThreadsPublisher(BasePublisher):
         if len(text) > 500:
             text = text[:496] + "..."
 
-        if DRY_RUN_MODE or not THREADS_ACCESS_TOKEN or not THREADS_USER_ID or THREADS_ACCESS_TOKEN.startswith("your_"):
-            logger.info(f"[DRY RUN / NO CREDS] Threads: Format={content_type.value}, Text len={len(text)}")
+        has_creds = bool(
+            THREADS_ACCESS_TOKEN and not THREADS_ACCESS_TOKEN.startswith("your_") and
+            THREADS_USER_ID and not THREADS_USER_ID.startswith("your_")
+        )
+
+        if not has_creds and not DRY_RUN_MODE:
+            logger.info("Threads: токени не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (THREADS_ACCESS_TOKEN у .env)"
+            )
+
+        if DRY_RUN_MODE and not has_creds:
+            logger.info(f"[DRY RUN] Threads: Format={content_type.value}, Text len={len(text)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_threads_404",
-                url="https://threads.net/@user/post/mock_threads_404",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (THREADS токени не налаштовано)"
+                url="https://threads.net/@user/post/mock_threads_404"
             )
 
         container_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"

@@ -41,17 +41,25 @@ class TikTokPublisher(BasePublisher):
         upload_session = TIKTOK_UPLOAD_SESSION_ID or TIKTOK_SESSION_ID
         is_configured = has_channel_state or (upload_session and not upload_session.startswith("your_"))
 
-        if DRY_RUN_MODE or not is_configured:
-            logger.info(f"[DRY RUN / NO CREDS] TikTok (Канал відео): Format={content_type.value}, Items={len(media_paths)}")
+        if not is_configured and not DRY_RUN_MODE:
+            logger.info("TikTok: токени сесії не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (TIKTOK_UPLOAD_SESSION_ID у .env)"
+            )
+
+        if DRY_RUN_MODE and not is_configured:
+            logger.info(f"[DRY RUN] TikTok (Канал відео): Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_tt_video_789",
-                url="https://www.tiktok.com/@bohdan.gpt/video/mock_tt_video_789",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TIKTOK_UPLOAD_SESSION_ID для заливу відео ще не налаштовано)"
+                url="https://www.tiktok.com/@bohdan.gpt/video/mock_tt_video_789"
             )
 
-        if not proxy_manager.proxy_url:
+        from config import STRICT_PROXY_CHECK
+        if not proxy_manager.proxy_url and STRICT_PROXY_CHECK:
             return PublishResult(
                 success=False,
                 platform=self.platform_name,
@@ -68,152 +76,159 @@ class TikTokPublisher(BasePublisher):
             proxy_cfg = proxy_manager.get_playwright_proxy()
 
             chromium_bin = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
-            launch_kwargs = {
-                "headless": True,
-                "proxy": proxy_cfg,
-                "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-            }
-            if chromium_bin:
-                launch_kwargs["executable_path"] = chromium_bin
+            proxy_modes = [True, False] if (proxy_cfg and not STRICT_PROXY_CHECK) else [bool(proxy_cfg)]
+            last_loop_err = None
 
-            with sync_playwright() as p:
-                browser = p.chromium.launch(**launch_kwargs)
+            for use_proxy in proxy_modes:
+                launch_kwargs = {
+                    "headless": True,
+                    "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+                }
+                if use_proxy and proxy_cfg:
+                    launch_kwargs["proxy"] = proxy_cfg
+                if chromium_bin:
+                    launch_kwargs["executable_path"] = chromium_bin
+
                 try:
-                    context = browser.new_context(
-                        storage_state=str(state_file) if state_file.exists() else None,
-                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                        viewport={"width": 1280, "height": 800}
-                    )
-                    if not state_file.exists() and upload_session:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(**launch_kwargs)
                         try:
-                            context.add_cookies([
-                                {"name": "sessionid", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
-                                {"name": "sessionid_ss", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
-                            ])
-                            logger.info("TikTok: додано sessionid та sessionid_ss у браузер")
-                        except Exception as ce:
-                            logger.warning(f"TikTok: не вдалося додати sessionid cookies: {ce}")
-
-                    page = context.new_page()
-                    try:
-                        from playwright_stealth import stealth_sync
-                        stealth_sync(page)
-                    except Exception:
-                        pass
-
-                    page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(4000)
-
-                    # 1. Завантажуємо файл
-                    file_input = page.locator('input[type="file"]')
-                    if file_input.count() > 0 and media_paths:
-                        file_input.first.set_input_files(media_paths[0])
-                        logger.info("TikTok: файл відео передано, чекаємо завершення обробки...")
-
-                        # 2. Чекаємо поки зникне прогрес-бар обробки (до 60 сек)
-                        try:
-                            page.wait_for_selector(
-                                'div[contenteditable="true"][data-placeholder], '
-                                'div[class*="caption"] [contenteditable="true"], '
-                                'div[data-e2e="upload-caption"]',
-                                timeout=60000
+                            context = browser.new_context(
+                                storage_state=str(state_file) if state_file.exists() else None,
+                                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                                viewport={"width": 1280, "height": 800}
                             )
-                        except Exception:
-                            # Якщо не знайшло точного поля — чекаємо 25 сек і пробуємо далі
-                            page.wait_for_timeout(25000)
+                            if not state_file.exists() and upload_session:
+                                try:
+                                    context.add_cookies([
+                                        {"name": "sessionid", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True},
+                                        {"name": "sessionid_ss", "value": upload_session, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True}
+                                    ])
+                                    logger.info("TikTok: додано sessionid та sessionid_ss у браузер")
+                                except Exception as ce:
+                                    logger.warning(f"TikTok: не вдалося додати sessionid cookies: {ce}")
 
-                    # 2.5. Закриваємо popup-модалки TikTok (content checks, new features тощо)
-                    for _ in range(4):
-                        closed = False
-                        for close_sel in [
-                            'button:has-text("Cancel")',
-                            'button:has-text("Got it")',
-                            'button[aria-label="Close"]',
-                            '[data-e2e="modal-close-btn"]',
-                            '.TUXModal-overlay ~ * button:has-text("×")',
-                            'div[class*="modal"] button:has-text("×")',
-                        ]:
+                            page = context.new_page()
                             try:
-                                modal_btn = page.locator(close_sel)
-                                if modal_btn.count() > 0 and modal_btn.first.is_visible():
-                                    modal_btn.first.click(force=True)
-                                    page.wait_for_timeout(800)
-                                    closed = True
-                                    logger.info(f"TikTok: закрито модалку через '{close_sel}'")
+                                from playwright_stealth import stealth_sync
+                                stealth_sync(page)
+                            except Exception:
+                                pass
+
+                            page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
+                            page.wait_for_timeout(4000)
+
+                            # 1. Завантажуємо файл
+                            file_input = page.locator('input[type="file"]')
+                            if file_input.count() > 0 and media_paths:
+                                file_input.first.set_input_files(media_paths[0])
+                                logger.info("TikTok: файл відео передано, чекаємо завершення обробки...")
+
+                                # 2. Чекаємо поки зникне прогрес-бар обробки (до 60 сек)
+                                try:
+                                    page.wait_for_selector(
+                                        'div[contenteditable="true"][data-placeholder], '
+                                        'div[class*="caption"] [contenteditable="true"], '
+                                        'div[data-e2e="upload-caption"]',
+                                        timeout=60000
+                                    )
+                                except Exception:
+                                    page.wait_for_timeout(25000)
+
+                            # 2.5. Закриваємо popup-модалки TikTok
+                            for _ in range(4):
+                                closed = False
+                                for close_sel in [
+                                    'button:has-text("Cancel")',
+                                    'button:has-text("Got it")',
+                                    'button[aria-label="Close"]',
+                                    '[data-e2e="modal-close-btn"]',
+                                    '.TUXModal-overlay ~ * button:has-text("×")',
+                                    'div[class*="modal"] button:has-text("×")',
+                                ]:
+                                    try:
+                                        modal_btn = page.locator(close_sel)
+                                        if modal_btn.count() > 0 and modal_btn.first.is_visible():
+                                            modal_btn.first.click(force=True)
+                                            page.wait_for_timeout(800)
+                                            closed = True
+                                            break
+                                    except Exception:
+                                        continue
+                                try:
+                                    overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
+                                    if overlay.count() > 0:
+                                        page.keyboard.press("Escape")
+                                        page.wait_for_timeout(600)
+                                except Exception:
+                                    pass
+                                if not closed:
                                     break
-                            except Exception:
-                                continue
-                        try:
-                            overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
-                            if overlay.count() > 0:
-                                page.keyboard.press("Escape")
-                                page.wait_for_timeout(600)
-                        except Exception:
-                            pass
-                        if not closed:
-                            break
 
-                    page.wait_for_timeout(1000)
-                    # 3. Поле підпису — перебираємо кілька варіантів selectors
-                    caption_selectors = [
-                        'div[role="combobox"][contenteditable="true"]',
-                        'div[data-e2e="upload-caption"] [contenteditable="true"]',
-                        'div[class*="caption"] [contenteditable="true"]',
-                        'div[contenteditable="true"][data-placeholder]',
-                        'div[contenteditable="true"]',
-                    ]
-                    caption_typed = False
-                    for sel in caption_selectors:
-                        cap_loc = page.locator(sel)
-                        if cap_loc.count() > 0:
+                            page.wait_for_timeout(1000)
+                            # 3. Поле підпису
+                            caption_selectors = [
+                                'div[role="combobox"][contenteditable="true"]',
+                                'div[data-e2e="upload-caption"] [contenteditable="true"]',
+                                'div[class*="caption"] [contenteditable="true"]',
+                                'div[contenteditable="true"][data-placeholder]',
+                                'div[contenteditable="true"]',
+                            ]
+                            for sel in caption_selectors:
+                                cap_loc = page.locator(sel)
+                                if cap_loc.count() > 0:
+                                    try:
+                                        cap_loc.first.click(force=True)
+                                        page.wait_for_timeout(500)
+                                        page.keyboard.press("Meta+a")
+                                        page.keyboard.press("Control+a")
+                                        page.keyboard.press("Backspace")
+                                        page.keyboard.type(caption[:2000], delay=15)
+                                        page.wait_for_timeout(500)
+                                        page.keyboard.press("Space")
+                                        page.wait_for_timeout(800)
+                                        break
+                                    except Exception:
+                                        continue
+
+                            # 4. Натискаємо кнопку Post
+                            page.wait_for_timeout(1500)
+                            post_btn = page.locator(
+                                'button:has-text("Post"), '
+                                'button:has-text("Опублікувати"), '
+                                'button[data-e2e="post-button"]'
+                            )
+                            if post_btn.count() > 0:
+                                post_btn.first.click(force=True)
+                                logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
+                                page.wait_for_timeout(8000)
+
+                            if state_file.exists():
+                                try:
+                                    context.storage_state(path=str(state_file))
+                                except Exception:
+                                    pass
+
+                            return PublishResult(
+                                success=True,
+                                platform=self.platform_name,
+                                external_id="tt_uploaded_id",
+                                url="https://www.tiktok.com/@bohdan.gpt"
+                            )
+                        finally:
                             try:
-                                cap_loc.first.click(force=True)
-                                page.wait_for_timeout(500)
-                                page.keyboard.press("Meta+a")
-                                page.keyboard.press("Control+a")
-                                page.keyboard.press("Backspace")
-                                page.keyboard.type(caption[:2000], delay=15)
-                                page.wait_for_timeout(500)
-                                page.keyboard.press("Space")
-                                page.wait_for_timeout(800)
-                                caption_typed = True
-                                logger.info(f"TikTok: підпис введено через '{sel}'")
-                                break
+                                browser.close()
                             except Exception:
-                                continue
+                                pass
+                except Exception as loop_err:
+                    last_loop_err = loop_err
+                    if use_proxy and len(proxy_modes) > 1:
+                        logger.warning(f"TikTok: спроба через проксі не вдалася ({loop_err}), перемикаємось на пряме з'єднання...")
+                        continue
+                    raise loop_err
 
-                    if not caption_typed:
-                        logger.warning("TikTok: не вдалося знайти поле підпису, публікуємо без нього")
-
-                    # 4. Натискаємо кнопку Post
-                    page.wait_for_timeout(1500)
-                    post_btn = page.locator(
-                        'button:has-text("Post"), '
-                        'button:has-text("Опублікувати"), '
-                        'button[data-e2e="post-button"]'
-                    )
-                    if post_btn.count() > 0:
-                        post_btn.first.click(force=True)
-                        logger.info("TikTok: натиснуто кнопку Post, чекаємо підтвердження...")
-                        page.wait_for_timeout(8000)
-                    else:
-                        logger.warning("TikTok: кнопку Post не знайдено")
-
-                    # 5. Зберігаємо оновлену сесію
-                    if state_file.exists():
-                        try:
-                            context.storage_state(path=str(state_file))
-                        except Exception:
-                            pass
-                finally:
-                    browser.close()
-
-            return PublishResult(
-                success=True,
-                platform=self.platform_name,
-                external_id="tt_uploaded_id",
-                url="https://www.tiktok.com/@bohdan.gpt"
-            )
+            if last_loop_err:
+                raise last_loop_err
 
         try:
             logger.info(f"TikTok публікація ({content_type.value}) через Creator Studio...")

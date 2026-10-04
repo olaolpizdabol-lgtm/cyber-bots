@@ -30,14 +30,26 @@ class BlueskyPublisher(BasePublisher):
         if len(text) > 300:
             text = text[:296] + "..."
 
-        if DRY_RUN_MODE or not BLUESKY_HANDLE or not BLUESKY_APP_PASSWORD or BLUESKY_HANDLE.startswith("your_"):
-            logger.info(f"[DRY RUN / NO CREDS] Bluesky: Format={content_type.value}, Text len={len(text)}")
+        has_creds = bool(
+            BLUESKY_HANDLE and not BLUESKY_HANDLE.startswith("your_") and
+            BLUESKY_APP_PASSWORD and not BLUESKY_APP_PASSWORD.startswith("your_")
+        )
+
+        if not has_creds and not DRY_RUN_MODE:
+            logger.info("Bluesky: токени не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (BLUESKY_HANDLE у .env)"
+            )
+
+        if DRY_RUN_MODE and not has_creds:
+            logger.info(f"[DRY RUN] Bluesky: Format={content_type.value}, Text len={len(text)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_bsky_post_606",
-                url="https://bsky.app/profile/user.bsky.social/post/mock_bsky_post_606",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (BLUESKY токени не налаштовано)"
+                url="https://bsky.app/profile/user.bsky.social/post/mock_bsky_post_606"
             )
 
         try:

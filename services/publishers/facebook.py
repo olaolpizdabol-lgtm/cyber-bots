@@ -30,14 +30,26 @@ class FacebookPublisher(BasePublisher):
         if len(caption) > 2000:
             caption = caption[:1996] + "..."
 
-        if DRY_RUN_MODE or not FB_PAGE_ACCESS_TOKEN or not FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN.startswith("your_"):
-            logger.info(f"[DRY RUN / NO CREDS] Facebook: Format={content_type.value}, Items={len(media_paths)}")
+        has_creds = bool(
+            FB_PAGE_ACCESS_TOKEN and not FB_PAGE_ACCESS_TOKEN.startswith("your_") and
+            FB_PAGE_ID and not FB_PAGE_ID.startswith("your_")
+        )
+
+        if not has_creds and not DRY_RUN_MODE:
+            logger.info("Facebook: токени не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (FACEBOOK_PAGE_ACCESS_TOKEN у .env)"
+            )
+
+        if DRY_RUN_MODE and not has_creds:
+            logger.info(f"[DRY RUN] Facebook: Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_fb_post_101",
-                url="https://facebook.com/mock_fb_post_101",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (FACEBOOK credentials ще не налаштовано)"
+                url="https://facebook.com/mock_fb_post_101"
             )
 
         proxies = proxy_manager.get_requests_proxies()

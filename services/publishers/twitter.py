@@ -41,14 +41,21 @@ class TwitterPublisher(BasePublisher):
             post_text = post_text[:276] + "..."
 
         auth = self._get_auth()
-        if DRY_RUN_MODE or not auth:
-            logger.info(f"[DRY RUN / NO CREDS] X: Format={content_type.value}, Text len={len(post_text)}")
+        if not auth and not DRY_RUN_MODE:
+            logger.info("X (Twitter): ключі не налаштовано у .env")
+            return PublishResult(
+                success=False,
+                platform=self.platform_name,
+                error="Не налаштовано (TWITTER ключі у .env)"
+            )
+
+        if DRY_RUN_MODE and not auth:
+            logger.info(f"[DRY RUN] X: Format={content_type.value}, Text len={len(post_text)}")
             return PublishResult(
                 success=True,
                 platform=self.platform_name,
                 external_id="mock_tweet_303",
-                url="https://x.com/user/status/mock_tweet_303",
-                error=None if DRY_RUN_MODE else "⚠️ Демо-режим (TWITTER ключі не задано)"
+                url="https://x.com/user/status/mock_tweet_303"
             )
 
         upload_url = "https://upload.twitter.com/1.1/media/upload.json"
