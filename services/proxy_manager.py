@@ -198,11 +198,17 @@ class ProxyManager:
                 isp = data.get("isp", "")
 
                 is_us = country_code.upper() == "US"
-                is_ny = "NEW YORK" in city.upper() or "NEW YORK" in region_name.upper() or region_code == "NY"
+                is_ny = (
+                    "NEW YORK" in city.upper() or
+                    "NEW YORK" in region_name.upper() or
+                    region_code in ("NY", "NJ") or
+                    "NEW JERSEY" in region_name.upper()
+                )
 
                 status_ok = is_us and is_ny
-                msg = "✅ US (New York) проксі активний та надійний!" if status_ok else (
-                    f"⚠️ Проксі працює, але локація: {city}, {country} (бажано саме New York, US)"
+                msg = "✅ US (New York / Metro) проксі активний та надійний!" if status_ok else (
+                    f"✅ US проксі активний ({city}, {country})!" if is_us else
+                    f"⚠️ Проксі працює, але локація: {city}, {country} (потрібен US)"
                 )
 
                 res = {
