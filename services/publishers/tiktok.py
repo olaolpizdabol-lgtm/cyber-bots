@@ -141,6 +141,11 @@ class TikTokPublisher(BasePublisher):
                             page.wait_for_timeout(3000)
 
                             # 1. Завантажуємо файл (перевіряємо головну сторінку та iframe)
+                            try:
+                                page.wait_for_selector('input[type="file"]', timeout=15000)
+                            except Exception:
+                                pass
+
                             target_scope = page
                             file_input = page.locator('input[type="file"]')
                             try:
