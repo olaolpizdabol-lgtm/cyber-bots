@@ -171,157 +171,119 @@ class TikTokPublisher(BasePublisher):
                                 file_input.first.set_input_files(media_paths[0])
                                 logger.info("TikTok Studio: файл передано, очікуємо завантаження форми редагування...")
 
-                                # Закриваємо спливаючі вікна (Got it, Close тощо) одразу після завантаження файлу
-                                page.wait_for_timeout(2500)
-                                for _ in range(3):
-                                    for btn_text in ["Got it", "Зрозуміло", "Turn on", "Увімкнути", "Close", "Закрити", "Cancel", "Skip", "Not now"]:
-                                        try:
-                                            b = page.locator(f'button:has-text("{btn_text}")')
-                                            if b.count() > 0 and b.first.is_visible():
-                                                logger.info(f"TikTok Studio: закриваємо модалку '{btn_text}'")
-                                                b.first.click(force=True)
-                                                page.wait_for_timeout(800)
-                                        except Exception:
-                                            pass
-
-                                # Чекаємо поки з'явиться форма редагування
-                                try:
-                                    target_scope.wait_for_selector(
-                                        'div[contenteditable="true"][data-placeholder], '
-                                        'div[class*="caption"] [contenteditable="true"], '
-                                        'div[data-e2e="upload-caption"]',
-                                        timeout=45000
-                                    )
-                                    logger.info("TikTok Studio: форму редагування успішно відображено")
-                                except Exception:
-                                    logger.warning("TikTok Studio: очікуємо додатковий час для форми...")
-                                    page.wait_for_timeout(5000)
-
-                            # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо) та joyride overlay
-                            for _ in range(6):
-                                dismissed = False
-                                try:
-                                    # Видаляємо joyride onboarding tour overlays, які можуть перехоплювати кліки
-                                    page.evaluate("""() => {
-                                        document.querySelectorAll('#react-joyride-portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => el.remove());
-                                    }""")
-                                except Exception:
-                                    pass
-
-                                for scope in [target_scope, page]:
-                                    for btn_text in [
-                                        "Turn on", "Увімкнути",
-                                        "Got it", "Зрозуміло",
-                                        "Cancel", "Скасувати",
-                                        "Close", "Закрити",
-                                        "Skip", "Пропустити",
-                                        "Not now", "Не зараз"
-                                    ]:
-                                        loc = scope.locator(f'button:has-text("{btn_text}")')
-                                        for i in range(loc.count()):
-                                            try:
-                                                b = loc.nth(i)
-                                                if b.is_visible():
-                                                    logger.info(f"TikTok: закриваємо модалку кнопкою '{btn_text}'")
-                                                    b.click(force=True)
-                                                    page.wait_for_timeout(1000)
-                                                    dismissed = True
-                                                    break
-                                            except Exception:
-                                                continue
-                                        if dismissed:
-                                            break
-                                    if dismissed:
-                                        break
-                                try:
-                                    overlay = page.locator('.TUXModal-overlay, [class*="modal-overlay"]')
-                                    if overlay.count() > 0:
-                                        page.keyboard.press("Escape")
-                                        page.wait_for_timeout(600)
-                                except Exception:
-                                    pass
-                                if not dismissed:
-                                    break
-
-                            page.wait_for_timeout(1000)
-                            # 3. Поле підпису
-                            caption_selectors = [
-                                'div[role="combobox"][contenteditable="true"]',
-                                'div[data-e2e="upload-caption"] [contenteditable="true"]',
-                                'div[class*="caption"] [contenteditable="true"]',
-                                'div[contenteditable="true"][data-placeholder]',
-                                'div[contenteditable="true"]',
-                            ]
-                            for scope in [target_scope, page]:
-                                cap_typed = False
-                                for sel in caption_selectors:
+                                # Закриваємо модальні діалоги ("Turn on automatic checks?", "Got it", "Cancel" тощо)
+                                for _ in range(4):
                                     try:
-                                        cap_loc = scope.locator(sel)
-                                        if cap_loc.count() > 0:
-                                            cap_loc.first.click(force=True)
-                                            page.wait_for_timeout(500)
-                                            page.keyboard.press("Meta+a")
-                                            page.keyboard.press("Control+a")
-                                            page.keyboard.press("Backspace")
-                                            page.keyboard.type(caption[:2000], delay=15)
-                                            page.wait_for_timeout(500)
-                                            page.keyboard.press("Space")
-                                            page.wait_for_timeout(400)
-                                            # Закриваємо випадаюче меню автопідказки хештегів
-                                            page.keyboard.press("Escape")
-                                            page.wait_for_timeout(500)
-                                            cap_typed = True
-                                            logger.info("TikTok: опис успішно введено")
-                                            break
+                                        page.keyboard.press("Escape")
                                     except Exception:
-                                        continue
-                                if cap_typed:
-                                    break
-
-                            # 4. Натискаємо кнопку Post
-                            page.wait_for_timeout(2000)
-                            post_clicked = False
-                            for scope in [target_scope, page]:
-                                try:
-                                    # Пріоритет: точна первинна кнопка Post
-                                    post_btn = scope.locator(
-                                        'button.Button__root--type-primary:has-text("Post"), '
-                                        'button.Button__root--type-primary:has-text("Опублікувати"), '
-                                        'button[data-e2e="post-button"]:has-text("Post"), '
-                                        'button[data-e2e="post-button"]'
-                                    )
-                                    if post_btn.count() == 0:
-                                        # Fallback перебір видимих кнопок
-                                        all_btns = scope.locator('button')
-                                        for i in range(all_btns.count()):
-                                            b = all_btns.nth(i)
-                                            if b.inner_text().strip() in ["Post", "Опублікувати"] and b.is_visible():
-                                                post_btn = b
-                                                break
-
-                                    if post_btn and post_btn.count() > 0:
-                                        for _ in range(20):
+                                        pass
+                                    for btn_name in ["Cancel", "Скасувати", "Got it", "Зрозуміло", "Turn on", "Увімкнути", "Close", "Закрити", "Skip"]:
+                                        btns = page.locator(f'button:has-text("{btn_name}")')
+                                        for i in range(btns.count()):
                                             try:
-                                                is_disabled = post_btn.first.get_attribute("disabled") is not None
-                                                if not is_disabled:
-                                                    break
+                                                b = btns.nth(i)
+                                                if b.is_visible():
+                                                    logger.info(f"TikTok Studio: закриваємо модалку '{btn_name}'")
+                                                    b.click(force=True)
+                                                    page.wait_for_timeout(400)
                                             except Exception:
                                                 pass
-                                            page.wait_for_timeout(1500)
 
-                                        post_btn.first.scroll_into_view_if_needed()
-                                        page.wait_for_timeout(500)
-                                        post_btn.first.click(force=True)
-                                        logger.info("TikTok: успішно натиснуто кнопку Post, очікуємо публікації...")
-                                        post_clicked = True
-                                        page.wait_for_timeout(10000)
+                                    try:
+                                        page.evaluate('''() => {
+                                            document.querySelectorAll('[role="dialog"], .TUXModal-overlay, [class*="modal-overlay"], #react-joyride-portal, [data-test-id="overlay"]').forEach(el => el.remove());
+                                        }''')
+                                    except Exception:
+                                        pass
+                                    page.wait_for_timeout(500)
+
+                            # 3. Поле підпису (Caption)
+                            logger.info("TikTok Studio: заповнюємо поле опису...")
+                            cap_loc = None
+                            for c_sel in [
+                                'div[role="combobox"][contenteditable="true"]',
+                                'div[class*="caption"] [contenteditable="true"]',
+                                'div[data-e2e="upload-caption"] [contenteditable="true"]',
+                                'div[contenteditable="true"]'
+                            ]:
+                                loc = page.locator(c_sel)
+                                if loc.count() > 0 and loc.first.is_visible():
+                                    cap_loc = loc.first
+                                    break
+
+                            if cap_loc:
+                                try:
+                                    cap_loc.scroll_into_view_if_needed()
+                                    cap_loc.click(force=True)
+                                    page.wait_for_timeout(300)
+                                    # Очищаємо авто-підставлене ім'я файлу
+                                    page.keyboard.press("Meta+a")
+                                    page.keyboard.press("Control+a")
+                                    page.keyboard.press("Backspace")
+                                    page.wait_for_timeout(200)
+                                    page.keyboard.type(caption[:2000], delay=10)
+                                    page.wait_for_timeout(400)
+                                    page.keyboard.press("Escape")
+                                    logger.info("TikTok Studio: опис успішно заповнено")
+                                except Exception as ce:
+                                    logger.warning(f"TikTok Studio: помилка заповнення опису: {ce}")
+                            else:
+                                logger.warning("TikTok Studio: поле опису не знайдено, переходимо до кнопки публікації")
+
+                            # 4. Кнопка публікації Post
+                            logger.info("TikTok Studio: шукаємо кнопку Post...")
+                            try:
+                                page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                            except Exception:
+                                pass
+                            page.wait_for_timeout(1000)
+
+                            post_btn = None
+                            for btn_sel in [
+                                'button[data-e2e="post-button"]',
+                                'button:has-text("Post")',
+                                'button:has-text("Опублікувати")'
+                            ]:
+                                loc = page.locator(btn_sel)
+                                for i in range(loc.count()):
+                                    b = loc.nth(i)
+                                    if b.is_visible() and b.inner_text().strip() in ["Post", "Опублікувати"]:
+                                        post_btn = b
                                         break
-                                except Exception as e:
-                                    logger.warning(f"TikTok: помилка при пошуку кнопки Post: {e}")
-                                    continue
+                                if post_btn:
+                                    break
 
-                            if not post_clicked:
-                                raise RuntimeError("Не вдалося знайти або натиснути кнопку Post у TikTok Studio")
+                            if not post_btn:
+                                all_b = page.locator('button')
+                                for i in range(all_b.count()):
+                                    b = all_b.nth(i)
+                                    if b.is_visible() and b.inner_text().strip() in ["Post", "Опублікувати"]:
+                                        post_btn = b
+                                        break
+
+                            if not post_btn:
+                                debug_shot = DATA_DIR / "tiktok_no_post_debug.png"
+                                try:
+                                    page.screenshot(path=str(debug_shot))
+                                except Exception:
+                                    pass
+                                raise RuntimeError(f"Не знайдено кнопку Post у TikTok Studio (знімок: {debug_shot.name})")
+
+                            # Чекаємо готовність кнопки Post (до 30 сек)
+                            for wait_i in range(30):
+                                try:
+                                    if not post_btn.is_disabled():
+                                        logger.info(f"TikTok Studio: кнопка Post готова на {wait_i}с!")
+                                        break
+                                except Exception:
+                                    pass
+                                page.wait_for_timeout(1000)
+
+                            post_btn.scroll_into_view_if_needed()
+                            page.wait_for_timeout(500)
+                            post_btn.click(force=True)
+                            logger.info("TikTok: успішно натиснуто кнопку Post, очікуємо фіксації публікації...")
+                            page.wait_for_timeout(10000)
 
                             if state_file.exists():
                                 try:
@@ -352,9 +314,7 @@ class TikTokPublisher(BasePublisher):
 
         try:
             logger.info(f"TikTok публікація ({content_type.value}) через Creator Studio...")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_do_upload)
-                return future.result(timeout=240)
+            return _do_upload()
         except Exception as e:
             from core.security_guard import security_guard
             err_clean = security_guard.sanitize_error(str(e))

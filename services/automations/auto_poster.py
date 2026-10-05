@@ -307,16 +307,31 @@ class AutoPosterService:
             logger.info(f"Публікація #{post_id} ({content_type.value}) на {publisher.platform_name} (файлів: {len(platform_media)})...")
             if plat_key in ("tiktok", "snapchat"):
                 logger.info(f"Очікуємо захоплення браузерного локу для {publisher.platform_name}...")
-                with BROWSER_LOCK:
+                acquired = BROWSER_LOCK.acquire(timeout=75)
+                if not acquired:
+                    logger.warning(f"Таймаут очікування браузерного локу для {publisher.platform_name}!")
+                    res = PublishResult(
+                        success=False,
+                        platform=plat_key,
+                        error="Браузер наразі зайнятий іншою операцією. Будь ласка, спробуйте ще раз через хвилину."
+                    )
+                    results[plat_key] = res
+                    update_post_platform_result(
+                        post_id=post_id,
+                        platform=plat_key,
+                        error=res.error
+                    )
+                    continue
+                try:
                     logger.info(f"Браузерний лок захоплено для {publisher.platform_name}, починаємо публікацію...")
-                    try:
-                        res = publisher.publish(
-                            content_type=content_type,
-                            media_paths=platform_media,
-                            metadata=metadata
-                        )
-                    finally:
-                        logger.info(f"Браузерний лок для {publisher.platform_name} успішно звільнено.")
+                    res = publisher.publish(
+                        content_type=content_type,
+                        media_paths=platform_media,
+                        metadata=metadata
+                    )
+                finally:
+                    BROWSER_LOCK.release()
+                    logger.info(f"Браузерний лок для {publisher.platform_name} успішно звільнено.")
             else:
                 res = publisher.publish(
                     content_type=content_type,
