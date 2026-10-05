@@ -23,11 +23,15 @@ class TwitterPublisher(BasePublisher):
         return "X (Twitter)"
 
     def _get_auth(self) -> Optional[OAuth1]:
-        if not (TWITTER_API_KEY and TWITTER_API_SECRET and TWITTER_ACCESS_TOKEN and TWITTER_ACCESS_TOKEN_SECRET):
+        api_key = os.getenv("TWITTER_API_KEY", TWITTER_API_KEY).strip()
+        api_secret = os.getenv("TWITTER_API_SECRET", TWITTER_API_SECRET).strip()
+        acc_token = os.getenv("TWITTER_ACCESS_TOKEN", TWITTER_ACCESS_TOKEN).strip()
+        acc_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET", TWITTER_ACCESS_TOKEN_SECRET).strip()
+        if not (api_key and api_secret and acc_token and acc_secret):
             return None
-        if TWITTER_API_KEY.startswith("your_"):
+        if api_key.startswith("your_") or acc_token.startswith("your_"):
             return None
-        return OAuth1(TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
+        return OAuth1(api_key, api_secret, acc_token, acc_secret)
 
     def publish(
         self,

@@ -30,9 +30,11 @@ class BlueskyPublisher(BasePublisher):
         if len(text) > 300:
             text = text[:296] + "..."
 
+        handle = os.getenv("BLUESKY_HANDLE", BLUESKY_HANDLE).strip()
+        pwd = os.getenv("BLUESKY_APP_PASSWORD", BLUESKY_APP_PASSWORD).strip()
         has_creds = bool(
-            BLUESKY_HANDLE and not BLUESKY_HANDLE.startswith("your_") and
-            BLUESKY_APP_PASSWORD and not BLUESKY_APP_PASSWORD.startswith("your_")
+            handle and not handle.startswith("your_") and
+            pwd and not pwd.startswith("your_")
         )
 
         if not has_creds and not DRY_RUN_MODE:
@@ -55,7 +57,7 @@ class BlueskyPublisher(BasePublisher):
         try:
             # Сесія
             session_url = "https://bsky.social/xrpc/com.atproto.server.createSession"
-            session_res = requests.post(session_url, json={"identifier": BLUESKY_HANDLE, "password": BLUESKY_APP_PASSWORD}, timeout=15).json()
+            session_res = requests.post(session_url, json={"identifier": handle, "password": pwd}, timeout=15).json()
             access_jwt = session_res.get("accessJwt")
             did = session_res.get("did")
             if not access_jwt or not did:

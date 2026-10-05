@@ -40,9 +40,11 @@ class PinterestPublisher(BasePublisher):
         if len(desc) > 500:
             desc = desc[:496] + "..."
 
+        token = os.getenv("PINTEREST_ACCESS_TOKEN", PINTEREST_ACCESS_TOKEN).strip()
+        board_id = os.getenv("PINTEREST_BOARD_ID", PINTEREST_BOARD_ID).strip()
         has_creds = bool(
-            PINTEREST_ACCESS_TOKEN and not PINTEREST_ACCESS_TOKEN.startswith("your_") and
-            PINTEREST_BOARD_ID and not PINTEREST_BOARD_ID.startswith("your_")
+            token and not token.startswith("your_") and
+            board_id and not board_id.startswith("your_")
         )
 
         if not has_creds and not DRY_RUN_MODE:

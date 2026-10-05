@@ -33,14 +33,16 @@ class TelegramChannelPublisher(BasePublisher):
         text_post = metadata.get("threads_post") or caption
         text_post = text_post[:4090]
 
-        clean_chan = TELEGRAM_TARGET_CHANNEL_ID.lstrip("@").strip()
+        target_chan = os.getenv("TELEGRAM_TARGET_CHANNEL_ID", TELEGRAM_TARGET_CHANNEL_ID).strip()
+        bot_tok = os.getenv("CHANNEL_AUTOMATION_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
+        clean_chan = target_chan.lstrip("@").strip()
         if (
             DRY_RUN_MODE
-            or not TELEGRAM_TARGET_CHANNEL_ID
+            or not target_chan
             or clean_chan.startswith("your_")
-            or not TELEGRAM_BOT_TOKEN
-            or TELEGRAM_BOT_TOKEN.startswith("your_")
-            or TELEGRAM_BOT_TOKEN.startswith("123456")
+            or not bot_tok
+            or bot_tok.startswith("your_")
+            or bot_tok.startswith("123456")
         ):
             logger.info(f"[DRY RUN / NO CREDS] Telegram Channel: Format={content_type.value}, Items={len(media_paths)}")
             return PublishResult(
@@ -54,9 +56,9 @@ class TelegramChannelPublisher(BasePublisher):
         import asyncio
 
         async def _async_send():
-            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            bot = Bot(token=bot_tok)
             try:
-                target = int(TELEGRAM_TARGET_CHANNEL_ID) if TELEGRAM_TARGET_CHANNEL_ID.lstrip("-").isdigit() else TELEGRAM_TARGET_CHANNEL_ID
+                target = int(target_chan) if target_chan.lstrip("-").isdigit() else target_chan
 
                 if content_type == ContentType.VIDEO and media_paths:
                     msg = await bot.send_video(

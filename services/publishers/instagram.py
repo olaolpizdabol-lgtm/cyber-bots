@@ -36,8 +36,14 @@ class InstagramPublisher(BasePublisher):
             return None
 
         cl = Client()
-        if proxy_manager.proxy_url:
-            cl.set_proxy(proxy_manager.proxy_url)
+        from config import STRICT_PROXY_CHECK
+        proxy_to_use = proxy_manager.proxy_url
+        if proxy_to_use and not STRICT_PROXY_CHECK and not proxy_manager.is_proxy_alive():
+            logger.info("Instagram: проксі недоступний або ліміт вичерпано. Перемикаємося на пряме підключення.")
+            proxy_to_use = None
+
+        if proxy_to_use:
+            cl.set_proxy(proxy_to_use)
 
         logged_in = False
         if has_session:
@@ -140,8 +146,8 @@ class InstagramPublisher(BasePublisher):
                 last_error = e
                 logger.warning(f"Спроба {attempt + 1}/{max_retries + 1} публікації в Instagram не вдалася: {e}")
                 err_str = str(e).lower()
-                if "proxy" in err_str or "transport" in err_str or "429" in err_str:
-                    logger.info("Instagram: помилка проксі (429/ProxyError), перемикаємось на пряме з'єднання...")
+                if "proxy" in err_str or "transport" in err_str or "429" in err_str or "socks" in err_str or "connection" in err_str:
+                    logger.info("Instagram: помилка проксі/з'єднання (Proxy/SOCKS), перемикаємось на пряме з'єднання...")
                     try:
                         client.set_proxy("")
                     except Exception:

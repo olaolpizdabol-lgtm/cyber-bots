@@ -29,9 +29,11 @@ class ThreadsPublisher(BasePublisher):
         if len(text) > 500:
             text = text[:496] + "..."
 
+        token = os.getenv("THREADS_ACCESS_TOKEN", THREADS_ACCESS_TOKEN).strip()
+        user_id = os.getenv("THREADS_USER_ID", THREADS_USER_ID).strip()
         has_creds = bool(
-            THREADS_ACCESS_TOKEN and not THREADS_ACCESS_TOKEN.startswith("your_") and
-            THREADS_USER_ID and not THREADS_USER_ID.startswith("your_")
+            token and not token.startswith("your_") and
+            user_id and not user_id.startswith("your_")
         )
 
         if not has_creds and not DRY_RUN_MODE:
