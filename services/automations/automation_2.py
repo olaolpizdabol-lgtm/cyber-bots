@@ -425,12 +425,32 @@ class TikTokStreakService:
                             except Exception:
                                 pass
 
+                    # Закриваємо pop-up сповіщення якщо є
+                    close_selectors = [
+                        'button[aria-label="Close"]',
+                        'button:has-text("✕")',
+                        'button[data-e2e="toast-close"]',
+                        'button:has-text("Not now")',
+                        'button:has-text("Не зараз")',
+                        'button:has-text("Пізніше")',
+                        'button:has-text("Later")'
+                    ]
+                    for sel in close_selectors:
+                        btns = page.locator(sel)
+                        for _ in range(await btns.count()):
+                            try:
+                                await btns.first.click(timeout=1000)
+                            except Exception:
+                                break
+
                     # 3. Шукаємо поле вводу (TikTok DM chat input)
                     chat_input = page.locator(
                         'div.public-DraftEditor-content[contenteditable="true"], '
                         '[data-e2e="chat-input"] [contenteditable="true"], '
                         '[contenteditable="true"][role="textbox"], '
-                        '[contenteditable="true"]'
+                        '[contenteditable="true"], '
+                        'textarea, '
+                        'div[data-e2e="chat-room"] [contenteditable="true"]'
                     )
 
                     try:
@@ -439,6 +459,32 @@ class TikTokStreakService:
                         pass
 
                     if await chat_input.count() == 0:
+                        # Спробуємо активувати вікно чату кліком по тілу діалогу
+                        chat_box = page.locator('div[class*="DivChatBox"], div[data-e2e="chat-room"]').first
+                        if await chat_box.count() > 0:
+                            try:
+                                await chat_box.click(force=True)
+                                await page.wait_for_timeout(1000)
+                            except Exception:
+                                pass
+                            chat_input = page.locator(
+                                'div.public-DraftEditor-content[contenteditable="true"], '
+                                '[data-e2e="chat-input"] [contenteditable="true"], '
+                                '[contenteditable="true"][role="textbox"], '
+                                '[contenteditable="true"], '
+                                'textarea'
+                            )
+
+                    if await chat_input.count() == 0:
+                        # Перевіряємо чи повідомлення вже випадково не було надіслано раніше
+                        chat_items = page.locator('div[data-e2e="dm-new-chat-item"]')
+                        if await chat_items.count() > 0:
+                            last_item = chat_items.last
+                            last_text = (await last_item.inner_text() or "").strip()
+                            if any(k in last_text for k in ["Доброго ранку", "сонечко", "❤️", "🥰", "вогник"]):
+                                logger.info(f"В чаті з @{username} вже є надіслане повідомлення. Вважаємо доставленим.")
+                                return True, "Повідомлення вже було надіслано в чат раніше"
+
                         try:
                             await page.screenshot(path=str(DATA_DIR / "tiktok_chat_debug.png"))
                         except Exception:
@@ -557,12 +603,39 @@ class TikTokStreakService:
         failed_count = 0
         details = []
 
+        today_date = datetime.now().strftime("%Y-%m-%d")
+        tracker_file = DATA_DIR / "streak_daily_tracker.json"
+        daily_sent = {}
+        if tracker_file.exists():
+            try:
+                daily_sent = json.loads(tracker_file.read_text(encoding="utf-8"))
+            except Exception:
+                daily_sent = {}
+        if not isinstance(daily_sent, dict):
+            daily_sent = {}
+        sent_today_users = set(daily_sent.get(today_date, []))
+
         logger.info(f"Запуск розсилки TikTok вогників для {len(targets)} контактів...")
 
         for idx, target in enumerate(targets):
             user = target["username"]
+            clean_user = user.strip().lstrip("@").lower()
             is_gf = bool(target["is_girlfriend"])
             custom_msg = target.get("custom_message")
+            last_sent_at = str(target.get("last_sent_at") or "")
+
+            # Захист від повторної відправки в той самий день (anti-duplicate guard)
+            if not force_all and (today_date in last_sent_at or clean_user in sent_today_users):
+                logger.info(f"⏭️ Вогник для @{user} вже відправлено сьогодні. Пропускаємо повторну відправку.")
+                details.append({
+                    "username": user,
+                    "is_girlfriend": is_gf,
+                    "message": "Вже відправлено сьогодні",
+                    "status": "already_sent_today",
+                    "error": None
+                })
+                sent_count += 1
+                continue
 
             # 1. Генерація правильного повідомлення
             if is_gf:
@@ -591,6 +664,12 @@ class TikTokStreakService:
             if success:
                 update_streak_target_sent(user)
                 sent_count += 1
+                sent_today_users.add(clean_user)
+                daily_sent[today_date] = list(sent_today_users)
+                try:
+                    tracker_file.write_text(json.dumps(daily_sent, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
             else:
                 failed_count += 1
 

@@ -106,12 +106,14 @@ async def main():
     from datetime import datetime, timezone, timedelta
     from core.database import get_setting, set_setting
     from services.automations.automation_2 import tiktok_streak_service
-    from config import ALLOWED_USER_IDS
+    from config import ALLOWED_USER_IDS, DATA_DIR, TIKTOK_STREAK_SCHEDULE_TIME
 
     async def streak_scheduler_background_task():
         logger.info("Фоновий планувальник TikTok вогників та вхідних відео активний.")
         last_dispatched_date = None
         last_react_check_minute = None
+        streak_file = DATA_DIR / "last_streak_dispatch_date.txt"
+
         while True:
             try:
                 await asyncio.sleep(45)
@@ -125,12 +127,19 @@ async def main():
 
                 today_str = now_kyiv.strftime("%Y-%m-%d")
                 current_hm = now_kyiv.strftime("%H:%M")
-                sched_time = get_setting("tiktok_streak_schedule_time", "10:00")
+                sched_time = get_setting("tiktok_streak_schedule_time") or TIKTOK_STREAK_SCHEDULE_TIME or "10:00"
                 last_db_date = get_setting("last_streak_dispatch_date", "")
+
+                last_file_date = ""
+                if streak_file.exists():
+                    try:
+                        last_file_date = streak_file.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        pass
 
                 # Запускаємо якщо настав час розкладу і сьогодні ще не відправляли
                 should_run = False
-                if last_dispatched_date != today_str and last_db_date != today_str:
+                if last_dispatched_date != today_str and last_db_date != today_str and last_file_date != today_str:
                     if current_hm >= sched_time and now_kyiv.hour < 23:
                         should_run = True
 
@@ -138,6 +147,10 @@ async def main():
                     logger.info(f"⏰ Настав час розкладу ({sched_time}, зараз {current_hm} Київ): запуск щоденної відправки вогників...")
                     last_dispatched_date = today_str
                     set_setting("last_streak_dispatch_date", today_str)
+                    try:
+                        streak_file.write_text(today_str, encoding="utf-8")
+                    except Exception:
+                        pass
                     res = await tiktok_streak_service.run_streaks_dispatch()
                     if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:
                         for uid in ALLOWED_USER_IDS:
