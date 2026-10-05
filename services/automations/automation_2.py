@@ -624,6 +624,12 @@ class TikTokStreakService:
             custom_msg = target.get("custom_message")
             last_sent_at = str(target.get("last_sent_at") or "")
 
+            # Для дівчини автоматичні вогники та повідомлення повністю вимкнено за вимогою користувача!
+            # Її повідомлення лише пересилаються в Telegram, а бот їй нічого не пише сам.
+            if is_gf:
+                logger.info(f"⏭️ Пропускаємо акаунт дівчини @{user}: автоматична відправка вимкнена. Повідомлення тільки пересилаються в Telegram.")
+                continue
+
             # Захист від повторної відправки в той самий день (anti-duplicate guard)
             if not force_all and (today_date in last_sent_at or clean_user in sent_today_users):
                 logger.info(f"⏭️ Вогник для @{user} вже відправлено сьогодні. Пропускаємо повторну відправку.")
@@ -637,11 +643,8 @@ class TikTokStreakService:
                 sent_count += 1
                 continue
 
-            # 1. Генерація правильного повідомлення
-            if is_gf:
-                msg_text = custom_msg or self.generate_girlfriend_heart_message()
-            else:
-                msg_text = custom_msg or self.generate_friend_streak_message()
+            # 1. Генерація правильного повідомлення (для друзів: з реальною погодою в Чернівцях)
+            msg_text = custom_msg or self.generate_friend_streak_message()
 
             # 2. Рандомізована затримка між повідомленнями (Humanized Jitter)
             if idx > 0:
@@ -733,6 +736,14 @@ class TikTokStreakService:
         # Відомі попередні реакції, щоб не коментувати повторно одне й те саме відео
         existing_reactions = get_recent_tiktok_reactions(limit=200)
         responded_urls = {r.get("video_url") for r in existing_reactions if r.get("video_url")}
+
+        gf_tracker_file = DATA_DIR / "tiktok_forwarded_gf_messages.json"
+        forwarded_gf_keys = set()
+        if gf_tracker_file.exists():
+            try:
+                forwarded_gf_keys = set(json.loads(gf_tracker_file.read_text(encoding="utf-8")))
+            except Exception:
+                forwarded_gf_keys = set()
 
         configured_proxy = proxy_manager.get_playwright_proxy()
         proxy_configs = [configured_proxy, None] if configured_proxy else [None]
@@ -839,13 +850,121 @@ class TikTokStreakService:
                             if item_count == 0:
                                 continue
 
+                            # ==========================================
+                            # 1. СПЕЦІАЛЬНА ОБРОБКА ДЛЯ ДІВЧИНИ (LADY_VALERI)
+                            # ==========================================
+                            if is_gf:
+                                # Для коханої: пересилаємо ВСІ нові вхідні повідомлення та відео прямо в Telegram!
+                                # БОТ КАТЕГОРИЧНО НІЧОГО НЕ НАДСИЛАЄ ЇЙ У ВІДПОВІДЬ!
+                                start_idx = max(0, item_count - 8)
+                                for idx_msg in range(start_idx, item_count):
+                                    m_elem = chat_items.nth(idx_msg)
+                                    msg_info = await m_elem.evaluate(
+                                        """el => {
+                                            const text = el.innerText || '';
+                                            const hasMyAvatar = !!el.querySelector('a[href*="/@flame.ai"]') || !!el.querySelector('a[href*="/@bohdan"]');
+                                            const hasYouReplied = text.includes("You replied");
+                                            const textContainer = el.querySelector('div[class*="DivTextContainer"]');
+                                            const isCyanBg = textContainer && window.getComputedStyle(textContainer).backgroundColor.includes("162, 201");
+                                            const isSelf = !!el.querySelector('[data-e2e*="self"], [class*="Self"], [class*="Right"]');
+
+                                            if (hasMyAvatar || hasYouReplied || isCyanBg || isSelf) {
+                                                return { isIncoming: false };
+                                            }
+
+                                            const directLink = el.querySelector('a[href*="/video/"]');
+                                            const sharedVideo = el.querySelector('[data-e2e="dm-new-shared-video"]');
+                                            const moreBtn = el.querySelector('[data-e2e="dm-new-more-btn"]');
+                                            const msgId = moreBtn ? moreBtn.id : null;
+                                            const videoUrl = directLink ? directLink.href : null;
+
+                                            return {
+                                                isIncoming: true,
+                                                hasVideo: !!(directLink || sharedVideo),
+                                                directUrl: videoUrl,
+                                                msgId: msgId,
+                                                text: text.trim(),
+                                                isSharedCard: !!sharedVideo
+                                            };
+                                        }"""
+                                    )
+
+                                    if not msg_info or not msg_info.get("isIncoming"):
+                                        continue
+
+                                    v_url = msg_info.get("directUrl")
+                                    raw_txt = (msg_info.get("text") or "").strip()
+                                    mid = msg_info.get("msgId") or ""
+
+                                    if msg_info.get("hasVideo") and not v_url and msg_info.get("isSharedCard"):
+                                        shared_el = m_elem.locator('[data-e2e="dm-new-shared-video"]').first
+                                        if await shared_el.count() > 0:
+                                            try:
+                                                await shared_el.click()
+                                                await page.wait_for_timeout(2000)
+                                                if "/video/" in page.url:
+                                                    v_url = page.url
+                                                    await page.go_back()
+                                                    await page.wait_for_timeout(1500)
+                                            except Exception:
+                                                pass
+
+                                    key_content = v_url or raw_txt[:80]
+                                    if not key_content:
+                                        continue
+                                    msg_key = f"{user}:{mid}:{key_content}"
+
+                                    if msg_key in forwarded_gf_keys:
+                                        continue
+
+                                    if msg_info.get("hasVideo") and v_url:
+                                        logger.info(f"💌 Пересилаємо нове TikTok відео від дівчини (@{user}) в Telegram...")
+                                        self._notify_admin_telegram(
+                                            f"🎬 <b>Кохана (@{user}) надіслала TikTok відео:</b>\n\n"
+                                            f"🔗 <a href='{v_url}'>Дивитись відео в TikTok</a>\n\n"
+                                            f"💬 <i>(Бот нічого їй не надсилає - переглянь та дай відповідь сам)</i>"
+                                        )
+                                        forwarded_gf_keys.add(msg_key)
+                                        processed.append({
+                                            "username": user,
+                                            "is_girlfriend": True,
+                                            "video_url": v_url,
+                                            "type": "video_forwarded"
+                                        })
+                                    elif raw_txt:
+                                        lines = [l for l in raw_txt.splitlines() if not l.startswith("Shared a video") and not l.startswith("Replied")]
+                                        clean_txt = "\n".join(lines).strip()
+                                        if clean_txt:
+                                            logger.info(f"💌 Пересилаємо текстове повідомлення від дівчини (@{user}) в Telegram...")
+                                            self._notify_admin_telegram(
+                                                f"💌 <b>Нове повідомлення від Коханої (@{user}) у TikTok:</b>\n\n"
+                                                f"«{clean_txt}»\n\n"
+                                                f"💬 <i>(Бот нічого їй не надсилає - напиши відповідь сам)</i>"
+                                            )
+                                            forwarded_gf_keys.add(msg_key)
+                                            processed.append({
+                                                "username": user,
+                                                "is_girlfriend": True,
+                                                "text": clean_txt,
+                                                "type": "text_forwarded"
+                                            })
+
+                                try:
+                                    gf_tracker_file.write_text(json.dumps(list(forwarded_gf_keys)[-500:], ensure_ascii=False, indent=2), encoding="utf-8")
+                                except Exception:
+                                    pass
+                                continue
+
+                            # ==========================================
+                            # 2. ОБРОБКА ДЛЯ ДРУЗІВ (КЄНТІВ)
+                            # ==========================================
                             # Аналізуємо СТРОГО останнє повідомлення у діалозі (не реагуємо на старі повідомлення та власні відповіді)
                             last_msg = chat_items.last
                             msg_analysis = await last_msg.evaluate(
                                 """el => {
                                     const text = el.innerText || '';
                                     // 1. Перевірка чи повідомлення надіслано нами (Богданом)
-                                    const hasMyAvatar = !!el.querySelector('a[href*="/@flame.ai"]');
+                                    const hasMyAvatar = !!el.querySelector('a[href*="/@flame.ai"]') || !!el.querySelector('a[href*="/@bohdan"]');
                                     const hasYouReplied = text.includes("You replied");
                                     const textContainer = el.querySelector('div[class*="DivTextContainer"]');
                                     const isCyanBg = textContainer && window.getComputedStyle(textContainer).backgroundColor.includes("162, 201");
@@ -907,14 +1026,14 @@ class TikTokStreakService:
 
                             if not full_url or full_url in responded_urls:
                                 continue
-                            logger.info(f"Знайдено нове надіслане TikTok відео від @{user}: {full_url}")
+                            logger.info(f"Знайдено нове надіслане TikTok відео від друга @{user}: {full_url}")
     
-                            # Генеруємо реакцію через Gemini AI (з урахуванням чи це дівчина)
+                            # Генеруємо автентичну реакцію через Gemini AI для кента
                             reaction_res = tiktok_reactions_service.process_tiktok_link(
                                 url=full_url,
-                                is_girlfriend=is_gf
+                                is_girlfriend=False
                             )
-                            reaction_text = reaction_res.get("reaction") or ("Ахаха це розрив 😂❤️" if is_gf else "одааа, чисто сігма мув 😎")
+                            reaction_text = reaction_res.get("reaction") or "одааа, чисто сігма мув 😎"
     
                             # Знаходимо поле вводу чату та надсилаємо реакцію
                             chat_input = page.locator(
@@ -936,20 +1055,18 @@ class TikTokStreakService:
                                 await page.wait_for_timeout(2500)
     
                                 responded_urls.add(full_url)
-                                logger.info(f"✅ Реакцію Gemini успішно надіслано до @{user}: «{reaction_text}»")
+                                logger.info(f"✅ Реакцію Gemini успішно надіслано другу @{user}: «{reaction_text}»")
     
                                 # Сповіщення адміну в Telegram
-                                tag = "❤️ 👸 Кохана" if is_gf else "🔥 Друг"
                                 self._notify_admin_telegram(
-                                    f"🎬 <b>Відреагував на TikTok відео через Gemini!</b>\n"
-                                    f"{tag}: <b>@{user}</b>\n"
+                                    f"🎬 <b>Відреагував на TikTok відео друга (@{user}) через Gemini!</b>\n\n"
                                     f"🔗 Відео: <a href='{full_url}'>Дивитись відео</a>\n"
                                     f"💬 Реакція: <i>«{reaction_text}»</i>"
                                 )
     
                                 processed.append({
                                     "username": user,
-                                    "is_girlfriend": is_gf,
+                                    "is_girlfriend": False,
                                     "video_url": full_url,
                                     "reaction": reaction_text
                                 })

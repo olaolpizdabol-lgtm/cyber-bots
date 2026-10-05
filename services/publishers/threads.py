@@ -53,28 +53,28 @@ class ThreadsPublisher(BasePublisher):
                 url="https://threads.net/@user/post/mock_threads_404"
             )
 
-        container_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"
-        publish_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish"
+        container_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
+        publish_url = f"https://graph.threads.net/v1.0/{user_id}/threads_publish"
 
         try:
             if content_type == ContentType.TEXT or not media_paths:
                 # Текстовий пост
                 res = requests.post(
                     container_url,
-                    data={"media_type": "TEXT", "text": text, "access_token": THREADS_ACCESS_TOKEN},
+                    data={"media_type": "TEXT", "text": text, "access_token": token},
                     timeout=15
                 ).json()
             elif content_type == ContentType.VIDEO:
                 res = requests.post(
                     container_url,
-                    data={"media_type": "VIDEO", "text": text, "access_token": THREADS_ACCESS_TOKEN},
+                    data={"media_type": "VIDEO", "text": text, "access_token": token},
                     timeout=20
                 ).json()
             else:
                 # Фото або карусель
                 res = requests.post(
                     container_url,
-                    data={"media_type": "IMAGE", "text": text, "access_token": THREADS_ACCESS_TOKEN},
+                    data={"media_type": "IMAGE", "text": text, "access_token": token},
                     timeout=15
                 ).json()
 
@@ -83,7 +83,7 @@ class ThreadsPublisher(BasePublisher):
                 raise Exception(f"Помилка створення контейнера Threads: {res}")
 
             time.sleep(3)
-            pub_res = requests.post(publish_url, data={"creation_id": creation_id, "access_token": THREADS_ACCESS_TOKEN}, timeout=15).json()
+            pub_res = requests.post(publish_url, data={"creation_id": creation_id, "access_token": token}, timeout=15).json()
             media_id = pub_res.get("id")
             if not media_id:
                 raise Exception(f"Помилка публікації Threads: {pub_res}")
@@ -100,12 +100,13 @@ class ThreadsPublisher(BasePublisher):
         if external_id.startswith("mock_"):
             return StatsResult(platform=self.platform_name, views=1450, likes=98, comments=11)
 
-        if not THREADS_ACCESS_TOKEN:
+        token = os.getenv("THREADS_ACCESS_TOKEN", THREADS_ACCESS_TOKEN).strip()
+        if not token:
             return StatsResult(platform=self.platform_name, error="Немає токена Threads")
 
         try:
             url = f"https://graph.threads.net/v1.0/{external_id}"
-            params = {"fields": "views,likes,replies", "access_token": THREADS_ACCESS_TOKEN}
+            params = {"fields": "views,likes,replies", "access_token": token}
             res = requests.get(url, params=params, timeout=10).json()
             return StatsResult(
                 platform=self.platform_name,
