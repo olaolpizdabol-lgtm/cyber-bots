@@ -64,7 +64,7 @@ def login_snapchat():
             "locale": "en-US"
         }
 
-        # Якщо є попередній файл сесії, спробуємо завантажити його для збереження cookies
+        # Якщо є попередній файл сесії, завантажимо його для прискорення
         if STATE_FILE.exists():
             try:
                 context = browser.new_context(storage_state=str(STATE_FILE), **context_kwargs)
@@ -86,14 +86,13 @@ def login_snapchat():
         try:
             page.goto(target_url, timeout=45000, wait_until="domcontentloaded")
         except Exception as e:
-            print(f"Попередження при завантаженні: {e}")
+            print(f"Завантаження: {e}")
 
         print("\n" + "=" * 60)
         print("✋ ДІЇ В БРАУЗЕРІ:")
         print("   1. Увійдіть у свій акаунт Snapchat (@bohdan.gpt)")
-        print("   2. Дочекайтеся появи особистого кабінету my.snapchat.com")
-        print("   3. Скрипт автоматично перейде на сторінку Spotlight,")
-        print("      перевірить права та збереже токен для Railway!")
+        print("   2. Якщо з'явиться капча - спокійно розв'яжіть її у вікні браузера")
+        print("   3. Скрипт НЕ перезавантажуватиме сторінку і дочекається входу!")
         print("=" * 60 + "\n")
 
         print("⏳ Очікуємо завершення входу в браузері...")
@@ -101,43 +100,48 @@ def login_snapchat():
 
         logged_in = False
         start_time = time.time()
-        max_wait = 300  # 5 хвилин
+        max_wait = 360  # 6 хвилин
+        uploader_requested = False
+        last_captcha_alert = 0.0
 
         while time.time() - start_time < max_wait:
-            curr_url = page.url
+            try:
+                curr_url = page.url
+            except Exception:
+                # Вікно закрите користувачем
+                break
 
-            # Ознака проходження логіну:
-            is_login_page = (
-                "/login" in curr_url or
-                page.locator('input[type="password"]').count() > 0 or
-                page.locator('text="Log in to Snapchat"').count() > 0
-            )
+            # 1. Якщо на екрані капча
+            if "captcha" in curr_url:
+                if time.time() - last_captcha_alert > 12:
+                    print("🧩 Snapchat вимагає підтвердження (капчу)! Будь ласка, розв'яжіть її у вікні браузера...")
+                    last_captcha_alert = time.time()
+                time.sleep(2)
+                continue
 
-            # Перевіряємо наявність майстер-сесійних cookies
-            cookies = context.cookies()
-            has_auth_cookie = any(
-                ("auth-session" in c["name"].lower() or "xsrf_token" in c["name"].lower())
-                for c in cookies
-            )
+            # 2. Якщо все ще на сторінках входу / 2FA / паролю (accounts.snapchat.com)
+            if "accounts.snapchat.com" in curr_url:
+                time.sleep(2)
+                continue
 
-            if not is_login_page and (has_auth_cookie or "my.snapchat.com" in curr_url):
-                print(f"\n🎉 Вхід зафіксовано! (URL: {curr_url})")
-                print("🔗 Перевіряємо доступ до веб-завантажувача Spotlight...")
+            # 3. Якщо успішно потрапили на my.snapchat.com (особистий кабінет)
+            if "my.snapchat.com" in curr_url and not uploader_requested:
+                print(f"\n🎉 Вхід на my.snapchat.com зафіксовано!")
+                print("🔗 Переходимо до веб-завантажувача Spotlight...")
+                uploader_requested = True
                 try:
-                    page.goto(SNAPCHAT_UPLOADER_URL, timeout=30000, wait_until="domcontentloaded")
+                    page.goto(SNAPCHAT_UPLOADER_URL, timeout=45000, wait_until="domcontentloaded")
                     page.wait_for_timeout(4000)
                 except Exception as ge:
-                    print(f"Помилка відкриття uploader: {ge}")
+                    print(f"Перехід: {ge}")
+                continue
 
-                if "/login" not in page.url:
+            # 4. Якщо ми на profile.snapchat.com (uploader або кабінет)
+            if "profile.snapchat.com" in curr_url and "accounts.snapchat.com" not in curr_url:
+                time.sleep(3)
+                if "accounts.snapchat.com" not in page.url:
                     logged_in = True
                     break
-                else:
-                    print("⏳ Виконується SSO перехід на Profile Manager, зачекайте кілька секунд...")
-                    page.wait_for_timeout(3000)
-                    if "/login" not in page.url:
-                        logged_in = True
-                        break
 
             time.sleep(2)
 
@@ -187,7 +191,10 @@ def login_snapchat():
             print("\n❌ Час очікування вичерпано або вікно закрито без входу.")
             print("⚠️ Файл сесії data/snapchat_state.json залишено без змін, щоб не пошкодити дані.")
 
-        browser.close()
+        try:
+            browser.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
