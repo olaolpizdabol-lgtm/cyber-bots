@@ -242,17 +242,20 @@ class SnapchatSpotlightPublisher(BasePublisher):
 
                         # 2. Вибір призначення: Post to Spotlight
                         try:
-                            spotlight_cb = target_scope.locator('input[type="checkbox"]').first
-                            if spotlight_cb.count() > 0:
-                                if not spotlight_cb.is_checked():
-                                    spotlight_cb.check(force=True)
-                                    logger.info("Snapchat: відмічено чекбокс 'Post to Spotlight'")
-                                else:
-                                    logger.info("Snapchat: чекбокс 'Post to Spotlight' вже активний за замовчуванням")
+                            # Шукаємо контейнер або текст "Post to Spotlight"
+                            spotlight_label = target_scope.locator('text="Post to Spotlight"').first
+                            if spotlight_label.count() > 0 and spotlight_label.is_visible():
+                                spotlight_label.click(force=True)
+                                logger.info("Snapchat: клікнуто по мітці 'Post to Spotlight'")
+                                page.wait_for_timeout(500)
                             else:
-                                logger.info("Snapchat: чекбоксів не знайдено, переходимо далі")
+                                spotlight_cb = target_scope.locator('input[type="checkbox"]').first
+                                if spotlight_cb.count() > 0:
+                                    if not spotlight_cb.is_checked():
+                                        spotlight_cb.check(force=True)
+                                        logger.info("Snapchat: відмічено чекбокс 'Post to Spotlight'")
                         except Exception as cbe:
-                            logger.warning(f"Snapchat: перевірка чекбокса Spotlight: {cbe}")
+                            logger.warning(f"Snapchat: вибір Post to Spotlight: {cbe}")
 
                         # 3. Заповнення опису (Description)
                         desc_box = target_scope.locator('textarea[placeholder*="description" i], textarea').first
