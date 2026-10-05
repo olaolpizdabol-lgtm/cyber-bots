@@ -281,18 +281,10 @@ class TikTokStreakService:
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--disable-webgl",
-                    "--disable-webgl2",
-                    "--disable-3d-apis",
-                    "--renderer-process-limit=1",
-                    "--disable-site-isolation-trials",
                     "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
-                    "--no-default-browser-check",
-                    "--js-flags=--max-old-space-size=256",
-                    "--disable-extensions",
-                    "--disable-background-networking"
+                    "--no-default-browser-check"
                 ]
                 browser = await p.chromium.launch(
                     headless=True,
@@ -774,18 +766,10 @@ class TikTokStreakService:
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
-                        "--disable-webgl",
-                        "--disable-webgl2",
-                        "--disable-3d-apis",
-                        "--renderer-process-limit=1",
-                        "--disable-site-isolation-trials",
                         "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
-                        "--no-default-browser-check",
-                        "--js-flags=--max-old-space-size=256",
-                        "--disable-extensions",
-                        "--disable-background-networking"
+                        "--no-default-browser-check"
                     ]
                     browser = await p.chromium.launch(
                         headless=True,

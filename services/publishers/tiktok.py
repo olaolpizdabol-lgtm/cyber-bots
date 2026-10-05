@@ -88,18 +88,10 @@ class TikTokPublisher(BasePublisher):
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
-                        "--disable-webgl",
-                        "--disable-webgl2",
-                        "--disable-3d-apis",
-                        "--renderer-process-limit=1",
-                        "--disable-site-isolation-trials",
                         "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
-                        "--no-default-browser-check",
-                        "--js-flags=--max-old-space-size=256",
-                        "--disable-extensions",
-                        "--disable-background-networking"
+                        "--no-default-browser-check"
                     ]
                 }
                 if use_proxy and proxy_cfg:
@@ -177,9 +169,22 @@ class TikTokPublisher(BasePublisher):
                             if media_paths:
                                 logger.info(f"TikTok Studio: передаємо файл {media_paths[0]} в input...")
                                 file_input.first.set_input_files(media_paths[0])
-                                logger.info("TikTok Studio: файл передано, очікуємо появи поля опису...")
+                                logger.info("TikTok Studio: файл передано, очікуємо завантаження форми редагування...")
 
-                                # 2. Чекаємо поки зникне прогрес-бар обробки або з'явиться поле підпису
+                                # Закриваємо спливаючі вікна (Got it, Close тощо) одразу після завантаження файлу
+                                page.wait_for_timeout(2500)
+                                for _ in range(3):
+                                    for btn_text in ["Got it", "Зрозуміло", "Turn on", "Увімкнути", "Close", "Закрити", "Cancel", "Skip", "Not now"]:
+                                        try:
+                                            b = page.locator(f'button:has-text("{btn_text}")')
+                                            if b.count() > 0 and b.first.is_visible():
+                                                logger.info(f"TikTok Studio: закриваємо модалку '{btn_text}'")
+                                                b.first.click(force=True)
+                                                page.wait_for_timeout(800)
+                                        except Exception:
+                                            pass
+
+                                # Чекаємо поки з'явиться форма редагування
                                 try:
                                     target_scope.wait_for_selector(
                                         'div[contenteditable="true"][data-placeholder], '
@@ -189,8 +194,8 @@ class TikTokPublisher(BasePublisher):
                                     )
                                     logger.info("TikTok Studio: форму редагування успішно відображено")
                                 except Exception:
-                                    logger.warning("TikTok Studio: таймаут очікування форми опису, очікуємо ще 15с...")
-                                    page.wait_for_timeout(15000)
+                                    logger.warning("TikTok Studio: очікуємо додатковий час для форми...")
+                                    page.wait_for_timeout(5000)
 
                             # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо) та joyride overlay
                             for _ in range(6):
