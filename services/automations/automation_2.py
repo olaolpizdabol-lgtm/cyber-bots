@@ -232,7 +232,11 @@ class TikTokStreakService:
         Автоматизована відправка Direct Message через Playwright Chromium у фоновому браузері.
         Підтримує авто-перемикання на пряме з'єднання при збоях проксі тунелю.
         """
-        with BROWSER_LOCK:
+        if not BROWSER_LOCK.acquire(blocking=False):
+            logger.info("Браузер зайнятий публікацією контенту. Пропускаємо відправку DM через Playwright.")
+            return False, "Браузер зайнятий іншою операцією"
+
+        try:
             configured_proxy = proxy_manager.get_playwright_proxy()
             proxy_configs = [configured_proxy, None] if configured_proxy else [None]
 
@@ -255,6 +259,8 @@ class TikTokStreakService:
                     return False, last_err
 
             return False, last_err
+        finally:
+            BROWSER_LOCK.release()
 
     async def _send_single_dm_attempt(self, username: str, message_text: str, session_id: str, proxy_cfg: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
         try:

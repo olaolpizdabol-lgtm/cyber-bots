@@ -102,8 +102,8 @@ class SnapchatSpotlightPublisher(BasePublisher):
     def _publish_via_playwright(self, video_path: str, caption: str, headline: str = "") -> PublishResult:
         from playwright.sync_api import sync_playwright
 
-        proxy_cfg = proxy_manager.get_playwright_proxy()
-        proxy_modes = [True, False] if (proxy_cfg and not STRICT_PROXY_CHECK) else [bool(proxy_cfg)]
+        # Відеофайли завантажуються напряму для стабільної роботи без падінь Playwright CDP
+        proxy_modes = [True] if (STRICT_PROXY_CHECK and proxy_cfg) else [False]
         last_err = None
 
         for use_proxy in proxy_modes:

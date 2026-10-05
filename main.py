@@ -113,6 +113,8 @@ async def main():
         last_react_check_minute = None
         last_ig_check_minute = None
         slots_file = DATA_DIR / "daily_news_streak_slots.json"
+        in_memory_sent_slots = set()
+        current_day_cached = ""
 
         while True:
             try:
@@ -128,8 +130,16 @@ async def main():
                 today_str = now_kyiv.strftime("%Y-%m-%d")
                 current_hm = now_kyiv.strftime("%H:%M")
 
+                if today_str != current_day_cached:
+                    current_day_cached = today_str
+                    in_memory_sent_slots.clear()
+
                 # Розклад 3 рази на день для друзів: 10:00 (ранок), 15:00 (день), 20:00 (вечір)
-                DAILY_NEWS_SLOTS = ["10:00", "15:00", "20:00"]
+                DAILY_NEWS_SLOTS = {
+                    "10:00": 10,
+                    "15:00": 15,
+                    "20:00": 20
+                }
                 sent_slots = {}
                 if slots_file.exists():
                     try:
@@ -139,21 +149,23 @@ async def main():
                 if not isinstance(sent_slots, dict):
                     sent_slots = {}
 
-                today_slots = set(sent_slots.get(today_str, []))
+                today_slots = set(sent_slots.get(today_str, [])) | in_memory_sent_slots
                 due_slot = None
-                for s in DAILY_NEWS_SLOTS:
-                    if current_hm >= s and s not in today_slots and now_kyiv.hour < 23:
+                for s, target_hour in DAILY_NEWS_SLOTS.items():
+                    # Слот спрацьовує виключно у відповідну годину (target_hour або target_hour + 1)
+                    if s not in today_slots and target_hour <= now_kyiv.hour <= target_hour + 1 and current_hm >= s:
                         due_slot = s
                         break
 
                 if due_slot:
                     logger.info(f"⏰ Настав час слоту {due_slot} (зараз {current_hm} Київ): відправка друзям новини та вогника...")
+                    in_memory_sent_slots.add(due_slot)
                     today_slots.add(due_slot)
                     sent_slots[today_str] = list(today_slots)
                     try:
                         slots_file.write_text(json.dumps(sent_slots, ensure_ascii=False, indent=2), encoding="utf-8")
-                    except Exception:
-                        pass
+                    except Exception as se:
+                        logger.warning(f"Не вдалося зберегти slots_file: {se}")
                     # Відправляємо кєнтам (дівчина фільтрується автоматично)
                     res = await tiktok_streak_service.run_streaks_dispatch(force_all=True, friends_only=True)
                     if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:

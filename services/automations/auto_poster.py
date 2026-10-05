@@ -306,12 +306,17 @@ class AutoPosterService:
 
             logger.info(f"Публікація #{post_id} ({content_type.value}) на {publisher.platform_name} (файлів: {len(platform_media)})...")
             if plat_key in ("tiktok", "snapchat"):
+                logger.info(f"Очікуємо захоплення браузерного локу для {publisher.platform_name}...")
                 with BROWSER_LOCK:
-                    res = publisher.publish(
-                        content_type=content_type,
-                        media_paths=platform_media,
-                        metadata=metadata
-                    )
+                    logger.info(f"Браузерний лок захоплено для {publisher.platform_name}, починаємо публікацію...")
+                    try:
+                        res = publisher.publish(
+                            content_type=content_type,
+                            media_paths=platform_media,
+                            metadata=metadata
+                        )
+                    finally:
+                        logger.info(f"Браузерний лок для {publisher.platform_name} успішно звільнено.")
             else:
                 res = publisher.publish(
                     content_type=content_type,

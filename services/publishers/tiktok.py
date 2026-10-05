@@ -75,8 +75,9 @@ class TikTokPublisher(BasePublisher):
             state_file = DATA_DIR / "tiktok_channel_state.json"
             proxy_cfg = proxy_manager.get_playwright_proxy()
 
-            chromium_bin = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
-            proxy_modes = [True, False] if (proxy_cfg and not STRICT_PROXY_CHECK) else [bool(proxy_cfg)]
+            # Відеофайли завантажуються напряму (без проксі з авторизацією, які спричиняють падіння Node.js через Invalid InterceptionId).
+            # Проксі підключається тільки якщо явно задано STRICT_PROXY_CHECK=True.
+            proxy_modes = [True] if (STRICT_PROXY_CHECK and proxy_cfg) else [False]
             last_loop_err = None
 
             for use_proxy in proxy_modes:
