@@ -75,29 +75,47 @@ class TikTokPublisher(BasePublisher):
             state_file = DATA_DIR / "tiktok_channel_state.json"
             proxy_cfg = proxy_manager.get_playwright_proxy()
 
-            # Відеофайли завантажуються напряму (без проксі з авторизацією, які спричиняють падіння Node.js через Invalid InterceptionId).
-            # Проксі підключається тільки якщо явно задано STRICT_PROXY_CHECK=True.
-            proxy_modes = [True] if (STRICT_PROXY_CHECK and proxy_cfg) else [False]
+            # Проксі: завжди використовуємо якщо є URL (незалежно від STRICT_PROXY_CHECK)
+            # щоб TikTok бачив US IP і давав охоплення в США.
+            # Якщо проксі недоступний - fallback на пряме з'єднання.
+            proxy_modes = [True, False] if proxy_cfg else [False]
             last_loop_err = None
+
+            # Базові Chrome flags для headless + стабільності на Railway
+            _base_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--mute-audio",
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+                # Memory-reducing flags
+                "--renderer-process-limit=1",
+                "--disable-software-rasterizer",
+                "--disable-accelerated-2d-canvas",
+                "--disable-extensions",
+                "--disable-component-extensions-with-background-pages",
+                "--disk-cache-size=1",
+                "--media-cache-size=1",
+            ]
+            # На Linux (Docker/Railway) додаткові флаги для зниження пам'яті
+            import sys as _sys
+            if _sys.platform.startswith("linux"):
+                _base_args += ["--no-zygote"]
 
             for use_proxy in proxy_modes:
                 launch_kwargs = {
                     "headless": True,
-                    "args": [
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--mute-audio",
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-first-run",
-                        "--no-default-browser-check"
-                    ]
+                    "args": _base_args,
                 }
                 if use_proxy and proxy_cfg:
                     launch_kwargs["proxy"] = proxy_cfg
 
                 try:
+                    proxy_label = "через проксі" if use_proxy else "пряме зєднання"
+                    logger.info(f"TikTok: запуск браузера ({proxy_label})...")
                     with sync_playwright() as p:
                         browser = p.chromium.launch(**launch_kwargs)
                         try:

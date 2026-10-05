@@ -62,7 +62,12 @@ class SnapchatSpotlightPublisher(BasePublisher):
                 with open(SNAPCHAT_STATE_FILE, "r", encoding="utf-8") as sf:
                     s_data = json.load(sf)
                 cookie_names = {c.get("name") for c in s_data.get("cookies", [])}
-                if any(k in cookie_names for k in ["sc-a-nonce", "sc-a-session", "xs", "sessionid"]):
+                # Snapchat може використовувати різні ключові куки залежно від типу сесії
+                session_indicators = [
+                    "sc-a-nonce", "sc-a-session", "xs", "sessionid",
+                    "_sc-sid", "blizzard_web_session_id", "sc-a-csrf",
+                ]
+                if any(k in cookie_names for k in session_indicators):
                     has_state = True
             except Exception:
                 has_state = False
@@ -102,28 +107,48 @@ class SnapchatSpotlightPublisher(BasePublisher):
     def _publish_via_playwright(self, video_path: str, caption: str, headline: str = "") -> PublishResult:
         from playwright.sync_api import sync_playwright
 
-        # Відеофайли завантажуються напряму для стабільної роботи без падінь Playwright CDP
-        proxy_modes = [True] if (STRICT_PROXY_CHECK and proxy_cfg) else [False]
+        proxy_cfg = proxy_manager.get_playwright_proxy()
+
+        # Проксі: завжди використовуємо якщо є URL (Snapchat Spotlight потребує US IP)
+        # Fallback на пряме з'єднання якщо проксі недоступний.
+        proxy_modes = [True, False] if proxy_cfg else [False]
         last_err = None
+
+        # Базові Chrome flags для headless + стабільності на Railway
+        _base_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--mute-audio",
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+            # Memory-reducing flags
+            "--renderer-process-limit=1",
+            "--disable-software-rasterizer",
+            "--disable-accelerated-2d-canvas",
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--disk-cache-size=1",
+            "--media-cache-size=1",
+        ]
+        # На Linux (Docker/Railway) додаткові флаги для зниження пам'яті
+        import sys as _sys
+        if _sys.platform.startswith("linux"):
+            _base_args += ["--no-zygote"]
 
         for use_proxy in proxy_modes:
             launch_kwargs = {
                 "headless": True,
-                "args": [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--mute-audio",
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-first-run",
-                    "--no-default-browser-check"
-                ]
+                "args": _base_args,
             }
             if use_proxy and proxy_cfg:
                 launch_kwargs["proxy"] = proxy_cfg
 
             try:
+                proxy_label = "через проксі" if use_proxy else "пряме зєднання"
+                logger.info(f"Snapchat: запуск браузера ({proxy_label})...")
                 with sync_playwright() as p:
                     browser = p.chromium.launch(**launch_kwargs)
                     try:
