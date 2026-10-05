@@ -117,7 +117,10 @@ class SnapchatSpotlightPublisher(BasePublisher):
                     "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
-                    "--no-default-browser-check"
+                    "--no-default-browser-check",
+                    "--js-flags=--max-old-space-size=256",
+                    "--disable-extensions",
+                    "--disable-background-networking"
                 ]
             }
             if use_proxy and proxy_cfg:
@@ -134,6 +137,17 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             locale="en-US"
                         )
                         page = context.new_page()
+
+                        try:
+                            def _block_heavy_snap(route):
+                                if route.request.resource_type in ["image", "media", "font"]:
+                                    route.abort()
+                                else:
+                                    route.continue_()
+                            page.route("**/*", _block_heavy_snap)
+                        except Exception:
+                            pass
+
                         try:
                             from playwright_stealth import stealth_sync
                             stealth_sync(page)
@@ -142,7 +156,7 @@ class SnapchatSpotlightPublisher(BasePublisher):
 
                         logger.info("Snapchat Spotlight: відкриваємо веб-завантажувач Profile Manager...")
                         page.goto(SNAPCHAT_UPLOADER_URL, timeout=40000, wait_until="domcontentloaded")
-                        page.wait_for_timeout(4000)
+                        page.wait_for_timeout(3000)
 
                         if "login" in page.url:
                             logger.info("Snapchat Spotlight: перевіряємо перехід через fallback %s...", SNAPCHAT_FALLBACK_URL)

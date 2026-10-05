@@ -90,7 +90,10 @@ class TikTokPublisher(BasePublisher):
                         "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
-                        "--no-default-browser-check"
+                        "--no-default-browser-check",
+                        "--js-flags=--max-old-space-size=256",
+                        "--disable-extensions",
+                        "--disable-background-networking"
                     ]
                 }
                 if use_proxy and proxy_cfg:
@@ -116,6 +119,18 @@ class TikTokPublisher(BasePublisher):
                                     logger.warning(f"TikTok: не вдалося додати sessionid cookies: {ce}")
 
                             page = context.new_page()
+
+                            # Захист від падіння вкладки через нестачу RAM у хмарі: блокуємо важкі ресурси
+                            try:
+                                def _block_heavy(route):
+                                    if route.request.resource_type in ["image", "media", "font"]:
+                                        route.abort()
+                                    else:
+                                        route.continue_()
+                                page.route("**/*", _block_heavy)
+                            except Exception:
+                                pass
+
                             try:
                                 from playwright_stealth import stealth_sync
                                 stealth_sync(page)
@@ -123,7 +138,7 @@ class TikTokPublisher(BasePublisher):
                                 pass
 
                             page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
-                            page.wait_for_timeout(4000)
+                            page.wait_for_timeout(3000)
 
                             # 1. Завантажуємо файл (перевіряємо головну сторінку та iframe)
                             target_scope = page
