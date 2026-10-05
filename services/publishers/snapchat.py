@@ -141,7 +141,7 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             pass
 
                         logger.info("Snapchat Spotlight: відкриваємо веб-завантажувач Profile Manager...")
-                        page.goto(SNAPCHAT_UPLOADER_URL, timeout=60000, wait_until="networkidle")
+                        page.goto(SNAPCHAT_UPLOADER_URL, timeout=40000, wait_until="domcontentloaded")
                         page.wait_for_timeout(4000)
 
                         if "login" in page.url:
