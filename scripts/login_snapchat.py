@@ -58,20 +58,11 @@ def login_snapchat():
             ]
         )
 
-        context_kwargs = {
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "viewport": {"width": 1280, "height": 900},
-            "locale": "en-US"
-        }
-
-        # Якщо є попередній файл сесії, завантажимо його для прискорення
-        if STATE_FILE.exists():
-            try:
-                context = browser.new_context(storage_state=str(STATE_FILE), **context_kwargs)
-            except Exception:
-                context = browser.new_context(**context_kwargs)
-        else:
-            context = browser.new_context(**context_kwargs)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+            locale="en-US"
+        )
 
         page = context.new_page()
 
@@ -81,8 +72,8 @@ def login_snapchat():
         except Exception:
             pass
 
-        target_url = "https://my.snapchat.com"
-        print(f"🔗 Відкриваємо {target_url}...")
+        target_url = "https://accounts.snapchat.com/v2/login?continue=https%3A%2F%2Fmy.snapchat.com"
+        print(f"🔗 Відкриваємо форму входу Snapchat...")
         try:
             page.goto(target_url, timeout=45000, wait_until="domcontentloaded")
         except Exception as e:
@@ -90,111 +81,81 @@ def login_snapchat():
 
         print("\n" + "=" * 60)
         print("✋ ДІЇ В БРАУЗЕРІ:")
-        print("   1. Увійдіть у свій акаунт Snapchat (@bohdan.gpt)")
-        print("   2. Якщо з'явиться капча - спокійно розв'яжіть її у вікні браузера")
-        print("   3. Скрипт НЕ перезавантажуватиме сторінку і дочекається входу!")
+        print("   1. Введіть логін (@bohdan.gpt) та пароль у вікні браузера.")
+        print("   2. Спокійно розв'яжіть капчу (якщо Snapchat її покаже).")
+        print("   3. Дочекайтеся відкриття особистого кабінету Snapchat.")
+        print("   4. Після цього поверніться сюди і натисніть клавішу ENTER!")
         print("=" * 60 + "\n")
 
-        print("⏳ Очікуємо завершення входу в браузері...")
-        page.wait_for_timeout(3000)
-
-        logged_in = False
-        start_time = time.time()
-        max_wait = 360  # 6 хвилин
-        uploader_requested = False
-        last_captcha_alert = 0.0
-
-        while time.time() - start_time < max_wait:
-            try:
-                curr_url = page.url
-            except Exception:
-                # Вікно закрите користувачем
-                break
-
-            # 1. Якщо на екрані капча
-            if "captcha" in curr_url:
-                if time.time() - last_captcha_alert > 12:
-                    print("🧩 Snapchat вимагає підтвердження (капчу)! Будь ласка, розв'яжіть її у вікні браузера...")
-                    last_captcha_alert = time.time()
-                time.sleep(2)
-                continue
-
-            # 2. Якщо все ще на сторінках входу / 2FA / паролю (accounts.snapchat.com)
-            if "accounts.snapchat.com" in curr_url:
-                time.sleep(2)
-                continue
-
-            # 3. Якщо успішно потрапили на my.snapchat.com (особистий кабінет)
-            if "my.snapchat.com" in curr_url and not uploader_requested:
-                print(f"\n🎉 Вхід на my.snapchat.com зафіксовано!")
-                print("🔗 Переходимо до веб-завантажувача Spotlight...")
-                uploader_requested = True
-                try:
-                    page.goto(SNAPCHAT_UPLOADER_URL, timeout=45000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(4000)
-                except Exception as ge:
-                    print(f"Перехід: {ge}")
-                continue
-
-            # 4. Якщо ми на profile.snapchat.com (uploader або кабінет)
-            if "profile.snapchat.com" in curr_url and "accounts.snapchat.com" not in curr_url:
-                time.sleep(3)
-                if "accounts.snapchat.com" not in page.url:
-                    logged_in = True
-                    break
-
-            time.sleep(2)
-
-        if logged_in:
-            print(f"📍 Фінальна цільова сторінка: {page.url}")
-            time.sleep(3)
-
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            context.storage_state(path=str(STATE_FILE))
-
-            # Очищаємо DBSC кукі з короткочасним TTL 30 хвилин для довготривалої роботи
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as sf:
-                    state_data = json.load(sf)
-                all_c = state_data.get("cookies", [])
-                clean_c = [c for c in all_c if "dbsc" not in c.get("name", "").lower()]
-                state_data["cookies"] = clean_c
-                with open(STATE_FILE, "w", encoding="utf-8") as sf:
-                    json.dump(state_data, sf, indent=2)
-            except Exception:
-                pass
-
-            screenshot_path = DATA_DIR / "snapchat_logged_in_page.png"
-            try:
-                page.screenshot(path=str(screenshot_path))
-                print(f"📸 Знімок сторінки збережено: {screenshot_path}")
-            except Exception:
-                pass
-
-            # Генеруємо Base64 для Railway
-            with open(STATE_FILE, "r", encoding="utf-8") as sf:
-                raw_json = sf.read().strip()
-            b64_val = base64.b64encode(raw_json.encode("utf-8")).decode("utf-8")
-
-            with open(B64_FILE, "w", encoding="utf-8") as bf:
-                bf.write(f"SNAPCHAT_STATE_B64={b64_val}\n")
-
-            print("\n" + "=" * 65)
-            print("🎉 УСПІХ! СЕСІЯ SNAPCHAT SPOTLIGHT ЗБЕРЕЖЕНА ТА ОНОВЛЕНА!")
-            print("=" * 65)
-            print(f"📁 Файл сесії: {STATE_FILE}")
-            print(f"📦 Base64 збережено у: {B64_FILE}")
-            print("\n📋 Скопіюйте оновлену змінну для Railway (Variables -> Raw Editor):")
-            print(f"\nSNAPCHAT_STATE_B64={b64_val}\n")
-            print("=" * 65 + "\n")
-        else:
-            print("\n❌ Час очікування вичерпано або вікно закрито без входу.")
-            print("⚠️ Файл сесії data/snapchat_state.json залишено без змін, щоб не пошкодити дані.")
-
         try:
+            input("👉 Натисніть [ENTER] після того, як успішно увійшли в акаунт у браузері: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\n❌ Скасовано користувачем.")
             browser.close()
+            return
+
+        print("\n⏳ Перевіряємо сесію та переходимо до Spotlight Web Uploader...")
+        try:
+            page.goto(SNAPCHAT_UPLOADER_URL, timeout=45000, wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+        except Exception as ge:
+            print(f"Завантаження uploader: {ge}")
+
+        # Якщо Snapchat вимагає додаткового підтвердження / капчі при переході
+        if "captcha" in page.url or "login" in page.url:
+            print("\n🧩 Snapchat вимагає підтвердження (капчу або клік) перед відкриттям Profile Manager.")
+            print(f"Поточна адреса: {page.url}")
+            try:
+                input("👉 Розв'яжіть капчу у вікні браузера та натисніть [ENTER]: ")
+                page.wait_for_timeout(3000)
+            except (KeyboardInterrupt, EOFError):
+                print("\n❌ Скасовано користувачем.")
+                browser.close()
+                return
+
+        print(f"📍 Цільова адреса: {page.url}")
+        time.sleep(3)
+
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        context.storage_state(path=str(STATE_FILE))
+
+        # Очищаємо тимчасові DBSC кукі з 30-хвилинним TTL для довговічності сесії
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as sf:
+                state_data = json.load(sf)
+            all_c = state_data.get("cookies", [])
+            clean_c = [c for c in all_c if "dbsc" not in c.get("name", "").lower()]
+            state_data["cookies"] = clean_c
+            with open(STATE_FILE, "w", encoding="utf-8") as sf:
+                json.dump(state_data, sf, indent=2)
         except Exception:
             pass
+
+        screenshot_path = DATA_DIR / "snapchat_logged_in_page.png"
+        try:
+            page.screenshot(path=str(screenshot_path))
+            print(f"📸 Знімок сторінки збережено: {screenshot_path}")
+        except Exception:
+            pass
+
+        # Генеруємо Base64 для Railway
+        with open(STATE_FILE, "r", encoding="utf-8") as sf:
+            raw_json = sf.read().strip()
+        b64_val = base64.b64encode(raw_json.encode("utf-8")).decode("utf-8")
+
+        with open(B64_FILE, "w", encoding="utf-8") as bf:
+            bf.write(f"SNAPCHAT_STATE_B64={b64_val}\n")
+
+        print("\n" + "=" * 65)
+        print("🎉 УСПІХ! СЕСІЯ SNAPCHAT SPOTLIGHT ЗБЕРЕЖЕНА ТА ГОТОВА!")
+        print("=" * 65)
+        print(f"📁 Файл сесії: {STATE_FILE}")
+        print(f"📦 Base64 збережено у: {B64_FILE}")
+        print("\n📋 Скопіюйте оновлену змінну для Railway (Variables -> Raw Editor):")
+        print(f"\nSNAPCHAT_STATE_B64={b64_val}\n")
+        print("=" * 65 + "\n")
+
+        browser.close()
 
 
 if __name__ == "__main__":
