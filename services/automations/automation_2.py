@@ -45,6 +45,7 @@ from core.database import (
     get_recent_streak_logs,
     get_streak_stats
 )
+from core.browser_lock import BROWSER_LOCK
 from core.security_guard import security_guard
 from services.gemini_ai import gemini_service, sanitize_typography
 from services.proxy_manager import proxy_manager
@@ -231,28 +232,29 @@ class TikTokStreakService:
         Автоматизована відправка Direct Message через Playwright Chromium у фоновому браузері.
         Підтримує авто-перемикання на пряме з'єднання при збоях проксі тунелю.
         """
-        configured_proxy = proxy_manager.get_playwright_proxy()
-        proxy_configs = [configured_proxy, None] if configured_proxy else [None]
+        with BROWSER_LOCK:
+            configured_proxy = proxy_manager.get_playwright_proxy()
+            proxy_configs = [configured_proxy, None] if configured_proxy else [None]
 
-        last_err = None
-        for p_cfg in proxy_configs:
-            try:
-                success, err = await self._send_single_dm_attempt(username, message_text, session_id, p_cfg)
-                if success:
-                    return True, None
-                last_err = err
-                if p_cfg is not None and any(w in str(err).lower() for w in ["tunnel", "proxy", "connection", "err_"]):
-                    logger.warning(f"Проксі не зміг підключитися ({err}). Автоматично перемикаємо на пряме з'єднання...")
-                    continue
-                return False, err
-            except Exception as e:
-                last_err = str(e)
-                if p_cfg is not None:
-                    logger.warning(f"Збій проксі ({e}), пробуємо пряме з'єднання...")
-                    continue
-                return False, last_err
+            last_err = None
+            for p_cfg in proxy_configs:
+                try:
+                    success, err = await self._send_single_dm_attempt(username, message_text, session_id, p_cfg)
+                    if success:
+                        return True, None
+                    last_err = err
+                    if p_cfg is not None and any(w in str(err).lower() for w in ["tunnel", "proxy", "connection", "err_"]):
+                        logger.warning(f"Проксі не зміг підключитися ({err}). Автоматично перемикаємо на пряме з'єднання...")
+                        continue
+                    return False, err
+                except Exception as e:
+                    last_err = str(e)
+                    if p_cfg is not None:
+                        logger.warning(f"Збій проксі ({e}), пробуємо пряме з'єднання...")
+                        continue
+                    return False, last_err
 
-        return False, last_err
+            return False, last_err
 
     async def _send_single_dm_attempt(self, username: str, message_text: str, session_id: str, proxy_cfg: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
         try:
@@ -273,9 +275,18 @@ class TikTokStreakService:
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
+                    "--disable-webgl",
+                    "--disable-webgl2",
+                    "--disable-3d-apis",
+                    "--renderer-process-limit=1",
+                    "--disable-site-isolation-trials",
+                    "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
-                    "--no-default-browser-check"
+                    "--no-default-browser-check",
+                    "--js-flags=--max-old-space-size=256",
+                    "--disable-extensions",
+                    "--disable-background-networking"
                 ]
                 browser = await p.chromium.launch(
                     headless=True,
@@ -720,6 +731,19 @@ class TikTokStreakService:
         if not targets:
             return []
 
+        if not BROWSER_LOCK.acquire(blocking=False):
+            logger.info("Браузер Chromium зараз зайнятий іншим процесом (публікація контенту). Пропускаємо фонову перевірку чатів TikTok.")
+            return []
+
+        try:
+            return await self._check_and_react_impl(targets)
+        finally:
+            BROWSER_LOCK.release()
+
+    async def _check_and_react_impl(self, targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        from core.database import get_recent_tiktok_reactions
+        from playwright.async_api import async_playwright
+
         # Відомі попередні реакції, щоб не коментувати повторно одне й те саме відео
         existing_reactions = get_recent_tiktok_reactions(limit=200)
         responded_urls = {r.get("video_url") for r in existing_reactions if r.get("video_url")}
@@ -744,9 +768,18 @@ class TikTokStreakService:
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
+                        "--disable-webgl",
+                        "--disable-webgl2",
+                        "--disable-3d-apis",
+                        "--renderer-process-limit=1",
+                        "--disable-site-isolation-trials",
+                        "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
-                        "--no-default-browser-check"
+                        "--no-default-browser-check",
+                        "--js-flags=--max-old-space-size=256",
+                        "--disable-extensions",
+                        "--disable-background-networking"
                     ]
                     browser = await p.chromium.launch(
                         headless=True,

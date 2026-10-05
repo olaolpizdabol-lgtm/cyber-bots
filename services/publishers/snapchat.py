@@ -155,29 +155,28 @@ class SnapchatSpotlightPublisher(BasePublisher):
                         page = context.new_page()
 
                         try:
-                            def _block_heavy_snap(route):
-                                if route.request.resource_type in ["image", "media", "font"]:
-                                    route.abort()
-                                else:
-                                    route.continue_()
-                            page.route("**/*", _block_heavy_snap)
-                        except Exception:
-                            pass
-
-                        try:
                             from playwright_stealth import stealth_sync
                             stealth_sync(page)
                         except Exception:
                             pass
 
-                        logger.info("Snapchat Spotlight: відкриваємо веб-завантажувач Profile Manager...")
-                        page.goto(SNAPCHAT_UPLOADER_URL, timeout=40000, wait_until="domcontentloaded")
+                        goto_timeout = 25000 if use_proxy else 40000
+                        logger.info(f"Snapchat Spotlight: відкриваємо веб-завантажувач Profile Manager (proxy={use_proxy}, timeout={goto_timeout}ms)...")
+                        page.goto(SNAPCHAT_UPLOADER_URL, timeout=goto_timeout, wait_until="domcontentloaded")
                         page.wait_for_timeout(3000)
+                        logger.info(f"Snapchat Spotlight: сторінку завантажено (URL: {page.url})")
 
                         if "login" in page.url:
                             logger.info("Snapchat Spotlight: перевіряємо перехід через fallback %s...", SNAPCHAT_FALLBACK_URL)
-                            page.goto(SNAPCHAT_FALLBACK_URL, timeout=40000, wait_until="domcontentloaded")
+                            page.goto(SNAPCHAT_FALLBACK_URL, timeout=goto_timeout, wait_until="domcontentloaded")
                             page.wait_for_timeout(4000)
+
+                        if "captcha" in page.url:
+                            return PublishResult(
+                                success=False,
+                                platform=self.platform_name,
+                                error="⚠️ Snapchat вимагає проходження капчі (антифрод-захист). Оновіть SNAPCHAT_STATE_B64."
+                            )
 
                         if "login" in page.url:
                             return PublishResult(
@@ -187,6 +186,7 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             )
 
                         # Чекаємо поки закінчиться спіннер завантаження і з'явиться input файлу
+                        logger.info("Snapchat Spotlight: шукаємо поле input[type='file']...")
                         try:
                             page.wait_for_selector('input[type="file"]', state="attached", timeout=25000)
                         except Exception:
@@ -201,21 +201,26 @@ class SnapchatSpotlightPublisher(BasePublisher):
                                     if f_inp.count() > 0:
                                         file_input = f_inp
                                         target_scope = frame
+                                        logger.info("Snapchat Spotlight: поле input[type='file'] знайдено всередині iframe")
                                         break
                                 except Exception:
                                     pass
 
                         if file_input.count() == 0:
                             debug_shot = DATA_DIR / "snapchat_no_input_debug.png"
-                            page.screenshot(path=str(debug_shot))
+                            try:
+                                page.screenshot(path=str(debug_shot))
+                            except Exception:
+                                pass
                             return PublishResult(
                                 success=False,
                                 platform=self.platform_name,
                                 error=f"Не знайдено поле завантаження відео на сторінці (знімок: {debug_shot.name})"
                             )
 
+                        logger.info(f"Snapchat Spotlight: передаємо файл {video_path} в input...")
                         file_input.first.set_input_files(video_path)
-                        logger.info("Snapchat: файл відео передано, чекаємо генерацію прев'ю...")
+                        logger.info("Snapchat Spotlight: файл відео передано, чекаємо генерацію прев'ю та готовність форми...")
                         page.wait_for_timeout(5000)
 
                         # 2. Вибір призначення: Post to Spotlight
@@ -242,23 +247,37 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             logger.info("Snapchat: заголовок мініатюри заповнено")
                             page.wait_for_timeout(500)
 
-                        # 5. Кнопка публікації Post
+                        # 5. Кнопка публікації Post (очікуємо готовність кнопки до 30с)
+                        logger.info("Snapchat: очікуємо готовність кнопки 'Post' (обробка відео)...")
                         post_btn = target_scope.locator('button:has-text("Post")').last
-                        if not post_btn.is_visible() or post_btn.is_disabled():
-                            page.wait_for_timeout(3000)
+                        for _ in range(30):
+                            try:
+                                if post_btn.is_visible() and not post_btn.is_disabled():
+                                    break
+                            except Exception:
+                                pass
+                            page.wait_for_timeout(1000)
 
                         if post_btn.is_disabled():
                             debug_shot = DATA_DIR / "snapchat_post_disabled_debug.png"
-                            page.screenshot(path=str(debug_shot))
+                            try:
+                                page.screenshot(path=str(debug_shot))
+                            except Exception:
+                                pass
                             return PublishResult(
                                 success=False,
                                 platform=self.platform_name,
-                                error=f"Кнопка Post недоступна (знімок: {debug_shot.name})"
+                                error=f"Кнопка Post недоступна після 30с очікування (знімок: {debug_shot.name})"
                             )
 
                         post_btn.click(force=True)
                         logger.info("Snapchat: успішно натиснуто кнопку публікації 'Post'!")
                         page.wait_for_timeout(10000)
+
+                        try:
+                            context.storage_state(path=str(SNAPCHAT_STATE_FILE))
+                        except Exception:
+                            pass
 
                         success_shot = DATA_DIR / "snapchat_post_success.png"
                         page.screenshot(path=str(success_shot))

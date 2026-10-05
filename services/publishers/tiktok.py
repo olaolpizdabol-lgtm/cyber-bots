@@ -125,27 +125,24 @@ class TikTokPublisher(BasePublisher):
 
                             page = context.new_page()
 
-                            # Захист від падіння вкладки через нестачу RAM у хмарі: блокуємо важкі ресурси
-                            try:
-                                def _block_heavy(route):
-                                    if route.request.resource_type in ["image", "media", "font"]:
-                                        route.abort()
-                                    else:
-                                        route.continue_()
-                                page.route("**/*", _block_heavy)
-                            except Exception:
-                                pass
-
                             try:
                                 from playwright_stealth import stealth_sync
                                 stealth_sync(page)
                             except Exception:
                                 pass
 
-                            page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=50000, wait_until="domcontentloaded")
+                            goto_timeout = 25000 if use_proxy else 45000
+                            logger.info(f"TikTok Studio: завантажуємо сторінку upload (proxy={use_proxy}, timeout={goto_timeout}ms)...")
+                            page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=goto_timeout, wait_until="domcontentloaded")
                             page.wait_for_timeout(3000)
+                            logger.info(f"TikTok Studio: сторінку завантажено (URL: {page.url})")
+
+                            if "login" in page.url:
+                                logger.warning(f"TikTok Studio: редірект на логін ({page.url})")
+                                raise RuntimeError("TikTok Studio перенаправив на сторінку логіну. Потрібно оновити TIKTOK_CHANNEL_STATE_B64.")
 
                             # 1. Завантажуємо файл (перевіряємо головну сторінку та iframe)
+                            logger.info("TikTok Studio: шукаємо поле input[type='file']...")
                             try:
                                 page.wait_for_selector('input[type="file"]', state="attached", timeout=20000)
                             except Exception:
@@ -161,15 +158,25 @@ class TikTokPublisher(BasePublisher):
                                             if f_inp.count() > 0:
                                                 file_input = f_inp
                                                 target_scope = frame
+                                                logger.info("TikTok Studio: поле input[type='file'] знайдено в iframe")
                                                 break
                                         except Exception:
                                             pass
                             except Exception:
                                 pass
 
-                            if file_input.count() > 0 and media_paths:
+                            if file_input.count() == 0:
+                                debug_shot = DATA_DIR / "tiktok_no_input_debug.png"
+                                try:
+                                    page.screenshot(path=str(debug_shot))
+                                except Exception:
+                                    pass
+                                raise RuntimeError(f"Не знайдено поле input[type='file'] в TikTok Studio (знімок: {debug_shot.name})")
+
+                            if media_paths:
+                                logger.info(f"TikTok Studio: передаємо файл {media_paths[0]} в input...")
                                 file_input.first.set_input_files(media_paths[0])
-                                logger.info("TikTok: файл відео передано, чекаємо завершення обробки...")
+                                logger.info("TikTok Studio: файл передано, очікуємо появи поля опису...")
 
                                 # 2. Чекаємо поки зникне прогрес-бар обробки або з'явиться поле підпису
                                 try:
@@ -179,7 +186,9 @@ class TikTokPublisher(BasePublisher):
                                         'div[data-e2e="upload-caption"]',
                                         timeout=45000
                                     )
+                                    logger.info("TikTok Studio: форму редагування успішно відображено")
                                 except Exception:
+                                    logger.warning("TikTok Studio: таймаут очікування форми опису, очікуємо ще 15с...")
                                     page.wait_for_timeout(15000)
 
                             # 2.5. Закриваємо popup-модалки TikTok ("Turn on", "Got it", "Cancel" тощо) та joyride overlay
