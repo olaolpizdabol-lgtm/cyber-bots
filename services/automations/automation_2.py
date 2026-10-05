@@ -164,33 +164,11 @@ class TikTokStreakService:
 
     def generate_friend_streak_message(self) -> str:
         """
-        Генерує дружнє повідомлення про вогник з реальною актуальною погодою (Чернівці).
-        Використовує Gemini AI для унікальності або перевірені погодні шаблони.
+        Генерує дружнє повідомлення про вогник з реальною актуальною погодою (Чернівці)
+        та цікавою свіжою позитивною новиною міста (без сумних тем, війни та зборів).
         """
-        from services.weather_service import get_current_weather, format_friend_weather_streak_message
-        w = get_current_weather("Chernivtsi")
-        weather_summary = w.get("summary", "+18°C, комфортно 🌤")
-
-        if gemini_service.api_key and not gemini_service.api_key.startswith("AIzaSyYour") and gemini_service.client:
-            prompt = f"""
-Ти - Бодя. Напиши коротке (1-2 речення) повідомлення кенту/другу в TikTok для щоденного вогника (streak).
-ОБОВ'ЯЗКОВО згадай сьогоднішню реальну погоду в Чернівцях: {weather_summary}.
-СТИЛЬ:
-1. Жива українська мова, дотепний дружній вайб ("йоу", "бро", "одягайся тепліше", "не мерзни", "тримаєм вогник").
-2. Обов'язково емодзі вогника 🔥.
-3. Тільки дефіс '-', ніяких довгих тире.
-4. Поверни ТІЛЬКИ готовий текст повідомлення без лапок і вступних слів.
-"""
-            try:
-                resp = gemini_service.generate_content([prompt])
-                if resp and getattr(resp, "text", None):
-                    clean = sanitize_typography(resp.text.strip())
-                    if clean:
-                        return clean
-            except Exception as e:
-                logger.debug(f"Помилка Gemini для погоди друзів: {e}")
-
-        return sanitize_typography(format_friend_weather_streak_message("Chernivtsi"))
+        from services.chernivtsi_news import generate_friend_news_and_weather_message
+        return generate_friend_news_and_weather_message()
 
     def get_streaks_session_id(self) -> str:
         """Повертає sessionid окремого акаунта вогників (з БД, .env або tiktok_state.json)"""
@@ -346,22 +324,28 @@ class TikTokStreakService:
                     # 1. Відкриваємо розділ повідомлень TikTok
                     logger.info(f"Відкриваємо повідомлення TikTok для діалогу з @{username}...")
                     try:
-                        await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
+                        await page.goto("https://www.tiktok.com/messages", timeout=45000, wait_until="networkidle")
                     except Exception:
                         await page.goto("https://www.tiktok.com/messages", timeout=40000)
-                    await page.wait_for_timeout(4000)
+                    await page.wait_for_timeout(2000)
 
                     if "login" in page.url.lower():
                         return False, "❌ TikTok сесія не авторизована. Запустіть 'python scripts/login_tiktok_once.py'"
+
+                    # Чекаємо підвантаження списку діалогів у DOM
+                    try:
+                        await page.locator('[data-e2e="dm-new-conversation-item"]').first.wait_for(state="visible", timeout=20000)
+                    except Exception:
+                        pass
 
                     # Шукаємо контакт у списку чатів
                     KNOWN_DISPLAY_NAMES = {
                         "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
                         "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
-                        "davidka223": ["davidkaaa", "davidka223", "Давід"],
+                        "davidka223": ["davidkaaa📿", "davidkaaa", "davidka223", "Давід"],
                         "lesko.new": ["Лесько", "lesko.new", "lesko"],
-                        "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
-                        "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
+                        "crypton_freedom": ["Mh_lit", "crypton_freedom", "crypton"],
+                        "13podpivasnik37": ["chicken gunner⚡️⚡️", "chicken gunner", "13podpivasnik37", "ПОЛЯРНИЙ МИШКА", "мишка"]
                     }
 
                     aliases = KNOWN_DISPLAY_NAMES.get(username.lower(), [username])
@@ -379,7 +363,11 @@ class TikTokStreakService:
                     target_found = False
                     if target_row:
                         logger.info(f"Знайдено контакт @{username} у списку повідомлень, відкриваємо...")
-                        await target_row.click(force=True)
+                        # Клікаємо по текстовій частині рядка (зміщення x=180, y=25), щоб не натиснути на круглу аватарку профілю
+                        try:
+                            await target_row.click(position={"x": 180, "y": 25}, timeout=4000)
+                        except Exception:
+                            await target_row.click(force=True)
                         await page.wait_for_timeout(3000)
                         target_found = True
                     else:
@@ -800,18 +788,23 @@ class TikTokStreakService:
 
                         logger.info("Відкриваємо TikTok Messages для перевірки надісланих відео...")
                         try:
-                            await page.goto("https://www.tiktok.com/messages", timeout=40000, wait_until="domcontentloaded")
+                            await page.goto("https://www.tiktok.com/messages", timeout=45000, wait_until="networkidle")
                         except Exception:
                             await page.goto("https://www.tiktok.com/messages", timeout=40000)
-                        await page.wait_for_timeout(4000)
+                        await page.wait_for_timeout(2000)
+
+                        try:
+                            await page.locator('[data-e2e="dm-new-conversation-item"]').first.wait_for(state="visible", timeout=20000)
+                        except Exception:
+                            pass
 
                         KNOWN_DISPLAY_NAMES = {
                             "jungajak8123": ["Бо Бо Рис", "jungajak8123"],
                             "lady_valeri1": ["Lady_Valeri", "lady_valeri", "lady_valeriiiii", "Кохана"],
-                            "davidka223": ["davidkaaa", "davidka223", "Давід"],
+                            "davidka223": ["davidkaaa📿", "davidkaaa", "davidka223", "Давід"],
                             "lesko.new": ["Лесько", "lesko.new", "lesko"],
-                            "crypton_freedom": ["chicken gunner", "crypton_freedom", "crypton"],
-                            "13podpivasnik37": ["ПОЛЯРНИЙ МИШКА", "13podpivasnik37", "мишка"]
+                            "crypton_freedom": ["Mh_lit", "crypton_freedom", "crypton"],
+                            "13podpivasnik37": ["chicken gunner⚡️⚡️", "chicken gunner", "13podpivasnik37", "ПОЛЯРНИЙ МИШКА", "мишка"]
                         }
     
                         for target in targets:
@@ -837,7 +830,10 @@ class TikTokStreakService:
                             if not chat_target:
                                 continue
     
-                            await chat_target.click(force=True)
+                            try:
+                                await chat_target.click(position={"x": 180, "y": 25}, timeout=4000)
+                            except Exception:
+                                await chat_target.click(force=True)
                             await page.wait_for_timeout(2500)
     
                             # Перевіряємо повідомлення ТІЛЬКИ у вікні активного діалогу (div[class*="DivChatBox"]), а не в лівій колонці нотифікацій

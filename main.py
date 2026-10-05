@@ -109,10 +109,10 @@ async def main():
     from config import ALLOWED_USER_IDS, DATA_DIR, TIKTOK_STREAK_SCHEDULE_TIME
 
     async def streak_scheduler_background_task():
-        logger.info("Фоновий планувальник TikTok вогників та вхідних відео активний.")
-        last_dispatched_date = None
+        logger.info("Фоновий планувальник TikTok вогників, новин Чернівців та Instagram DM активний.")
         last_react_check_minute = None
-        streak_file = DATA_DIR / "last_streak_dispatch_date.txt"
+        last_ig_check_minute = None
+        slots_file = DATA_DIR / "daily_news_streak_slots.json"
 
         while True:
             try:
@@ -127,38 +127,42 @@ async def main():
 
                 today_str = now_kyiv.strftime("%Y-%m-%d")
                 current_hm = now_kyiv.strftime("%H:%M")
-                sched_time = get_setting("tiktok_streak_schedule_time") or TIKTOK_STREAK_SCHEDULE_TIME or "10:00"
-                last_db_date = get_setting("last_streak_dispatch_date", "")
 
-                last_file_date = ""
-                if streak_file.exists():
+                # Розклад 3 рази на день для друзів: 10:00 (ранок), 15:00 (день), 20:00 (вечір)
+                DAILY_NEWS_SLOTS = ["10:00", "15:00", "20:00"]
+                sent_slots = {}
+                if slots_file.exists():
                     try:
-                        last_file_date = streak_file.read_text(encoding="utf-8").strip()
+                        sent_slots = json.loads(slots_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        sent_slots = {}
+                if not isinstance(sent_slots, dict):
+                    sent_slots = {}
+
+                today_slots = set(sent_slots.get(today_str, []))
+                due_slot = None
+                for s in DAILY_NEWS_SLOTS:
+                    if current_hm >= s and s not in today_slots and now_kyiv.hour < 23:
+                        due_slot = s
+                        break
+
+                if due_slot:
+                    logger.info(f"⏰ Настав час слоту {due_slot} (зараз {current_hm} Київ): відправка друзям новини та вогника...")
+                    today_slots.add(due_slot)
+                    sent_slots[today_str] = list(today_slots)
+                    try:
+                        slots_file.write_text(json.dumps(sent_slots, ensure_ascii=False, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-
-                # Запускаємо якщо настав час розкладу і сьогодні ще не відправляли
-                should_run = False
-                if last_dispatched_date != today_str and last_db_date != today_str and last_file_date != today_str:
-                    if current_hm >= sched_time and now_kyiv.hour < 23:
-                        should_run = True
-
-                if should_run:
-                    logger.info(f"⏰ Настав час розкладу ({sched_time}, зараз {current_hm} Київ): запуск щоденної відправки вогників...")
-                    last_dispatched_date = today_str
-                    set_setting("last_streak_dispatch_date", today_str)
-                    try:
-                        streak_file.write_text(today_str, encoding="utf-8")
-                    except Exception:
-                        pass
-                    res = await tiktok_streak_service.run_streaks_dispatch()
+                    # Відправляємо кєнтам (дівчина фільтрується автоматично)
+                    res = await tiktok_streak_service.run_streaks_dispatch(force_all=True, friends_only=True)
                     if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:
                         for uid in ALLOWED_USER_IDS:
                             try:
                                 await bot.send_message(
                                     uid,
-                                    f"🔥 <b>Щоденний звіт TikTok вогників!</b>\n"
-                                    f"Час: {current_hm} (Київ)\n"
+                                    f"🔥 <b>Звіт TikTok вогників та новин Чернівців!</b>\n"
+                                    f"Слот: {due_slot} (Київ)\n"
                                     f"Успішно опрацьовано: {res['sent_count']} контактів.",
                                     parse_mode="HTML"
                                 )
@@ -173,10 +177,19 @@ async def main():
                         await tiktok_streak_service.check_and_react_to_shared_videos()
                     except Exception as react_err:
                         logger.error(f"Помилка фонової перевірки TikTok відео: {react_err}")
+
+                # Періодична перевірка Instagram Direct повідомлень та Reels від дівчини (@lady_valeriii) кожні 5 хвилин
+                if now_kyiv.minute % 5 == 0 and last_ig_check_minute != now_kyiv.minute:
+                    last_ig_check_minute = now_kyiv.minute
+                    try:
+                        from services.instagram_dm_monitor import instagram_dm_monitor
+                        instagram_dm_monitor.check_new_messages()
+                    except Exception as ig_err:
+                        logger.error(f"Помилка фонової перевірки Instagram Direct від Валерії: {ig_err}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Помилка фонового планувальника вогників: {e}")
+                logger.error(f"Помилка фонового планувальника: {e}")
 
     async def post_scheduler_background_task():
         logger.info("Фоновий планувальник публікацій контенту активний (перевірка кожні 20 сек).")
