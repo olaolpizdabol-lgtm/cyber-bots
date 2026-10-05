@@ -19,6 +19,28 @@ class FacebookPublisher(BasePublisher):
     def platform_name(self) -> str:
         return "Facebook"
 
+    def _resolve_page_token(self, token: str, page_id: str, proxies: Optional[Dict[str, str]] = None) -> str:
+        """
+        Перевіряє, чи токен є Page Access Token. Якщо передано User Token,
+        автоматично отримує Page Access Token для сторінки через Graph API /{page_id}?fields=access_token
+        """
+        if not token or not page_id:
+            return token
+        try:
+            r = requests.get(
+                f"https://graph.facebook.com/v21.0/{page_id}?fields=access_token&access_token={token}",
+                proxies=proxies,
+                timeout=10
+            )
+            if r.status_code == 200:
+                p_tok = r.json().get("access_token")
+                if p_tok:
+                    logger.info("Facebook: успішно конвертовано User Token у Page Access Token!")
+                    return p_tok
+        except Exception as e:
+            logger.debug(f"Facebook resolve page token: {e}")
+        return token
+
     def publish(
         self,
         content_type: ContentType,
@@ -65,6 +87,9 @@ class FacebookPublisher(BasePublisher):
                     logger.warning(f"Facebook: збій проксі ({pe}), перемикаємось на пряме з'єднання...")
                     return requests.post(url, proxies=None, **kwargs)
             return requests.post(url, proxies=None, **kwargs)
+
+        # Автоматичне перетворення User Token -> Page Token якщо надано користувацький токен
+        token = self._resolve_page_token(token, page_id, proxies)
 
         try:
             if content_type == ContentType.VIDEO:
