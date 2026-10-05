@@ -132,11 +132,8 @@ class SnapchatSpotlightPublisher(BasePublisher):
             "--disable-component-extensions-with-background-pages",
             "--disk-cache-size=1",
             "--media-cache-size=1",
+            "--js-flags=--max-old-space-size=256",
         ]
-        # На Linux (Docker/Railway) додаткові флаги для зниження пам'яті
-        import sys as _sys
-        if _sys.platform.startswith("linux"):
-            _base_args += ["--no-zygote"]
 
         for use_proxy in proxy_modes:
             launch_kwargs = {
@@ -242,20 +239,22 @@ class SnapchatSpotlightPublisher(BasePublisher):
 
                         # 2. Вибір призначення: Post to Spotlight
                         try:
-                            # Шукаємо контейнер або текст "Post to Spotlight"
-                            spotlight_label = target_scope.locator('text="Post to Spotlight"').first
-                            if spotlight_label.count() > 0 and spotlight_label.is_visible():
-                                spotlight_label.click(force=True)
-                                logger.info("Snapchat: клікнуто по мітці 'Post to Spotlight'")
-                                page.wait_for_timeout(500)
+                            spotlight_btn = target_scope.locator('button#spotlight, button[role="checkbox"][id="spotlight"]').first
+                            if spotlight_btn.count() > 0:
+                                if spotlight_btn.get_attribute("aria-checked") != "true":
+                                    spotlight_btn.click(force=True)
+                                    logger.info("Snapchat: увімкнено чекбокс 'Post to Spotlight' (button#spotlight)")
+                                else:
+                                    logger.info("Snapchat: чекбокс 'Post to Spotlight' вже активний")
                             else:
-                                spotlight_cb = target_scope.locator('input[type="checkbox"]').first
-                                if spotlight_cb.count() > 0:
-                                    if not spotlight_cb.is_checked():
-                                        spotlight_cb.check(force=True)
-                                        logger.info("Snapchat: відмічено чекбокс 'Post to Spotlight'")
+                                spotlight_label = target_scope.locator('text="Post to Spotlight"').first
+                                if spotlight_label.count() > 0 and spotlight_label.is_visible():
+                                    spotlight_label.click(force=True)
+                                    logger.info("Snapchat: клікнуто по мітці 'Post to Spotlight'")
                         except Exception as cbe:
                             logger.warning(f"Snapchat: вибір Post to Spotlight: {cbe}")
+
+                        page.wait_for_timeout(500)
 
                         # 3. Заповнення опису (Description)
                         desc_box = target_scope.locator('textarea[placeholder*="description" i], textarea').first
@@ -294,7 +293,7 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             logger.info("Snapchat: поле заголовка не вимагається або не знайдене")
                         page.wait_for_timeout(500)
 
-                        # 5. Кнопка публікації Post (очікуємо готовність кнопки до 45с)
+                        # 5. Кнопка публікації Post (очікуємо готовність кнопки до 90с)
                         logger.info("Snapchat: очікуємо готовність кнопки 'Post' (обробка відео)...")
                         try:
                             page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
@@ -303,31 +302,28 @@ class SnapchatSpotlightPublisher(BasePublisher):
                         page.wait_for_timeout(1000)
 
                         post_btn = None
-                        for btn_sel in [
-                            'button[type="submit"]:has-text("Post")',
-                            'button:has-text("Post to Spotlight")',
-                            'button:has-text("Post")'
-                        ]:
-                            loc = target_scope.locator(btn_sel)
-                            if loc.count() > 0:
-                                post_btn = loc.last
-                                break
-
-                        if not post_btn or post_btn.count() == 0:
-                            post_btn = target_scope.locator('button').last
-
-                        for wait_iter in range(45):
+                        for wait_iter in range(90):
                             try:
-                                is_dis = post_btn.is_disabled()
-                                is_vis = post_btn.is_visible()
-                                if is_vis and not is_dis:
+                                for candidate_sel in [
+                                    'button.styles-d0uhtl:has-text("Post")',
+                                    'button.primary-BOdHls:has-text("Post")',
+                                    'button:text-is("Post")',
+                                    'button[type="submit"]:has-text("Post")',
+                                    'button:has-text("Post to Spotlight")',
+                                ]:
+                                    c_loc = target_scope.locator(candidate_sel)
+                                    if c_loc.count() > 0 and c_loc.last.is_visible() and not c_loc.last.is_disabled():
+                                        post_btn = c_loc.last
+                                        break
+
+                                if post_btn and post_btn.is_visible() and not post_btn.is_disabled():
                                     logger.info(f"Snapchat: кнопка 'Post' готова на {wait_iter}с!")
                                     break
                             except Exception:
                                 pass
                             page.wait_for_timeout(1000)
 
-                        if post_btn.is_disabled():
+                        if not post_btn or post_btn.is_disabled():
                             debug_shot = DATA_DIR / "snapchat_post_disabled_debug.png"
                             try:
                                 page.screenshot(path=str(debug_shot), full_page=True)
@@ -336,7 +332,7 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             return PublishResult(
                                 success=False,
                                 platform=self.platform_name,
-                                error=f"Кнопка Post недоступна після 45с очікування (знімок: {debug_shot.name})"
+                                error=f"Кнопка Post недоступна після 90с очікування (знімок: {debug_shot.name})"
                             )
 
                         post_btn.scroll_into_view_if_needed()

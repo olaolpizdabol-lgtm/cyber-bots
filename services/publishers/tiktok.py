@@ -99,11 +99,8 @@ class TikTokPublisher(BasePublisher):
                 "--disable-component-extensions-with-background-pages",
                 "--disk-cache-size=1",
                 "--media-cache-size=1",
+                "--js-flags=--max-old-space-size=256",
             ]
-            # На Linux (Docker/Railway) додаткові флаги для зниження пам'яті
-            import sys as _sys
-            if _sys.platform.startswith("linux"):
-                _base_args += ["--no-zygote"]
 
             for use_proxy in proxy_modes:
                 launch_kwargs = {
@@ -135,6 +132,16 @@ class TikTokPublisher(BasePublisher):
                                     logger.warning(f"TikTok: не вдалося додати sessionid cookies: {ce}")
 
                             page = context.new_page()
+
+                            # Зменшуємо пікове навантаження на пам'ять при розборі відео
+                            try:
+                                page.add_init_script("""
+                                    window.Worker = class { constructor() { throw new Error('Worker disabled'); } };
+                                    window.SharedWorker = class { constructor() { throw new Error('Worker disabled'); } };
+                                    window.createImageBitmap = undefined;
+                                """)
+                            except Exception:
+                                pass
 
                             try:
                                 from playwright_stealth import stealth_sync
