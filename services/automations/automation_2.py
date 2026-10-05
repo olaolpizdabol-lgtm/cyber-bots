@@ -273,7 +273,6 @@ class TikTokStreakService:
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--disable-software-rasterizer",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
                     "--no-default-browser-check"
@@ -745,7 +744,6 @@ class TikTokStreakService:
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
-                        "--disable-software-rasterizer",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
                         "--no-default-browser-check"

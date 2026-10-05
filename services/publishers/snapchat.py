@@ -114,7 +114,6 @@ class SnapchatSpotlightPublisher(BasePublisher):
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--disable-software-rasterizer",
                     "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
