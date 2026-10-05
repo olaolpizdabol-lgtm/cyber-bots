@@ -87,6 +87,11 @@ class TikTokPublisher(BasePublisher):
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
+                        "--disable-webgl",
+                        "--disable-webgl2",
+                        "--disable-3d-apis",
+                        "--renderer-process-limit=1",
+                        "--disable-site-isolation-trials",
                         "--mute-audio",
                         "--disable-blink-features=AutomationControlled",
                         "--no-first-run",
@@ -142,7 +147,7 @@ class TikTokPublisher(BasePublisher):
 
                             # 1. Завантажуємо файл (перевіряємо головну сторінку та iframe)
                             try:
-                                page.wait_for_selector('input[type="file"]', timeout=15000)
+                                page.wait_for_selector('input[type="file"]', state="attached", timeout=20000)
                             except Exception:
                                 pass
 

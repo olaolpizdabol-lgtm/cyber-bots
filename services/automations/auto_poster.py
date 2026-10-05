@@ -1,7 +1,10 @@
 import logging
 import random
 import time
+import threading
 from typing import Dict, Any, Optional, List
+
+_BROWSER_PUBLISH_LOCK = threading.Lock()
 from core.media_processor import media_processor
 from core.security_guard import security_guard
 from core.content_type import (
@@ -302,11 +305,19 @@ class AutoPosterService:
             platform_media = self.prepare_media_for_platform(plat_key, content_type, all_media_files)
 
             logger.info(f"Публікація #{post_id} ({content_type.value}) на {publisher.platform_name} (файлів: {len(platform_media)})...")
-            res = publisher.publish(
-                content_type=content_type,
-                media_paths=platform_media,
-                metadata=metadata
-            )
+            if plat_key in ("tiktok", "snapchat"):
+                with _BROWSER_PUBLISH_LOCK:
+                    res = publisher.publish(
+                        content_type=content_type,
+                        media_paths=platform_media,
+                        metadata=metadata
+                    )
+            else:
+                res = publisher.publish(
+                    content_type=content_type,
+                    media_paths=platform_media,
+                    metadata=metadata
+                )
 
             # Маскування будь-яких випадкових чутливих даних у тексті помилки
             if res.error:

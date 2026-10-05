@@ -114,6 +114,11 @@ class SnapchatSpotlightPublisher(BasePublisher):
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
+                    "--disable-webgl",
+                    "--disable-webgl2",
+                    "--disable-3d-apis",
+                    "--renderer-process-limit=1",
+                    "--disable-site-isolation-trials",
                     "--mute-audio",
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
@@ -136,6 +141,17 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             viewport={"width": 1280, "height": 900},
                             locale="en-US"
                         )
+
+                        # Очищаємо тимчасові DBSC кукі з 30-хвилинним лімітом, щоб Snapchat використовував майстер-сесію
+                        try:
+                            all_c = context.cookies()
+                            clean_c = [c for c in all_c if "dbsc" not in c["name"].lower()]
+                            if len(clean_c) != len(all_c):
+                                context.clear_cookies()
+                                context.add_cookies(clean_c)
+                        except Exception:
+                            pass
+
                         page = context.new_page()
 
                         try:
@@ -169,6 +185,12 @@ class SnapchatSpotlightPublisher(BasePublisher):
                                 platform=self.platform_name,
                                 error="⚠️ Сесія Snapchat застаріла. Оновіть її: .venv/bin/python scripts/export_snapchat_cookies.py"
                             )
+
+                        # Чекаємо поки закінчиться спіннер завантаження і з'явиться input файлу
+                        try:
+                            page.wait_for_selector('input[type="file"]', state="attached", timeout=25000)
+                        except Exception:
+                            pass
 
                         target_scope = page
                         file_input = page.locator('input[type="file"]')
