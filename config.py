@@ -101,6 +101,8 @@ TIKTOK_STREAKS_SESSION_ID = (
     or os.getenv("TIKTOK_PERSONAL_SESSION_ID", "").strip()
 )
 TIKTOK_STREAKS_ACCOUNT_NAME = os.getenv("TIKTOK_STREAKS_ACCOUNT_NAME", "Особистий акаунт").strip()
+# Канал заливу (Creator Studio) — handle профілю для перевірки публікацій
+TIKTOK_PROFILE_HANDLE = os.getenv("TIKTOK_PROFILE_HANDLE", "bohdan.gpt").strip().lstrip("@")
 TIKTOK_STREAKS_ENABLED = os.getenv("TIKTOK_STREAKS_ENABLED", "true").lower() in ("true", "1", "yes")
 TIKTOK_GIRLFRIEND_USERNAME = os.getenv("TIKTOK_GIRLFRIEND_USERNAME", "").strip().lstrip("@")
 TIKTOK_STREAK_SCHEDULE_TIME = os.getenv("TIKTOK_STREAK_SCHEDULE_TIME", "10:00").strip()

@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List
 import requests
 from services.publishers.base import BasePublisher, PublishResult, StatsResult
 from services.proxy_manager import proxy_manager
-from config import TIKTOK_UPLOAD_SESSION_ID, TIKTOK_SESSION_ID, DRY_RUN_MODE
+from config import TIKTOK_UPLOAD_SESSION_ID, TIKTOK_SESSION_ID, DRY_RUN_MODE, TIKTOK_PROFILE_HANDLE
 from core.content_type import ContentType
 
 logger = logging.getLogger(__name__)
@@ -19,13 +19,37 @@ _SUCCESS_TEXTS = [
     "your post has been published",
     "відео завантажено",
     "опубліковано",
+    # TikTok Studio варіанти
+    "congratulations",
+    "upload another video",
+    "your video is live",
+    "video is now live",
+    "post successfully",
+    "successfully posted",
+    "успішно опубліковано",
 ]
 _FAIL_TEXTS = [
     "your video failed to upload",
     "upload failed",
     "something went wrong",
     "помилка завантаження",
+    "file is too large",
+    "unsupported file",
+    "video is not eligible",
+    "violates community guidelines",
 ]
+
+
+def _caption_field_ok(caption: str, field_text: str) -> bool:
+    """True якщо текст із поля опису TikTok відповідає бажаному опису."""
+    need = re.sub(r"[#\s]+", "", caption or "").lower()
+    if not need:
+        return True  # опис не потрібен — поле може бути порожнім
+    got = re.sub(r"[#\s]+", "", field_text or "").lower()
+    if not got:
+        return False
+    probe = need[:40]
+    return probe in got or got[:40] in need
 
 
 class TikTokPublisher(BasePublisher):
@@ -285,11 +309,56 @@ class TikTokPublisher(BasePublisher):
                                     page.keyboard.type(caption[:2000], delay=10)
                                     page.wait_for_timeout(400)
                                     page.keyboard.press("Escape")
+                                    # Верифікація: текст реально потрапив у поле
+                                    typed = ""
+                                    try:
+                                        typed = (cap_loc.inner_text(timeout=2000) or "").strip()
+                                    except Exception:
+                                        typed = ""
+                                    if not _caption_field_ok(caption, typed):
+                                        logger.warning(
+                                            f"TikTok Studio: опис не зберігся у полі "
+                                            f"(було {len(caption)} символів, у полі {len(typed)}). Повторюємо..."
+                                        )
+                                        cap_loc.click(force=True)
+                                        page.keyboard.press("Meta+a")
+                                        page.keyboard.press("Control+a")
+                                        page.keyboard.press("Backspace")
+                                        page.wait_for_timeout(200)
+                                        page.keyboard.type(caption[:2000], delay=10)
+                                        page.wait_for_timeout(500)
+                                        typed = ""
+                                        try:
+                                            typed = (cap_loc.inner_text(timeout=2000) or "").strip()
+                                        except Exception:
+                                            typed = ""
+                                        if not _caption_field_ok(caption, typed):
+                                            # Публікувати з неправильним/відсутнім описом не можна
+                                            debug_shot = DATA_DIR / "tiktok_caption_verify_failed.png"
+                                            try:
+                                                page.screenshot(path=str(debug_shot))
+                                            except Exception:
+                                                pass
+                                            return PublishResult(
+                                                success=False,
+                                                platform=self.platform_name,
+                                                error=(
+                                                    "Опис не потрапив у поле TikTok (у полі: "
+                                                    f"«{typed[:60]}»). Публікацію скасовано, "
+                                                    f"щоб не заливати чужий/файловий опис (знімок: {debug_shot.name})"
+                                                )
+                                            )
                                     logger.info("TikTok Studio: опис успішно заповнено")
                                 except Exception as ce:
                                     logger.warning(f"TikTok Studio: помилка заповнення опису: {ce}")
                             else:
-                                logger.warning("TikTok Studio: поле опису не знайдено, переходимо до кнопки публікації")
+                                if caption.strip():
+                                    return PublishResult(
+                                        success=False,
+                                        platform=self.platform_name,
+                                        error="Поле опису не знайдено у TikTok Studio — публікацію скасовано (щоб не залишити порожній/файловий опис)"
+                                    )
+                                logger.warning("TikTok Studio: поле опису не знайдено, але опис порожній — продовжуємо")
 
                             # 4. Кнопка публікації Post
                             logger.info("TikTok Studio: шукаємо кнопку Post...")
@@ -342,10 +411,36 @@ class TikTokPublisher(BasePublisher):
 
                             post_btn.scroll_into_view_if_needed()
                             page.wait_for_timeout(500)
+
+                            # Слухаємо відповіді publish-API TikTok (найнадійніший сигнал)
+                            api_hits = []
+
+                            def _on_api_resp(resp):
+                                try:
+                                    u = resp.url or ""
+                                    if ("/publish" in u or "/upload/" in u) and resp.status < 400:
+                                        if "api" in u or "item" in u or "video" in u:
+                                            api_hits.append((resp.status, u))
+                                except Exception:
+                                    pass
+
+                            page.on("response", _on_api_resp)
+
                             post_btn.click(force=True)
                             logger.info("TikTok: натиснуто Post, очікуємо підтвердження публікації...")
 
-                            published_url, verify_err = self._wait_for_publication(page, timeout_s=90)
+                            published_url, verify_err = self._wait_for_publication(
+                                page, timeout_s=240, api_hits=api_hits
+                            )
+                            try:
+                                page.remove_listener("response", _on_api_resp)
+                            except Exception:
+                                pass
+                            if not published_url and verify_err and api_hits:
+                                # API відповів успішно — вважаємо опублікованим
+                                logger.info(f"TikTok: publish-API підтвердив публікацію ({api_hits[-1][0]})")
+                                verify_err = None
+                                published_url = page.url
                             if not published_url and verify_err:
                                 debug_shot = DATA_DIR / "tiktok_publish_verify_failed.png"
                                 try:
@@ -366,7 +461,7 @@ class TikTokPublisher(BasePublisher):
                                 return PublishResult(
                                     success=False,
                                     platform=self.platform_name,
-                                    error=f"TikTok не підтвердив публікацію за 90с (знімок: {debug_shot.name})"
+                                    error=f"TikTok не підтвердив публікацію за 240с (знімок: {debug_shot.name})"
                                 )
 
                             if state_file.exists():
@@ -417,11 +512,21 @@ class TikTokPublisher(BasePublisher):
             return m.group(1)
         return None
 
-    def _wait_for_publication(self, page, timeout_s: int = 90) -> tuple:
-        """Чекає реального підтвердження публікації. Повертає (published_url, error)."""
+    def _wait_for_publication(self, page, timeout_s: int = 240, api_hits: Optional[list] = None) -> tuple:
+        """Чекає реального підтвердження публікації. Повертає (published_url, error).
+
+        Сигнали успіху (будь-який достатній):
+        1) відповідь publish-API (api_hits, перевіряється першою);
+        2) редірект на сторінку відео;
+        3) тексти успіху в UI;
+        4) кнопка Post зникла.
+        Якщо нічого — фолбек: відкриваємо профіль і шукаємо нове відео.
+        """
+        api_hits = api_hits if api_hits is not None else []
         deadline = time.time() + timeout_s
-        last_body = ""
         while time.time() < deadline:
+            if api_hits:
+                return page.url, None
             # 1. Редірект на сторінку відео/контенту = успіх
             cur = page.url or ""
             if re.search(r"/@[^/]+/video/\d{6,}", cur) or ("/content/" in cur and "upload" not in cur):
@@ -453,7 +558,6 @@ class TikTokPublisher(BasePublisher):
                 if t.lower() in low:
                     return None, f"отримано помилку в UI: '{t}'"
             # 4. Кнопка Post зникла після кліку = форму відправлено
-            # (помилки ми вже перевірили вище, тож це ознака успіху)
             try:
                 post_btns = page.locator('button:has-text("Post")')
                 visible = False
@@ -469,7 +573,51 @@ class TikTokPublisher(BasePublisher):
             except Exception:
                 pass
             page.wait_for_timeout(2000)
+
+        # Фолбек: не підтверджено на сторінці форми — перевіряємо профіль
+        if not api_hits:
+            prof_url = self._verify_on_profile(page)
+            if prof_url:
+                return prof_url, None
         return None, "підтвердження не отримано (таймаут)"
+
+    def _verify_on_profile(self, page, handle: str = "") -> Optional[str]:
+        """Фолбек-верифікація: відкриваємо профіль TikTok і шукаємо найновіше відео,
+        опубліковане за останні хвилини. Повертає URL відео або None."""
+        handle = (handle or TIKTOK_PROFILE_HANDLE).lstrip("@")
+        if not handle:
+            return None
+        try:
+            page.goto(f"https://www.tiktok.com/@{handle}", timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+            items = page.evaluate(
+                """() => Array.from(document.querySelectorAll('a[href*="/video/"]'))
+                    .slice(0, 10)
+                    .map(a => a.href)"""
+            )
+            if not items:
+                return None
+            # Час публікації: шукаємо "N minutes ago" поруч із першими відео
+            fresh = page.evaluate(
+                """() => {
+                    const links = Array.from(document.querySelectorAll('a[href*="/video/"]')).slice(0, 5);
+                    for (const a of links) {
+                        const box = a.closest('[data-e2e], div');
+                        const txt = (box ? box.innerText : '').toLowerCase();
+                        if (/\\b(seconds?|minutes?|хвилин|щойно|just now)\\s*(ago)?\\b/.test(txt)
+                            || /\\d+\\s*(сек|хв|min)/.test(txt)) {
+                            return a.href;
+                        }
+                    }
+                    return null;
+                }"""
+            )
+            if fresh:
+                logger.info(f"TikTok: профіль підтвердив нове відео: {fresh}")
+                return fresh
+        except Exception as e:
+            logger.warning(f"TikTok: перевірка профілю не вдалась: {e}")
+        return None
 
     def get_stats(self, external_id: str) -> StatsResult:
         if not external_id or external_id.startswith("mock_") or external_id == "tt_uploaded_id":

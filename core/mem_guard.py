@@ -19,8 +19,34 @@ MIN_FREE_MB_FOR_BROWSER = 280
 TEMP_FILE_MAX_AGE_S = 24 * 3600
 
 
+def _read_first_int(path: str) -> Optional[int]:
+    try:
+        raw = Path(path).read_text().strip()
+        if raw == "max":  # cgroup v2: ліміту немає
+            return None
+        return int(raw)
+    except Exception:
+        return None
+
+
 def get_free_memory_mb() -> Optional[int]:
-    """Вільна RAM у МБ (Linux /proc/meminfo). None якщо невідомо (macOS)."""
+    """Вільна RAM у МБ.
+
+    Спочатку читає ліміт/споживання cgroup (реальний ліміт контейнера на Railway),
+    бо /proc/meminfo показує пам'ять хоста (сотні ГБ) і охорона ніколи не спрацює.
+    """
+    # cgroup v2 (сучасні системи)
+    limit = _read_first_int("/sys/fs/cgroup/memory.max")
+    usage = _read_first_int("/sys/fs/cgroup/memory.current")
+    if limit is None or usage is None:
+        # cgroup v1
+        limit = _read_first_int("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        usage = _read_first_int("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    if limit is not None and usage is not None and limit > 0:
+        # Старі cgroup v1 віддають майже 2^63 при відсутності ліміту
+        if limit < (1 << 62):
+            return max(0, limit - usage) // (1024 * 1024)
+    # Фолбек: /proc/meminfo (macOS немає — None)
     try:
         meminfo = Path("/proc/meminfo")
         if meminfo.exists():
@@ -40,6 +66,7 @@ def ensure_memory_for_browser(platform_label: str = "browser") -> bool:
     gc.collect()
     free_mb = get_free_memory_mb()
     if free_mb is None:
+        logger.info(f"🧠 Пам'ять: ліміт невідомо на цій платформі ({platform_label}) — пропускаємо перевірку.")
         return True
     if free_mb < MIN_FREE_MB_FOR_BROWSER:
         gc.collect()
@@ -50,7 +77,7 @@ def ensure_memory_for_browser(platform_label: str = "browser") -> bool:
                 f"{free_mb} МБ вільно, потрібно >= {MIN_FREE_MB_FOR_BROWSER} МБ. Пропускаємо."
             )
             return False
-    logger.info(f"🧠 Пам'ять OK для {platform_label}: {free_mb} МБ вільно.")
+    logger.info(f"🧠 Пам'ять OK для {platform_label}: {free_mb} МБ вільно (контейнер).")
     return True
 
 

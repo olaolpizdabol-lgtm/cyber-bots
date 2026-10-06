@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 import time
@@ -96,6 +97,56 @@ def truncate_at_word_boundary(text: str, max_chars: int, suffix: str = "...") ->
     if last_space > int(budget * 0.5):
         return sub[:last_space].rstrip(",. !?") + suffix
     return sub.rstrip(",. !?") + suffix
+
+
+def extract_json_lenient(text: str):
+    """Парсить JSON з відповіді Gemini навіть якщо там є текст до/після об'єкта
+    (типова помилка "Extra data: line N column M")."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    def _try(s):
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+    data = _try(text)
+    if data is not None:
+        return data
+
+    # Шукаємо перший збалансований {...} або [...]
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = text.find(opener)
+        if start < 0:
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == opener:
+                    depth += 1
+                elif ch == closer:
+                    depth -= 1
+                    if depth == 0:
+                        data = _try(text[start:i + 1])
+                        if data is not None:
+                            return data
+                        break
+    raise json.JSONDecodeError("Не вдалося виділити валідний JSON з відповіді Gemini", text, 0)
 
 
 class GeminiService:
@@ -364,7 +415,7 @@ class GeminiService:
             if text_resp.endswith("```"):
                 text_resp = text_resp[:-3]
 
-            data = json.loads(text_resp.strip())
+            data = extract_json_lenient(text_resp)
             return self._normalize_metadata(data)
 
         except Exception as e:
@@ -486,7 +537,7 @@ class GeminiService:
             if t_resp.endswith("```"):
                 t_resp = t_resp[:-3]
 
-            d = json.loads(t_resp.strip())
+            d = extract_json_lenient(t_resp)
             return {
                 "twitter_post": truncate_at_word_boundary(sanitize_typography(d.get("twitter_post", "")), 240),
                 "threads_post": truncate_at_word_boundary(sanitize_typography(d.get("threads_post", "")), 400),
