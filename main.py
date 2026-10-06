@@ -3,6 +3,7 @@ import sys
 import json
 import asyncio
 import logging
+from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -52,6 +53,20 @@ async def main():
 
     logger.info("Ініціалізація бази даних та модулів для Бота Канал Автоматизація...")
     init_db()
+
+    # Скидаємо пости, що застрягли у 'publishing' після аварійного перезапуску
+    try:
+        from core.database import reset_stuck_publishing_posts
+        reset_stuck_publishing_posts()
+    except Exception as rs_err:
+        logger.warning(f"Не вдалося скинути stuck-пости: {rs_err}")
+
+    # Прибирання старих тимчасових файлів (downloads/temp/скріншоти)
+    try:
+        from core.mem_guard import cleanup_temp_dirs
+        cleanup_temp_dirs()
+    except Exception as cl_err:
+        logger.warning(f"Не вдалося прибрати тимчасові файли: {cl_err}")
 
     token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
     if not token or token.startswith("123456789:"):
@@ -206,7 +221,7 @@ async def main():
 
     async def post_scheduler_background_task():
         logger.info("Фоновий планувальник публікацій контенту активний (перевірка кожні 20 сек).")
-        from core.database import get_due_scheduled_posts, update_post_status
+        from core.database import get_due_scheduled_posts, claim_scheduled_post, update_post_status
         from services.automations.auto_poster import auto_poster
         from core.security_guard import security_guard
         from bot.keyboards import get_publish_result_keyboard
@@ -228,8 +243,28 @@ async def main():
 
                 for post in due_posts:
                     post_id = post["id"]
+                    # Атомарний claim: захист від подвійної публікації (два таски / два інстанси)
+                    if not claim_scheduled_post(post_id):
+                        logger.info(f"⏭️ Пост #{post_id} вже забраний іншим процесом — пропускаємо.")
+                        continue
+
                     logger.info(f"⏰ Настав час публікації запланованого поста #{post_id}!")
-                    update_post_status(post_id, "publishing")
+
+                    # Перевіряємо, що медіафайли поста реально існують (захист від застарілих записів)
+                    media_list = post.get("media_paths_list") or []
+                    missing = [p for p in media_list if not Path(p).exists()]
+                    if media_list and missing:
+                        update_post_status(post_id, "partial")
+                        err_text = f"⚠️ Пост #{post_id} НЕ опубліковано: медіафайли відсутні: {missing}"
+                        logger.warning(err_text)
+                        recipients = [post.get("scheduled_by_chat_id")] if post.get("scheduled_by_chat_id") else ALLOWED_USER_IDS
+                        for uid in recipients:
+                            if uid:
+                                try:
+                                    await bot.send_message(uid, err_text)
+                                except Exception:
+                                    pass
+                        continue
 
                     target_platforms = post.get("target_platforms_list")
                     chat_id = post.get("scheduled_by_chat_id")

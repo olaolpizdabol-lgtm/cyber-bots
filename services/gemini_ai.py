@@ -106,6 +106,14 @@ class GeminiService:
         self._key_index = 0
         self._clients: List[Any] = []
         self.is_new_sdk = True
+        self._clients_ready = False
+        # Клієнти google.genai створюються ЛАЗІЙНО при першому виклику:
+        # це економить ~70 МБ RSS на старті (важливо для Railway 1 ГБ)
+
+    def _ensure_clients(self):
+        if self._clients_ready:
+            return
+        self._clients_ready = True
         self._init_clients()
 
     def _init_clients(self):
@@ -138,6 +146,7 @@ class GeminiService:
 
     @property
     def client(self):
+        self._ensure_clients()
         if not self._clients:
             return None
         return self._clients[self._key_index % len(self._clients)]
@@ -168,6 +177,8 @@ class GeminiService:
         for alt in ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]:
             if alt not in models_cascade:
                 models_cascade.append(alt)
+
+        self._ensure_clients()
 
         if not self._clients and hasattr(self, "legacy_model"):
             try:

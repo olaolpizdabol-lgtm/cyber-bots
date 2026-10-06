@@ -12,7 +12,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    playwright install --with-deps chromium
+    playwright install --with-deps chromium && \
+    rm -rf /root/.cache/ms-playwright/chromium-*/chrome-linux/chrome_crashpad_handler 2>/dev/null || true
 
 COPY . .
 
@@ -20,5 +21,12 @@ RUN mkdir -p data downloads temp credentials
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+# Меморі-оптимізація для 1GB Railway: менше malloc-арен, без байткоду в контейнері
+ENV MALLOC_ARENA_MAX=2
+ENV MALLOC_TRIM_THRESHOLD_=131072
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV OMP_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
 
 CMD ["python", "run_all_bots.py"]

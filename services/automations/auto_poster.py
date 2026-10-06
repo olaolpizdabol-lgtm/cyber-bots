@@ -32,16 +32,6 @@ from services.proxy_manager import (
     DIRECT_PLATFORMS
 )
 from services.publishers.base import PublishResult
-from services.publishers.youtube import youtube_publisher
-from services.publishers.instagram import instagram_publisher
-from services.publishers.tiktok import tiktok_publisher
-from services.publishers.facebook import facebook_publisher
-from services.publishers.snapchat import snapchat_publisher
-from services.publishers.twitter import twitter_publisher
-from services.publishers.threads import threads_publisher
-from services.publishers.pinterest import pinterest_publisher
-from services.publishers.bluesky import bluesky_publisher
-from services.publishers.telegram_channel import telegram_channel_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +39,78 @@ TIER_1_PLATFORMS = ["tiktok", "instagram", "youtube", "facebook", "snapchat"]
 TIER_2_PLATFORMS = ["twitter", "threads", "pinterest", "bluesky", "telegram"]
 ALL_PLATFORMS = TIER_1_PLATFORMS + TIER_2_PLATFORMS
 
-PUBLISHERS = {
-    "youtube": youtube_publisher,
-    "instagram": instagram_publisher,
-    "tiktok": tiktok_publisher,
-    "facebook": facebook_publisher,
-    "snapchat": snapchat_publisher,
-    "twitter": twitter_publisher,
-    "threads": threads_publisher,
-    "pinterest": pinterest_publisher,
-    "bluesky": bluesky_publisher,
-    "telegram": telegram_channel_publisher
+# Lazy-завантаження паблішерів: важкі залежності (instagrapi, googleapiclient
+# тощо) імпортуються ТІЛЬКИ при першому виклику конкретної платформи.
+# Це знижує RSS процесу на 100+ МБ, що критично для Railway (1 ГБ RAM).
+_PUBLISHER_MODULES = {
+    "youtube": "services.publishers.youtube",
+    "instagram": "services.publishers.instagram",
+    "tiktok": "services.publishers.tiktok",
+    "facebook": "services.publishers.facebook",
+    "snapchat": "services.publishers.snapchat",
+    "twitter": "services.publishers.twitter",
+    "threads": "services.publishers.threads",
+    "pinterest": "services.publishers.pinterest",
+    "bluesky": "services.publishers.bluesky",
+    "telegram": "services.publishers.telegram_channel",
 }
+_PUBLISHER_ATTRS = {"telegram": "telegram_channel_publisher"}
+_PUBLISHER_CACHE: Dict[str, Any] = {}
+
+
+def get_publisher(plat_key: str):
+    """Повертає паблішер, лазійно імпортуючи модуль лише один раз."""
+    if plat_key in _PUBLISHER_CACHE:
+        return _PUBLISHER_CACHE[plat_key]
+    mod_name = _PUBLISHER_MODULES.get(plat_key)
+    if not mod_name:
+        return None
+    import importlib
+    mod = importlib.import_module(mod_name)
+    attr = _PUBLISHER_ATTRS.get(plat_key, f"{plat_key}_publisher")
+    pub = getattr(mod, attr)
+    _PUBLISHER_CACHE[plat_key] = pub
+    return pub
+
+
+class _LazyPublishers:
+    """Сумісна з dict-подібною мапою, але імпортує паблішерів на вимогу."""
+
+    def get(self, plat_key: str, default=None):
+        try:
+            return get_publisher(plat_key) or default
+        except Exception as le:
+            logger.error(f"Не вдалося завантажити паблішер '{plat_key}': {le}")
+            return default
+
+    def __getitem__(self, plat_key: str):
+        pub = get_publisher(plat_key)
+        if pub is None:
+            raise KeyError(plat_key)
+        return pub
+
+    def __contains__(self, plat_key: str) -> bool:
+        return plat_key in _PUBLISHER_MODULES
+
+    def keys(self):
+        return _PUBLISHER_MODULES.keys()
+
+    def values(self):
+        return [get_publisher(k) for k in _PUBLISHER_MODULES if get_publisher(k)]
+
+    def items(self):
+        for k in _PUBLISHER_MODULES:
+            pub = get_publisher(k)
+            if pub:
+                yield k, pub
+
+
+PUBLISHERS = _LazyPublishers()
+
+
+# Захист від подвійної публікації: пост, що вже публікується
+_IN_FLIGHT_LOCK = threading.Lock()
+_IN_FLIGHT_POSTS: set = set()
 
 
 class AutoPosterService:
@@ -236,6 +286,19 @@ class AutoPosterService:
         return get_post_by_id(post_id) or {}
 
     def publish_post(self, post_id: int, platforms: Optional[List[str]] = None) -> Dict[str, Any]:
+        # In-flight захист: двійний клік по кнопці / два інстанси не публікують один пост двічі
+        with _IN_FLIGHT_LOCK:
+            if post_id in _IN_FLIGHT_POSTS:
+                logger.warning(f"⏭️ Пост #{post_id} вже публікується — повторний виклик ігнорується.")
+                return {"error": f"Публікація поста #{post_id} вже виконується. Зачекайте завершення."}
+            _IN_FLIGHT_POSTS.add(post_id)
+        try:
+            return self._publish_post_impl(post_id, platforms)
+        finally:
+            with _IN_FLIGHT_LOCK:
+                _IN_FLIGHT_POSTS.discard(post_id)
+
+    def _publish_post_impl(self, post_id: int, platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         post = get_post_by_id(post_id)
         if not post:
             return {"error": f"Публікацію з ID {post_id} не знайдено"}
@@ -253,6 +316,13 @@ class AutoPosterService:
         all_media_files = post.get("media_paths_list") or []
         if not all_media_files and post.get("clean_video_path"):
             all_media_files = [post["clean_video_path"]]
+
+        # Захист: публікуємо ТІЛЬКИ ті файли, які реально належать цьому посту
+        from pathlib import Path
+        missing_files = [p for p in all_media_files if not Path(p).exists()]
+        if missing_files:
+            logger.error(f"⛔️ Пост #{post_id}: медіафайли відсутні, публікацію скасовано: {missing_files}")
+            return {"error": f"Медіафайли поста #{post_id} відсутні: {missing_files}"}
 
         results = {}
         raw_metadata = {
@@ -402,19 +472,23 @@ class AutoPosterService:
         top_platform = None
         max_views = -1
 
-        for plat_key, pub in PUBLISHERS.items():
+        for plat_key in list(PUBLISHERS.keys()):
             ext_id = post.get(col_id_map.get(plat_key, ""))
-            if ext_id:
-                stat = pub.get_stats(ext_id)
-                platform_stats[plat_key] = stat
-                if not stat.error:
-                    update_post_platform_stats(post_id, plat_key, stat.views, stat.likes)
-                    total_views += stat.views
-                    total_likes += stat.likes
-                    total_comments += stat.comments
-                    if stat.views > max_views:
-                        max_views = stat.views
-                        top_platform = pub.platform_name
+            if not ext_id:
+                continue
+            pub = PUBLISHERS.get(plat_key)
+            if not pub:
+                continue
+            stat = pub.get_stats(ext_id)
+            platform_stats[plat_key] = stat
+            if not stat.error:
+                update_post_platform_stats(post_id, plat_key, stat.views, stat.likes)
+                total_views += stat.views
+                total_likes += stat.likes
+                total_comments += stat.comments
+                if stat.views > max_views:
+                    max_views = stat.views
+                    top_platform = pub.platform_name
 
         return {
             "post_id": post_id,
@@ -451,13 +525,17 @@ class AutoPosterService:
             "telegram": "error_message"
         }
 
-        for plat_key, pub in PUBLISHERS.items():
+        for plat_key in list(PUBLISHERS.keys()):
             ext_id = last_post.get(col_id_map.get(plat_key, ""))
-            if ext_id:
-                stat = pub.get_stats(ext_id)
-                stats_summary["platforms"][plat_key] = stat
-                if not stat.error:
-                    update_post_platform_stats(post_id, plat_key, stat.views, stat.likes)
+            if not ext_id:
+                continue
+            pub = PUBLISHERS.get(plat_key)
+            if not pub:
+                continue
+            stat = pub.get_stats(ext_id)
+            stats_summary["platforms"][plat_key] = stat
+            if not stat.error:
+                update_post_platform_stats(post_id, plat_key, stat.views, stat.likes)
 
         return stats_summary
 

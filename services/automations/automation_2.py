@@ -286,6 +286,9 @@ class TikTokStreakService:
                     "--no-first-run",
                     "--no-default-browser-check"
                 ]
+                from core.mem_guard import ensure_memory_for_browser
+                if not ensure_memory_for_browser("TikTok streaks"):
+                    raise RuntimeError("Недостатньо вільної RAM для Chromium — операцію вогників пропущено.")
                 browser = await p.chromium.launch(
                     headless=True,
                     proxy=proxy_cfg,
@@ -771,6 +774,9 @@ class TikTokStreakService:
                         "--no-first-run",
                         "--no-default-browser-check"
                     ]
+                    from core.mem_guard import ensure_memory_for_browser
+                    if not ensure_memory_for_browser("TikTok dispatch"):
+                        raise RuntimeError("Недостатньо вільної RAM для Chromium — диспатч вогників пропущено.")
                     browser = await p.chromium.launch(
                         headless=True,
                         proxy=p_cfg,

@@ -1,4 +1,6 @@
 import os
+import re
+import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -9,6 +11,21 @@ from config import TIKTOK_UPLOAD_SESSION_ID, TIKTOK_SESSION_ID, DRY_RUN_MODE
 from core.content_type import ContentType
 
 logger = logging.getLogger(__name__)
+
+_SUCCESS_TEXTS = [
+    "your video has been uploaded",
+    "video posted",
+    "upload complete",
+    "your post has been published",
+    "відео завантажено",
+    "опубліковано",
+]
+_FAIL_TEXTS = [
+    "your video failed to upload",
+    "upload failed",
+    "something went wrong",
+    "помилка завантаження",
+]
 
 
 class TikTokPublisher(BasePublisher):
@@ -112,6 +129,9 @@ class TikTokPublisher(BasePublisher):
 
                 try:
                     proxy_label = "через проксі" if use_proxy else "пряме зєднання"
+                    from core.mem_guard import ensure_memory_for_browser
+                    if not ensure_memory_for_browser("TikTok"):
+                        raise RuntimeError("Недостатньо вільної RAM для запуску Chromium (TikTok). Спробуйте пізніше.")
                     logger.info(f"TikTok: запуск браузера ({proxy_label})...")
                     with sync_playwright() as p:
                         browser = p.chromium.launch(**launch_kwargs)
@@ -192,9 +212,25 @@ class TikTokPublisher(BasePublisher):
                                 raise RuntimeError(f"Не знайдено поле input[type='file'] в TikTok Studio (знімок: {debug_shot.name})")
 
                             if media_paths:
-                                logger.info(f"TikTok Studio: передаємо файл {media_paths[0]} в input...")
-                                file_input.first.set_input_files(media_paths[0])
-                                logger.info("TikTok Studio: файл передано, очікуємо завантаження форми редагування...")
+                                existing = [p for p in media_paths if Path(p).exists()]
+                                if len(existing) != len(media_paths):
+                                    missing = [p for p in media_paths if not Path(p).exists()]
+                                    raise RuntimeError(f"TikTok: медіафайли відсутні: {missing}")
+                                if not existing:
+                                    raise RuntimeError("TikTok: не передано жодного медіафайлу")
+                                logger.info(f"TikTok Studio: передаємо {len(existing)} файл(ів) в input (перший: {existing[0]})...")
+                                file_input.first.set_input_files(existing if len(existing) > 1 else existing[0])
+                                logger.info("TikTok Studio: файли передано, очікуємо завантаження форми редагування...")
+                                page.wait_for_timeout(4000)
+
+                                # Верифікуємо, що TikTok прийняв САМЕ наші файли (не залишковий з попередньої сесії)
+                                try:
+                                    body_text = page.inner_text("body", timeout=5000)
+                                except Exception:
+                                    body_text = ""
+                                for fail_marker in ("Failed to upload", "Unsupported file", "File too large", "Помилка завантаження"):
+                                    if fail_marker.lower() in body_text.lower():
+                                        raise RuntimeError(f"TikTok відхилив медіафайл: {fail_marker}")
 
                                 # Закриваємо модальні діалоги ("Turn on automatic checks?", "Got it", "Cancel" тощо)
                                 for _ in range(4):
@@ -307,8 +343,31 @@ class TikTokPublisher(BasePublisher):
                             post_btn.scroll_into_view_if_needed()
                             page.wait_for_timeout(500)
                             post_btn.click(force=True)
-                            logger.info("TikTok: успішно натиснуто кнопку Post, очікуємо фіксації публікації...")
-                            page.wait_for_timeout(10000)
+                            logger.info("TikTok: натиснуто Post, очікуємо підтвердження публікації...")
+
+                            published_url, verify_err = self._wait_for_publication(page, timeout_s=90)
+                            if not published_url and verify_err:
+                                debug_shot = DATA_DIR / "tiktok_publish_verify_failed.png"
+                                try:
+                                    page.screenshot(path=str(debug_shot))
+                                except Exception:
+                                    pass
+                                return PublishResult(
+                                    success=False,
+                                    platform=self.platform_name,
+                                    error=f"TikTok не підтвердив публікацію: {verify_err} (знімок: {debug_shot.name})"
+                                )
+                            if not published_url:
+                                debug_shot = DATA_DIR / "tiktok_publish_unverified.png"
+                                try:
+                                    page.screenshot(path=str(debug_shot))
+                                except Exception:
+                                    pass
+                                return PublishResult(
+                                    success=False,
+                                    platform=self.platform_name,
+                                    error=f"TikTok не підтвердив публікацію за 90с (знімок: {debug_shot.name})"
+                                )
 
                             if state_file.exists():
                                 try:
@@ -319,9 +378,10 @@ class TikTokPublisher(BasePublisher):
                             return PublishResult(
                                 success=True,
                                 platform=self.platform_name,
-                                external_id="tt_uploaded_id",
-                                url="https://www.tiktok.com/@bohdan.gpt"
+                                external_id=self._extract_video_id(published_url),
+                                url=published_url
                             )
+
                         finally:
                             try:
                                 browser.close()
@@ -346,17 +406,89 @@ class TikTokPublisher(BasePublisher):
             logger.error(f"Помилка TikTok: {err_clean}")
             return PublishResult(success=False, platform=self.platform_name, error=err_clean)
 
+    def _extract_video_id(self, url: str) -> Optional[str]:
+        if not url:
+            return None
+        m = re.search(r"/video/(\d{6,})", url)
+        if m:
+            return m.group(1)
+        m = re.search(r"item_id=(\d{6,})", url)
+        if m:
+            return m.group(1)
+        return None
+
+    def _wait_for_publication(self, page, timeout_s: int = 90) -> tuple:
+        """Чекає реального підтвердження публікації. Повертає (published_url, error)."""
+        deadline = time.time() + timeout_s
+        last_body = ""
+        while time.time() < deadline:
+            # 1. Редірект на сторінку відео/контенту = успіх
+            cur = page.url or ""
+            if re.search(r"/@[^/]+/video/\d{6,}", cur) or ("/content/" in cur and "upload" not in cur):
+                return cur, None
+            try:
+                last_body = page.inner_text("body", timeout=3000) or ""
+            except Exception:
+                last_body = ""
+            low = last_body.lower()
+            # 2. Текстові індикатори успіху
+            for t in _SUCCESS_TEXTS:
+                if t.lower() in low:
+                    # намагаємось дістати реальне посилання
+                    try:
+                        link = page.evaluate(
+                            """() => {
+                                const a = Array.from(document.querySelectorAll('a'))
+                                    .find(a => /\\/video\\/\\d{6,}/.test(a.href || ''));
+                                return a ? a.href : null;
+                            }"""
+                        )
+                        if link:
+                            return link, None
+                    except Exception:
+                        pass
+                    return cur, None
+            # 3. Виразні помилки
+            for t in _FAIL_TEXTS:
+                if t.lower() in low:
+                    return None, f"отримано помилку в UI: '{t}'"
+            # 4. Кнопка Post зникла після кліку = форму відправлено
+            # (помилки ми вже перевірили вище, тож це ознака успіху)
+            try:
+                post_btns = page.locator('button:has-text("Post")')
+                visible = False
+                for i in range(post_btns.count()):
+                    try:
+                        if post_btns.nth(i).is_visible():
+                            visible = True
+                            break
+                    except Exception:
+                        continue
+                if not visible:
+                    return page.url, None
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)
+        return None, "підтвердження не отримано (таймаут)"
+
     def get_stats(self, external_id: str) -> StatsResult:
-        if external_id.startswith("mock_") or external_id == "tt_uploaded_id":
-            return StatsResult(platform=self.platform_name, views=5840, likes=612, comments=47)
+        if not external_id or external_id.startswith("mock_") or external_id == "tt_uploaded_id":
+            return StatsResult(platform=self.platform_name, error="ID публікації не підтверджено")
 
         try:
             proxies = proxy_manager.get_requests_proxies()
             url = f"https://www.tiktok.com/oembed?url=https://www.tiktok.com/@me/video/{external_id}"
             resp = requests.get(url, proxies=proxies, timeout=10)
             if resp.status_code == 200:
-                return StatsResult(platform=self.platform_name, views=1000, likes=50, comments=5)
-            return StatsResult(platform=self.platform_name, views=0, likes=0, comments=0)
+                try:
+                    data = resp.json() or {}
+                    title = data.get("title", "")
+                except Exception:
+                    title = ""
+                return StatsResult(platform=self.platform_name, views=0, likes=0, comments=0,
+                                   error=None if title else "TikTok не підтвердив відео (oembed порожній)")
+            return StatsResult(platform=self.platform_name, views=0, likes=0, comments=0,
+                               error=f"oembed HTTP {resp.status_code}")
         except Exception as e:
             return StatsResult(platform=self.platform_name, error=str(e))
 

@@ -1,4 +1,6 @@
 import os
+import re
+import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -145,6 +147,9 @@ class SnapchatSpotlightPublisher(BasePublisher):
 
             try:
                 proxy_label = "через проксі" if use_proxy else "пряме зєднання"
+                from core.mem_guard import ensure_memory_for_browser
+                if not ensure_memory_for_browser("Snapchat"):
+                    raise RuntimeError("Недостатньо вільної RAM для запуску Chromium (Snapchat). Спробуйте пізніше.")
                 logger.info(f"Snapchat: запуск браузера ({proxy_label})...")
                 with sync_playwright() as p:
                     browser = p.chromium.launch(**launch_kwargs)
@@ -338,8 +343,25 @@ class SnapchatSpotlightPublisher(BasePublisher):
                         post_btn.scroll_into_view_if_needed()
                         page.wait_for_timeout(500)
                         post_btn.click(force=True)
-                        logger.info("Snapchat: успішно натиснуто кнопку публікації 'Post'!")
-                        page.wait_for_timeout(12000)
+                        logger.info("Snapchat: натиснуто 'Post', очікуємо підтвердження публікації...")
+
+                        published_url, verify_err = self._wait_for_publication(page, timeout_s=90)
+                        if not published_url:
+                            debug_shot = DATA_DIR / "snapchat_publish_unverified.png"
+                            try:
+                                page.screenshot(path=str(debug_shot))
+                            except Exception:
+                                pass
+                            try:
+                                context.storage_state(path=str(SNAPCHAT_STATE_FILE))
+                            except Exception:
+                                pass
+                            reason = verify_err or "підтвердження не отримано за 90с"
+                            return PublishResult(
+                                success=False,
+                                platform=self.platform_name,
+                                error=f"Snapchat не підтвердив публікацію: {reason} (знімок: {debug_shot.name})"
+                            )
 
                         try:
                             context.storage_state(path=str(SNAPCHAT_STATE_FILE))
@@ -347,13 +369,16 @@ class SnapchatSpotlightPublisher(BasePublisher):
                             pass
 
                         success_shot = DATA_DIR / "snapchat_post_success.png"
-                        page.screenshot(path=str(success_shot))
+                        try:
+                            page.screenshot(path=str(success_shot))
+                        except Exception:
+                            pass
 
                         return PublishResult(
                             success=True,
                             platform=self.platform_name,
-                            external_id="snap_spotlight_playwright",
-                            url="https://www.snapchat.com/@bohdan.gpt"
+                            external_id=self._extract_media_id(published_url),
+                            url=published_url
                         )
                     finally:
                         browser.close()
@@ -400,6 +425,69 @@ class SnapchatSpotlightPublisher(BasePublisher):
             err_clean = security_guard.sanitize_error(str(e))
             logger.error(f"Помилка Snapchat Spotlight API: {err_clean}")
             return PublishResult(success=False, platform=self.platform_name, error=err_clean)
+
+    def _extract_media_id(self, url: str) -> Optional[str]:
+        if not url:
+            return None
+        m = re.search(r"/(?:spotlight|p|story)/([A-Za-z0-9_-]{8,})", url)
+        if m:
+            return m.group(1)
+        return None
+
+    def _wait_for_publication(self, page, timeout_s: int = 90) -> tuple:
+        """Чекає реального підтвердження публікації Snapchat. Повертає (published_url, error)."""
+        success_texts = [
+            "your spotlight has been posted",
+            "spotlight posted",
+            "posted to spotlight",
+            "your content has been posted",
+            "опубліковано",
+        ]
+        fail_texts = [
+            "something went wrong",
+            "upload failed",
+            "failed to post",
+            "couldn't post",
+            "помилка завантаження",
+        ]
+        deadline = time.time() + timeout_s
+        last_body = ""
+        while time.time() < deadline:
+            cur = page.url or ""
+            if re.search(r"/(?:spotlight|p)/[A-Za-z0-9_-]{8,}", cur):
+                return cur, None
+            try:
+                last_body = page.inner_text("body", timeout=3000) or ""
+            except Exception:
+                last_body = ""
+            low = last_body.lower()
+            for t in fail_texts:
+                if t in low:
+                    return None, f"отримано помилку в UI: '{t}'"
+            for t in success_texts:
+                if t in low:
+                    try:
+                        link = page.evaluate(
+                            """() => {
+                                const a = Array.from(document.querySelectorAll('a'))
+                                    .find(a => /\\/(spotlight|p)\\/[A-Za-z0-9_-]{8,}/.test(a.href || ''));
+                                return a ? a.href : null;
+                            }"""
+                        )
+                        if link:
+                            return link, None
+                    except Exception:
+                        pass
+                    return cur, None
+            # Зникнув modal/редірект після кліку Post
+            try:
+                still_posting = page.locator('button:has-text("Post to Spotlight")').count() > 0
+                if not still_posting and "create" not in cur.lower():
+                    return cur, None
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)
+        return None, "підтвердження не отримано (таймаут)"
 
     def get_stats(self, external_id: str) -> StatsResult:
         return StatsResult(platform=self.platform_name, views=0, likes=0, comments=0)

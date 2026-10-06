@@ -1,9 +1,12 @@
 import sqlite3
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from config import DB_PATH, DEFAULT_AI_PROMPT
 from core.content_type import ContentType
+
+logger = logging.getLogger(__name__)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -353,7 +356,8 @@ def update_post_platform_result(
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(f"UPDATE posts SET {col} = ? WHERE id = ?", (external_id, post_id))
+        if external_id is not None:
+            cursor.execute(f"UPDATE posts SET {col} = ? WHERE id = ?", (external_id, post_id))
         if error:
             cursor.execute("UPDATE posts SET error_message = ? WHERE id = ?", (error, post_id))
         conn.commit()
@@ -474,9 +478,18 @@ def cancel_scheduled_post(post_id: int):
         conn.commit()
 
 
-def get_due_scheduled_posts() -> List[Dict[str, Any]]:
+def get_due_scheduled_posts(max_overdue_s: int = 1800) -> List[Dict[str, Any]]:
+    """
+    Повертає due-пости, що НЕ просрочені більше за max_overdue_s секунд.
+    Просрочені (наприклад, бот не працював) позначаються як 'missed' — НЕ публікуються,
+    щоб випадково не залити старий контент у неправильний час.
+    scheduled_at зберігається у локальному (київському) часі, тому
+    fallback-порівняння робиться з локальним часом, а НЕ з UTC datetime('now').
+    """
     import time
+    from datetime import datetime as _dt
     now_ts = time.time()
+    local_now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -484,12 +497,13 @@ def get_due_scheduled_posts() -> List[Dict[str, Any]]:
             WHERE status = 'scheduled' 
               AND (
                 (scheduled_timestamp IS NOT NULL AND scheduled_timestamp <= ?)
-                OR (scheduled_timestamp IS NULL AND scheduled_at IS NOT NULL AND scheduled_at <= datetime('now'))
+                OR (scheduled_timestamp IS NULL AND scheduled_at IS NOT NULL AND scheduled_at <= ?)
               )
             ORDER BY id ASC
-        """, (now_ts,))
+        """, (now_ts, local_now))
         rows = cursor.fetchall()
-        result = []
+        due: List[Dict[str, Any]] = []
+        missed: List[Dict[str, Any]] = []
         for r in rows:
             d = dict(r)
             if d.get("media_paths"):
@@ -499,6 +513,7 @@ def get_due_scheduled_posts() -> List[Dict[str, Any]]:
                     d["media_paths_list"] = []
             else:
                 d["media_paths_list"] = []
+
             if d.get("target_platforms"):
                 try:
                     d["target_platforms_list"] = json.loads(d["target_platforms"])
@@ -506,8 +521,52 @@ def get_due_scheduled_posts() -> List[Dict[str, Any]]:
                     d["target_platforms_list"] = None
             else:
                 d["target_platforms_list"] = None
-            result.append(d)
-        return result
+
+            sched_ts = d.get("scheduled_timestamp")
+            overdue_s = (now_ts - sched_ts) if sched_ts else 0
+            if sched_ts and overdue_s > max_overdue_s:
+                missed.append(d)
+            else:
+                due.append(d)
+
+        for d in missed:
+            cursor.execute(
+                "UPDATE posts SET status = 'missed' WHERE id = ? AND status = 'scheduled'",
+                (d["id"],)
+            )
+        conn.commit()
+        if missed:
+            logger.warning(
+                f"⏰ Пропущено застарілі заплановані пости (не публікувались): "
+                f"{[d['id'] for d in missed]}"
+            )
+        return due
+
+
+def claim_scheduled_post(post_id: int) -> bool:
+    """Атомарно 'забирає' запланований пост. Повертає False якщо вже забраний іншим викликом."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE posts SET status = 'publishing' WHERE id = ? AND status = 'scheduled'",
+            (post_id,)
+        )
+        claimed = cursor.rowcount > 0
+        conn.commit()
+        return claimed
+
+
+def reset_stuck_publishing_posts() -> int:
+    """Скидає пости, що застрягли у 'publishing' після аварійного перезапуску."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM posts WHERE status = 'publishing'")
+        stuck = [r[0] for r in cursor.fetchall()]
+        if stuck:
+            cursor.execute("UPDATE posts SET status = 'partial' WHERE status = 'publishing'")
+            conn.commit()
+            logger.warning(f"⚠️ Скинуто {len(stuck)} постів, що застрягли у 'publishing': {stuck}")
+        return len(stuck)
 
 
 def get_all_scheduled_posts() -> List[Dict[str, Any]]:

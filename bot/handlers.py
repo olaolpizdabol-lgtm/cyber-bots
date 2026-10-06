@@ -81,6 +81,39 @@ from bot.keyboards import (
 logger = logging.getLogger(__name__)
 router = Router()
 
+# Callback-кнопки з повідомлень старіших за цей строк вважаються застарілими
+# (захист від випадкової публікації СТАРОГО поста через старе повідомлення)
+STALE_CALLBACK_MAX_AGE_S = 24 * 3600
+
+
+def is_stale_callback(call: CallbackQuery, max_age_s: int = STALE_CALLBACK_MAX_AGE_S) -> bool:
+    try:
+        if not call.message or not call.message.date:
+            return False
+        msg_ts = call.message.date.timestamp()
+        return (datetime.now(timezone.utc).timestamp() - msg_ts) > max_age_s
+    except Exception:
+        return False
+
+
+async def reject_stale_callback(call: CallbackQuery, action: str = "цю дію") -> bool:
+    """Повертає True якщо callback застарілий і вже відхилено."""
+    if not is_stale_callback(call):
+        return False
+    try:
+        await call.answer(
+            f"⌛️ Кнопка застаріла (повідомлення старіше 24 год). {action} заблоковано, щоб не опублікувати не те.",
+            show_alert=True
+        )
+    except Exception:
+        pass
+    logger.warning(f"⌛️ Відхилено застарілий callback {call.data!r} від користувача {call.from_user.id if call.from_user else '?'}")
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    return True
+
 
 class BotStates(StatesGroup):
     waiting_for_new_prompt = State()
@@ -842,6 +875,8 @@ async def callback_back_to_publish(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pub_compat:"))
 async def callback_publish_compat(call: CallbackQuery):
+    if await reject_stale_callback(call, "Публікація"):
+        return
     try:
         await call.answer()
     except Exception:
@@ -856,6 +891,8 @@ async def callback_publish_compat(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pub_tier1:"))
 async def callback_publish_tier1(call: CallbackQuery):
+    if await reject_stale_callback(call, "Публікація"):
+        return
     try:
         await call.answer()
     except Exception:
@@ -870,6 +907,8 @@ async def callback_publish_tier1(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pub_p:"))
 async def callback_publish_single(call: CallbackQuery):
+    if await reject_stale_callback(call, "Публікація"):
+        return
     try:
         await call.answer()
     except Exception:
@@ -922,6 +961,8 @@ async def format_and_send_publish_results(msg: Message, post_id: int, results: d
 
 @router.callback_query(F.data.startswith("retry_failed:"))
 async def callback_retry_failed(call: CallbackQuery):
+    if await reject_stale_callback(call, "Повторна публікація"):
+        return
     try:
         await call.answer()
     except Exception:
@@ -1268,6 +1309,15 @@ async def callback_sched_apply(call: CallbackQuery):
         await call.answer("Пост не знайдено!", show_alert=True)
         return
 
+    # Захист: не даємо запланувати пост на час у минулому (в інакшому разі
+    # фоновий планувальник опублікує його миттєво і не тоді, коли просили)
+    if target_ts <= datetime.now(timezone.utc).timestamp() + 60:
+        try:
+            await call.answer("⌛️ Обраний час уже минув — оберіть час у майбутньому.", show_alert=True)
+        except Exception:
+            pass
+        return
+
     try:
         kyiv_tz = ZoneInfo("Europe/Kyiv")
     except Exception:
@@ -1309,6 +1359,8 @@ async def callback_sched_apply(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sched_now:"))
 async def callback_sched_now(call: CallbackQuery):
+    if await reject_stale_callback(call, "Миттєва публікація"):
+        return
     try:
         await call.answer()
     except Exception:

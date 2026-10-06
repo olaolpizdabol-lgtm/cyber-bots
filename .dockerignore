@@ -1,0 +1,36 @@
+# Важче: локальне середовище та сторонні репозиторії (не потрібні в образі)
+.venv/
+venv/
+opencode/
+.git/
+.gitignore
+
+# Секрети та локальні змінні (Railway надає змінні середовища самостійно)
+.env
+.env.local
+railway_env_ready.txt
+
+# Сесії/токени — відновлюються з env змінних (core/railway_sync.py)
+credentials/
+data/
+downloads/
+temp/
+
+# Локальні БД та стани, щоб Railway НЕ публікував застарілі пости з мак-машини
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# Кеші та артефакти
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.log
+
+# Великі локальні зображення/тести
+photo_*.png
+screenshots/
