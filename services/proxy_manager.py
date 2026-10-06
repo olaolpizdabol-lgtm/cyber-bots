@@ -82,6 +82,8 @@ class ProxyManager:
         self.strict_check = STRICT_PROXY_CHECK
         self._cached_health: Optional[Dict[str, Any]] = None
         self._last_health_check: float = 0.0
+        self._proxy_fail_streak: int = 0
+        self._health_ttl: float = 60.0
 
     def is_platform_ip_dependent(self, platform: str) -> bool:
         """Перевіряє, чи потрібен обов'язковий US проксі для платформи"""
@@ -161,7 +163,7 @@ class ProxyManager:
         Кешує результат на 60 секунд, щоб не затримувати паралельні запити.
         """
         now = time.time()
-        if not force and self._cached_health and (now - self._last_health_check < 60.0):
+        if not force and self._cached_health and (now - self._last_health_check < self._health_ttl):
             return self._cached_health
 
         if not self.proxy_url:
@@ -189,6 +191,8 @@ class ProxyManager:
             )
             data = resp.json()
             if data.get("status") == "success":
+                self._proxy_fail_streak = 0
+                self._health_ttl = 60.0
                 ip = data.get("query", "")
                 country_code = data.get("countryCode", "")
                 country = data.get("country", "")
@@ -223,6 +227,8 @@ class ProxyManager:
                     "message": msg
                 }
             else:
+                self._proxy_fail_streak += 1
+                self._health_ttl = 300.0
                 res = {
                     "ok": False,
                     "ip": "Error",
@@ -235,7 +241,14 @@ class ProxyManager:
                     "message": f"❌ Помилка перевірки проксі: {data.get('message')}"
                 }
         except Exception as e:
-            logger.warning(f"Помилка підключення до проксі або ліміт трафіку вичерпано: {e}")
+            self._proxy_fail_streak += 1
+            self._health_ttl = 300.0
+            if self._proxy_fail_streak <= 1:
+                logger.warning(f"Помилка підключення до проксі або ліміт трафіку вичерпано: {e}")
+            else:
+                logger.debug(
+                    f"Проксі недоступний (повтор #{self._proxy_fail_streak}, ігноруємо): {e}"
+                )
             res = {
                 "ok": False,
                 "ip": "Offline",

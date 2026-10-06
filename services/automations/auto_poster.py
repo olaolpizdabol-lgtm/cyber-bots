@@ -286,17 +286,23 @@ class AutoPosterService:
         return get_post_by_id(post_id) or {}
 
     def publish_post(self, post_id: int, platforms: Optional[List[str]] = None) -> Dict[str, Any]:
-        # In-flight захист: двійний клік по кнопці / два інстанси не публікують один пост двічі
+        # In-flight захист: двійний клік по кнопці / два інстанси не публікують
+        # один і той самий пост на ту саму платформу двічі.
+        # Ключ включає платформи, щоб паралельно можна було заливати на різні платформи.
+        lock_key = (post_id, tuple(sorted(platforms)) if platforms else ("*",))
         with _IN_FLIGHT_LOCK:
-            if post_id in _IN_FLIGHT_POSTS:
-                logger.warning(f"⏭️ Пост #{post_id} вже публікується — повторний виклик ігнорується.")
+            if lock_key in _IN_FLIGHT_POSTS:
+                logger.warning(
+                    f"⏭️ Пост #{post_id} на {', '.join(platforms) if platforms else 'всі платформи'} "
+                    f"вже публікується — повторний виклик ігнорується."
+                )
                 return {"error": f"Публікація поста #{post_id} вже виконується. Зачекайте завершення."}
-            _IN_FLIGHT_POSTS.add(post_id)
+            _IN_FLIGHT_POSTS.add(lock_key)
         try:
             return self._publish_post_impl(post_id, platforms)
         finally:
             with _IN_FLIGHT_LOCK:
-                _IN_FLIGHT_POSTS.discard(post_id)
+                _IN_FLIGHT_POSTS.discard(lock_key)
 
     def _publish_post_impl(self, post_id: int, platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         post = get_post_by_id(post_id)
