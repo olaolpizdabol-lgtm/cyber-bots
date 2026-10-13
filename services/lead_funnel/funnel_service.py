@@ -2,6 +2,7 @@
 🎯 Lead Magnet Funnel Orchestrator
 Cross-platform Comment-to-DM Engine with AI Detection & Follower Conversion
 """
+import os
 import random
 import time
 import asyncio
