@@ -42,7 +42,11 @@ from core.database import (
     schedule_post,
     cancel_scheduled_post,
     get_all_scheduled_posts,
-    get_due_scheduled_posts
+    get_due_scheduled_posts,
+    get_lead_funnel_triggers,
+    add_lead_funnel_trigger,
+    remove_lead_funnel_trigger,
+    get_lead_funnel_stats
 )
 from core.security_guard import security_guard
 from core.media_processor import media_processor
@@ -56,6 +60,7 @@ from services.automations.auto_poster import (
 from services.automations.automation_2 import tiktok_streak_service
 from services.cyber_rizhyi import cyber_rizhyi_service
 from services.tiktok_reactions import tiktok_reactions_service
+from services.lead_funnel import lead_funnel_service, detect_comment_intent
 from services.proxy_manager import (
     proxy_manager,
     IP_DEPENDENT_PLATFORMS,
@@ -75,7 +80,9 @@ from bot.keyboards import (
     get_streak_menu_keyboard,
     get_streak_targets_management_keyboard,
     get_cyber_rizhyi_keyboard,
-    get_publish_result_keyboard
+    get_publish_result_keyboard,
+    get_lead_funnel_menu_keyboard,
+    get_lead_funnel_triggers_keyboard
 )
 
 logger = logging.getLogger(__name__)
@@ -125,6 +132,9 @@ class BotStates(StatesGroup):
     waiting_for_rizhyi_test_input = State()
     waiting_for_rizhyi_photo_test = State()
     waiting_for_post_schedule_time = State()
+    waiting_for_new_trigger = State()
+    waiting_for_lead_link = State()
+    waiting_for_lead_dm = State()
 
 
 # ---------------------------------------------------------
@@ -2399,5 +2409,202 @@ async def callback_rizhyi_model_info(call: CallbackQuery):
         "• <b>Типографіка:</b> строго дефіс '-' (нуль довгих тире)"
     )
     await call.message.answer(text, reply_markup=get_cyber_rizhyi_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+
+# ==============================================================================
+# 🎯 LEAD MAGNET FUNNEL HANDLERS (Comment-to-DM Engine)
+# ==============================================================================
+
+@router.callback_query(F.data == "menu_lead_funnel")
+async def callback_menu_lead_funnel(call: CallbackQuery):
+    if await reject_stale_callback(call, "відкриття Lead Funnel"):
+        return
+
+    triggers = get_lead_funnel_triggers(only_active=True)
+    triggers_str = ", ".join([f"<code>{t}</code>" for t in triggers]) if triggers else "<i>немає</i>"
+    stats = get_lead_funnel_stats()
+    lead_link = lead_funnel_service.get_lead_link()
+    dm_preview = lead_funnel_service.get_formatted_dm_text()
+
+    text = (
+        "🎯 <b>Lead Magnet Funnel (Автоворонка Коментарі ➡️ Direct)</b>\n\n"
+        "Автоматично відстежує коментарі на <b>Instagram, Facebook, TikTok та YouTube</b>, "
+        "перевіряє статус підписки, надсилає 100+ промптів у Direct і відповідає на коментарі англійською мовою.\n\n"
+        f"🎯 <b>Активні тригери ({len(triggers)}):</b>\n{triggers_str}\n\n"
+        f"🔗 <b>Цільове посилання (лінк):</b>\n<code>{html.escape(lead_link)}</code>\n\n"
+        f"📊 <b>Статистика воронки:</b>\n"
+        f"• Знайдено лід-коментарів: <b>{stats['total_leads']}</b>\n"
+        f"• Успішно надіслано в Direct: <b>{stats['dms_delivered']}</b>\n"
+        f"• Конвертовано після прохання підписатись: <b>{stats['converted_after_follow']}</b>\n"
+        f"• Очікують підписки зараз: <b>{stats['pending_follow']}</b>\n"
+        f"• Закритий Direct у юзерів: <b>{stats['failed_private_dms']}</b>\n\n"
+        "💬 <b>Попередній перегляд повідомлення в Direct:</b>\n"
+        f"<i>\"{html.escape(dm_preview[:200])}...\"</i>"
+    )
+    await call.message.edit_text(text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data == "funnel_triggers")
+async def callback_funnel_triggers(call: CallbackQuery):
+    if await reject_stale_callback(call, "керування тригерами"):
+        return
+
+    triggers = get_lead_funnel_triggers(only_active=True)
+    text = (
+        f"📋 <b>Керування словами-тригерами ({len(triggers)} активних)</b>\n\n"
+        "Коли людина пише одне з цих слів у коментарях, система активує воронку "
+        "(перевіряє підписку та надсилає лід-магніт у Direct).\n\n"
+        "• Натисніть <b>❌ Видалити</b> біля будь-якого слова, щоб прибрати його.\n"
+        "• Натисніть <b>➕ Додати нове слово-тригер</b>, щоб додати будь-яке інше."
+    )
+    await call.message.edit_text(text, reply_markup=get_lead_funnel_triggers_keyboard(triggers), parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("trigger_del:"))
+async def callback_trigger_del(call: CallbackQuery):
+    trigger_word = call.data.split(":", 1)[1].strip()
+    remove_lead_funnel_trigger(trigger_word)
+    await call.answer(f"✅ Тригер {trigger_word} видалено!", show_alert=True)
+    triggers = get_lead_funnel_triggers(only_active=True)
+    await call.message.edit_reply_markup(reply_markup=get_lead_funnel_triggers_keyboard(triggers))
+
+
+@router.callback_query(F.data == "trigger_add")
+async def callback_trigger_add(call: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_new_trigger)
+    await call.message.answer(
+        "➕ <b>Додавання нового слова-тригера:</b>\n\n"
+        "Напишіть слово або фразу, яка має активувати відправку лід-магніту "
+        "(наприклад: <code>VAULT</code>, <code>CHOP</code>, <code>БАЗА</code>, <code>ACCESS</code>):",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_new_trigger)
+async def message_new_trigger(message: Message, state: FSMContext):
+    text = (message.text or "").strip().upper()
+    if text:
+        add_lead_funnel_trigger(text)
+        await state.clear()
+        triggers = get_lead_funnel_triggers(only_active=True)
+        await message.answer(
+            f"✅ <b>Слово-тригер <code>{text}</code> успішно додано!</b>\n\n"
+            f"Тепер система реагує на нього в коментарях.",
+            reply_markup=get_lead_funnel_triggers_keyboard(triggers),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("⚠️ Введіть коректне слово-тригер.")
+
+
+@router.callback_query(F.data == "funnel_set_link")
+async def callback_funnel_set_link(call: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_lead_link)
+    current_link = lead_funnel_service.get_lead_link()
+    await call.message.answer(
+        "🔗 <b>Зміна посилання (лінка) для лід-магніту:</b>\n\n"
+        f"Поточне посилання: <code>{html.escape(current_link)}</code>\n\n"
+        "Надішліть новий URL (наприклад: посилання на Telegram-канал, Notion, Google Drive чи сайт):",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_lead_link)
+async def message_new_lead_link(message: Message, state: FSMContext):
+    link = (message.text or "").strip()
+    if link.startswith(("http://", "https://", "t.me/")):
+        set_setting("lead_funnel_link", link)
+        await state.clear()
+        await message.answer(
+            f"✅ <b>Посилання на лід-магніт успішно оновлено!</b>\n\n"
+            f"Новий лінк: <code>{html.escape(link)}</code>\n\n"
+            "Він автоматично підставиться в усі нові повідомлення в Direct.",
+            reply_markup=get_lead_funnel_menu_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("⚠️ Будь ласка, надішліть коректне посилання (повинно починатися з http://, https:// або t.me/).")
+
+
+@router.callback_query(F.data == "funnel_set_dm")
+async def callback_funnel_set_dm(call: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_lead_dm)
+    current_tpl = lead_funnel_service.get_dm_template()
+    await call.message.answer(
+        "📝 <b>Редагування тексту повідомлення в Direct (DM):</b>\n\n"
+        "Надішліть новий шаблон англійською мовою. "
+        "Обов'язково використовуйте <code>{link}</code> у місці, де має бути вставлено посилання на базу промптів.\n\n"
+        f"<b>Поточний шаблон:</b>\n<pre>{html.escape(current_tpl)}</pre>",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_lead_dm)
+async def message_new_lead_dm(message: Message, state: FSMContext):
+    tpl = (message.text or "").strip()
+    if "{link}" in tpl:
+        set_setting("lead_funnel_dm_template", tpl)
+        await state.clear()
+        preview = lead_funnel_service.get_formatted_dm_text()
+        await message.answer(
+            f"✅ <b>Шаблон повідомлення в Direct збережено!</b>\n\n"
+            f"<b>Попередній перегляд:</b>\n<pre>{html.escape(preview)}</pre>",
+            reply_markup=get_lead_funnel_menu_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("⚠️ Шаблон обов'язково повинен містити тег <code>{link}</code>, щоб бот знав, куди вставляти посилання.")
+
+
+@router.callback_query(F.data == "funnel_run_now")
+async def callback_funnel_run_now(call: CallbackQuery):
+    await call.answer("⚡ Запускаю перевірку коментарів та очікуючих підписок...", show_alert=False)
+    status_msg = await call.message.answer("⏳ <i>Сканую нові коментарі на Instagram, Facebook, TikTok та YouTube...</i>", parse_mode="HTML")
+
+    loop = asyncio.get_event_loop()
+    # 1. Обробка свіжих коментарів
+    total_stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0}
+    for platform in ["instagram", "facebook", "tiktok", "youtube"]:
+        try:
+            p_stats = await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, 5)
+            for k, v in p_stats.items():
+                total_stats[k] = total_stats.get(k, 0) + v
+        except Exception as e:
+            logger.warning(f"Помилка сканування {platform}: {e}")
+
+    # 2. Дотискання тих, хто підписався після нагадування
+    converted = await loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads)
+
+    summary_text = (
+        "🚀 <b>Результати перевірки воронки:</b>\n\n"
+        f"• Перевірено коментарів: <b>{total_stats['processed']}</b>\n"
+        f"• Знайдено запитів лід-магніту: <b>{total_stats['leads']}</b>\n"
+        f"• Надіслано Direct повідомлень (підписаним): <b>{total_stats['dms_sent']}</b>\n"
+        f"• Попросили підписатися (непідписані): <b>{total_stats['pending_follow']}</b>\n"
+        f"• 🎉 Щойно підписались і отримали DM: <b>{converted}</b>"
+    )
+    await status_msg.edit_text(summary_text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "funnel_stats")
+async def callback_funnel_stats(call: CallbackQuery):
+    stats = get_lead_funnel_stats()
+    text = (
+        "📊 <b>Повна аналітика Lead Magnet Funnel:</b>\n\n"
+        f"• Всього проаналізовано коментарів: <b>{stats['total_comments']}</b>\n"
+        f"• Запитів лід-магніту (leads): <b>{stats['total_leads']}</b>\n"
+        f"• Успішно доставлено лід-магнітів: <b>{stats['dms_delivered']}</b>\n"
+        f"• Конвертовано після нагадування: <b>{stats['converted_after_follow']}</b>\n"
+        f"• Наразі в черзі на підписку: <b>{stats['pending_follow']}</b>\n"
+        f"• Помилки через закритий Direct: <b>{stats['failed_private_dms']}</b>\n\n"
+        "⚡ <i>Система працює повністю в фоновому режимі та конвертує коментарі у підписників і лідів.</i>"
+    )
+    await call.message.edit_text(text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
     await call.answer()
 

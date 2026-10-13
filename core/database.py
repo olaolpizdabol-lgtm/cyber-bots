@@ -293,6 +293,44 @@ def init_db():
             )
         """)
 
+        # 🎯 Автоматизація воронки лідогенерації: коментарі -> перевірка підписки -> Direct
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lead_funnel_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,               -- 'instagram', 'facebook', 'tiktok', 'youtube'
+                comment_id TEXT NOT NULL,
+                post_id TEXT,
+                post_url TEXT,
+                user_id TEXT,
+                username TEXT,
+                comment_text TEXT,
+                detected_intent TEXT,                 -- 'lead_magnet', 'question_chat', 'spam'
+                matched_trigger TEXT,
+                is_following BOOLEAN DEFAULT 0,
+                status TEXT NOT NULL,                 -- 'pending_follow', 'sent_dm', 'dm_failed_private', 'replied_public_only', 'converted'
+                dm_sent_at TIMESTAMP,
+                reply_comment_id TEXT,
+                check_count INTEGER DEFAULT 1,
+                last_checked_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(platform, comment_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lead_funnel_triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT UNIQUE NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Базові ключові слова-тригери за замовчуванням
+        default_triggers = ["GPT", "PROMPT", "PROMPTS", "VAULT", "AI", "SEND", "LINK", "GUIDE", "ГПТ"]
+        for dt in default_triggers:
+            cursor.execute("INSERT OR IGNORE INTO lead_funnel_triggers (keyword) VALUES (?)", (dt.strip().upper(),))
+
         cursor.execute("SELECT value FROM settings WHERE key = 'ai_prompt'")
         row = cursor.fetchone()
         if not row:
@@ -1321,6 +1359,163 @@ def get_aggregate_stats() -> Dict[str, Any]:
             "total_posts": row["total_posts"] if row else 0,
             "total_views": row["total_views"] if row else 0,
             "total_likes": row["total_likes"] if row else 0
+        }
+
+
+
+# ==============================================================================
+# 🎯 LEAD MAGNET FUNNEL DATABASE FUNCTIONS
+# ==============================================================================
+
+def get_lead_funnel_triggers(only_active: bool = True) -> List[str]:
+    """Повертає список ключових слів-тригерів для коментарів"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        query = "SELECT keyword FROM lead_funnel_triggers WHERE is_active = 1" if only_active else "SELECT keyword FROM lead_funnel_triggers"
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        return [r["keyword"] for r in rows]
+
+
+def add_lead_funnel_trigger(keyword: str) -> bool:
+    """Додає нове ключове слово-тригер"""
+    kw = keyword.strip().upper()
+    if not kw:
+        return False
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT OR REPLACE INTO lead_funnel_triggers (keyword, is_active) VALUES (?, 1)", (kw,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Помилка додавання тригера {kw}: {e}")
+            return False
+
+
+def remove_lead_funnel_trigger(keyword: str) -> bool:
+    """Видаляє ключове слово-тригер"""
+    kw = keyword.strip().upper()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM lead_funnel_triggers WHERE keyword = ?", (kw,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_lead_comment(platform: str, comment_id: str) -> Optional[Dict[str, Any]]:
+    """Перевіряє, чи вже оброблявся даний коментар"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM lead_funnel_comments WHERE platform = ? AND comment_id = ?", (platform, str(comment_id)))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def save_lead_comment(
+    platform: str,
+    comment_id: str,
+    post_id: str,
+    user_id: str,
+    username: str,
+    comment_text: str,
+    detected_intent: str,
+    matched_trigger: Optional[str],
+    is_following: bool,
+    status: str,
+    post_url: Optional[str] = None,
+    reply_comment_id: Optional[str] = None,
+    dm_sent: bool = False
+) -> int:
+    """Зберігає новий коментар у воронку"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        dm_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if dm_sent else None
+        cursor.execute("""
+            INSERT OR REPLACE INTO lead_funnel_comments (
+                platform, comment_id, post_id, post_url, user_id, username,
+                comment_text, detected_intent, matched_trigger, is_following,
+                status, dm_sent_at, reply_comment_id, check_count, last_checked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+        """, (
+            platform, str(comment_id), str(post_id or ""), str(post_url or ""),
+            str(user_id or ""), str(username or ""), comment_text, detected_intent,
+            matched_trigger, 1 if is_following else 0, status, dm_time, str(reply_comment_id or "")
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_pending_follow_leads(platform: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Повертає лідів, які очікують підписки для повторної перевірки"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if platform:
+            cursor.execute("""
+                SELECT * FROM lead_funnel_comments 
+                WHERE status = 'pending_follow' AND platform = ? AND check_count < 15
+                ORDER BY created_at DESC LIMIT ?
+            """, (platform, limit))
+        else:
+            cursor.execute("""
+                SELECT * FROM lead_funnel_comments 
+                WHERE status = 'pending_follow' AND check_count < 15
+                ORDER BY created_at DESC LIMIT ?
+            """, (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def update_lead_status(
+    lead_id: int,
+    status: str,
+    is_following: Optional[bool] = None,
+    dm_sent: bool = False,
+    reply_comment_id: Optional[str] = None
+):
+    """Оновлює статус ліда (наприклад, після того як підписався та отримав DM)"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        updates = ["status = ?", "check_count = check_count + 1", "last_checked_at = CURRENT_TIMESTAMP"]
+        params: List[Any] = [status]
+
+        if is_following is not None:
+            updates.append("is_following = ?")
+            params.append(1 if is_following else 0)
+
+        if dm_sent:
+            updates.append("dm_sent_at = CURRENT_TIMESTAMP")
+
+        if reply_comment_id:
+            updates.append("reply_comment_id = ?")
+            params.append(str(reply_comment_id))
+
+        params.append(lead_id)
+        cursor.execute(f"UPDATE lead_funnel_comments SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+
+
+def get_lead_funnel_stats() -> Dict[str, Any]:
+    """Повертає детальну аналітику воронки"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_comments,
+                SUM(CASE WHEN detected_intent = 'lead_magnet' THEN 1 ELSE 0 END) as total_leads,
+                SUM(CASE WHEN status IN ('sent_dm', 'converted') THEN 1 ELSE 0 END) as dms_delivered,
+                SUM(CASE WHEN status = 'converted' THEN 1 ELSE 0 END) as converted_after_follow,
+                SUM(CASE WHEN status = 'pending_follow' THEN 1 ELSE 0 END) as pending_follow,
+                SUM(CASE WHEN status = 'dm_failed_private' THEN 1 ELSE 0 END) as failed_private_dms
+            FROM lead_funnel_comments
+        """)
+        row = cursor.fetchone()
+        return {
+            "total_comments": row["total_comments"] or 0,
+            "total_leads": row["total_leads"] or 0,
+            "dms_delivered": row["dms_delivered"] or 0,
+            "converted_after_follow": row["converted_after_follow"] or 0,
+            "pending_follow": row["pending_follow"] or 0,
+            "failed_private_dms": row["failed_private_dms"] or 0
         }
 
 

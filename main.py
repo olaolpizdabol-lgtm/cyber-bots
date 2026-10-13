@@ -304,8 +304,33 @@ async def main():
             except Exception as e:
                 logger.error(f"Помилка фонового планувальника публікацій: {e}")
 
+    async def lead_funnel_background_task():
+        logger.info("🎯 Фоновий моніторинг Lead Magnet Funnel (коментарі & конверсія підписок) активовано.")
+        from services.lead_funnel import lead_funnel_service
+        await asyncio.sleep(60)
+        while True:
+            try:
+                loop = asyncio.get_event_loop()
+                for platform in ["instagram", "facebook", "tiktok", "youtube"]:
+                    try:
+                        await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, 3)
+                    except Exception as pe:
+                        logger.debug(f"Lead funnel {platform} poll: {pe}")
+
+                converted = await loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads)
+                if converted > 0:
+                    logger.info(f"🎉 Lead Funnel: успішно конвертовано {converted} нових підписників!")
+
+                await asyncio.sleep(600)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Помилка фонового lead_funnel: {e}")
+                await asyncio.sleep(120)
+
     post_scheduler_task = asyncio.create_task(post_scheduler_background_task())
     scheduler_task = asyncio.create_task(streak_scheduler_background_task())
+    funnel_task = asyncio.create_task(lead_funnel_background_task())
 
     try:
         await bot.delete_webhook(drop_pending_updates=False)
@@ -313,6 +338,7 @@ async def main():
     finally:
         scheduler_task.cancel()
         post_scheduler_task.cancel()
+        funnel_task.cancel()
         await bot.session.close()
 
 

@@ -228,6 +228,12 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="🎯 Lead Magnet Funnel (Коментарі -> Direct)",
+                callback_data="menu_lead_funnel"
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="🚀 Пост на ВСІ платформи (YT+IG+TT+TG)",
                 callback_data="menu_crosspost"
             )
@@ -379,3 +385,42 @@ def get_prompt_management_keyboard() -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_lead_funnel_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню керування автоматизацією Lead Magnet Funnel (Comment-to-DM)"""
+    buttons = [
+        [
+            InlineKeyboardButton(text="⚡ Запустити перевірку коментарів зараз", callback_data="funnel_run_now")
+        ],
+        [
+            InlineKeyboardButton(text="📋 Ключові слова-тригери", callback_data="funnel_triggers"),
+            InlineKeyboardButton(text="🔗 Змінити посилання (лінк)", callback_data="funnel_set_link")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Редагувати текст DM", callback_data="funnel_set_dm"),
+            InlineKeyboardButton(text="📊 Детальна статистика", callback_data="funnel_stats")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Головне меню", callback_data="menu_back")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_lead_funnel_triggers_keyboard(triggers: List[str]) -> InlineKeyboardMarkup:
+    """Клавіатура для керування списком слів-тригерів із кнопками видалення ❌"""
+    buttons = []
+    # Ряди по 2 тригери з кнопкою видалення
+    for trigger in triggers:
+        buttons.append([
+            InlineKeyboardButton(text=f"🎯 {trigger}", callback_data=f"trigger_info:{trigger}"),
+            InlineKeyboardButton(text="❌ Видалити", callback_data=f"trigger_del:{trigger}")
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(text="➕ Додати нове слово-тригер", callback_data="trigger_add"),
+        InlineKeyboardButton(text="◀️ До меню воронки", callback_data="menu_lead_funnel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
