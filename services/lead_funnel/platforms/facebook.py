@@ -115,8 +115,21 @@ class FacebookFunnel(BasePlatformFunnel):
                             page.mouse.wheel(0, 2000)
                             page.wait_for_timeout(700)
 
-                    raw_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
-                    unique_reels = list(dict.fromkeys([l for l in raw_reels if l and not l.startswith("/reel/?")]))
+                    # Шукаємо посилання на Reels у головному блоці сторінки (ігноруючи панель сповіщень)
+                    main_loc = page.locator('[role="main"], main').first
+                    raw_reels = [a.get_attribute("href") for a in main_loc.locator('a[href*="/reel/"]').all()]
+                    unique_reels = []
+                    for l in raw_reels:
+                        if l and "/reel/" in l and "notif" not in l:
+                            clean_l = l.split("?")[0]
+                            if clean_l not in unique_reels:
+                                unique_reels.append(clean_l)
+
+                    # Фолбек якщо main не повернув Reels
+                    if not unique_reels:
+                        all_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
+                        unique_reels = list(dict.fromkeys([l.split("?")[0] for l in all_reels if l and "notif" not in l and not l.startswith("/reel/?")]))
+
                     target_reels = unique_reels if limit_posts is None else unique_reels[:limit_posts]
 
                     # Перевіряємо відео з Reels
@@ -170,44 +183,53 @@ class FacebookFunnel(BasePlatformFunnel):
                                     txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
                                     if len(txt_lines) >= 2 and any(k in txt_lines for k in ["Reply", "Send message", "Hide"]):
                                         u_name = txt_lines[0]
-                                        # Шукаємо тіло коментаря (текст перед кнопками дій)
-                                        reply_idx = -1
+                                        # Знаходимо межу кнопок дій
+                                        reply_idx = len(txt_lines)
                                         for k_idx, item in enumerate(txt_lines):
                                             if item in ("Reply", "Send message", "Hide"):
                                                 reply_idx = k_idx
                                                 break
-                                        if reply_idx >= 1:
-                                            c_text = txt_lines[reply_idx - 1]
-                                            t_str = txt_lines[1] if len(txt_lines) > 2 and any(u in txt_lines[1] for u in ['m', 'h', 'd', 'w', '·']) else None
 
-                                            if u_name not in ("Bohdan GPT", "Author", "Автор"):
-                                                has_rep = any("bohdan" in s.lower() for s in txt_lines)
-                                                c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
+                                        c_candidates = []
+                                        t_str = None
+                                        for l in txt_lines[1:reply_idx]:
+                                            if l in ("·", "Follow back", "Author", "Автор", "Top fan"):
+                                                continue
+                                            if any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5:
+                                                t_str = l
+                                                continue
+                                            c_candidates.append(l)
 
-                                                # Авто-лайк на коментар (якщо не спам)
-                                                from services.lead_funnel.intent_detector import detect_comment_intent
-                                                intent_fb = detect_comment_intent(c_text)
-                                                if intent_fb.intent != "spam":
-                                                    try:
-                                                        like_btn = art.locator('[aria-label="Like"]').first
-                                                        if like_btn.is_visible():
-                                                            like_btn.click()
-                                                            page.wait_for_timeout(350)
-                                                            logger.info(f"❤️ [Facebook] Лайкнули коментар від {u_name}: '{c_text[:30]}'")
-                                                    except Exception as l_err:
-                                                        logger.debug(f"FB comment like error: {l_err}")
+                                        c_text = " ".join(c_candidates).strip()
 
-                                                results.append(PlatformComment(
-                                                    comment_id=c_id_gen,
-                                                    post_id=r_url,
-                                                    post_url=r_url,
-                                                    user_id=c_id_gen,
-                                                    username=u_name,
-                                                    text=c_text,
-                                                    has_author_replied=has_rep,
-                                                    created_time=t_str,
-                                                    screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
-                                                ))
+                                        if u_name not in ("Bohdan GPT", "Author", "Автор") and c_text:
+                                            has_rep = any("bohdan" in s.lower() for s in txt_lines)
+                                            c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
+
+                                            # Авто-лайк на коментар (якщо не спам)
+                                            from services.lead_funnel.intent_detector import detect_comment_intent
+                                            intent_fb = detect_comment_intent(c_text)
+                                            if intent_fb.intent != "spam":
+                                                try:
+                                                    like_btn = art.locator('[aria-label="Like"]').first
+                                                    if like_btn.is_visible():
+                                                        like_btn.click()
+                                                        page.wait_for_timeout(350)
+                                                        logger.info(f"❤️ [Facebook] Лайкнули коментар від {u_name}: '{c_text[:30]}'")
+                                                except Exception as l_err:
+                                                    logger.debug(f"FB comment like error: {l_err}")
+
+                                            results.append(PlatformComment(
+                                                comment_id=c_id_gen,
+                                                post_id=r_url,
+                                                post_url=r_url,
+                                                user_id=c_id_gen,
+                                                username=u_name,
+                                                text=c_text,
+                                                has_author_replied=has_rep,
+                                                created_time=t_str,
+                                                screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
+                                            ))
                                 except Exception:
                                     continue
                         except Exception:
