@@ -158,17 +158,20 @@ class FacebookFunnel(BasePlatformFunnel):
                                     if not c_text or c_text in ("·", "Like", "Reply", "Send message", "Подобається", "Відповісти"):
                                         continue
 
-                                    # Шукаємо справжній comment_id з посилання
+                                    # Шукаємо справжній comment_id та посилання на профіль користувача
                                     real_c_id = None
                                     comm_post_url = wall_url
+                                    profile_url = None
                                     for lnk in art.locator('a').all():
                                         h = lnk.get_attribute('href') or ''
                                         m = re.search(r'comment_id=([0-9a-zA-Z_]+)', h)
-                                        if m:
+                                        if m and not real_c_id:
                                             real_c_id = m.group(1)
                                             if "/reel/" in h or "/posts/" in h:
                                                 comm_post_url = h.split("?")[0]
-                                            break
+                                        base_h = h.split("?")[0]
+                                        if base_h.startswith("https://www.facebook.com/") and not any(x in base_h for x in ['/reel/', '/posts/', '/watch/', '/photo/', '/help/']) and not profile_url:
+                                            profile_url = base_h
 
                                     if not real_c_id:
                                         real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
@@ -187,6 +190,11 @@ class FacebookFunnel(BasePlatformFunnel):
                                     ss_hash = hashlib.sha256(f"{u_name}_{real_c_id}".encode()).hexdigest()[:16]
                                     comment_ss = TEMP_DIR / f"fb_comment_{ss_hash}.png"
                                     try:
+                                        page.evaluate('''() => {
+                                            document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => el.remove());
+                                        }''')
+                                        art.scroll_into_view_if_needed()
+                                        page.wait_for_timeout(350)
                                         art.screenshot(path=str(comment_ss))
                                     except Exception:
                                         comment_ss = None
@@ -198,7 +206,7 @@ class FacebookFunnel(BasePlatformFunnel):
                                         comment_id=real_c_id,
                                         post_id=comm_post_url,
                                         post_url=comm_post_url,
-                                        user_id=u_name,
+                                        user_id=profile_url or u_name,
                                         username=u_name,
                                         text=c_text,
                                         has_author_replied=has_rep,
@@ -428,6 +436,10 @@ class FacebookFunnel(BasePlatformFunnel):
                     page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
                     page.wait_for_timeout(2000)
                     self._dismiss_fb_dialog(page)
+                    page.evaluate('''() => {
+                        document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => el.remove());
+                    }''')
+                    page.wait_for_timeout(300)
                     page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
                     browser.close()
                     return False, str(proof_path)
