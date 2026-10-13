@@ -321,23 +321,41 @@ class InstagramFunnel(BasePlatformFunnel):
                         page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=20000)
                         page.wait_for_timeout(2000)
                         msg_btn = page.locator('header [role="button"]:has-text("Message"), header button:has-text("Message"), header div:has-text("Message")').first
-                        if msg_btn.is_visible():
+                        if not msg_btn.is_visible():
+                            # Якщо кнопки Message немає в шапці (наприклад, кнопка Follow Back), шукаємо "Send message" у 3 крапках (...)
+                            dots_svg = page.locator('header svg[aria-label="Options"], header svg[aria-label="Параметри"], header [aria-label="Options"], header [aria-label="Параметри"]').first
+                            if dots_svg.is_visible():
+                                parent_btn = dots_svg.locator('xpath=ancestor::button').first
+                                if parent_btn.is_visible():
+                                    parent_btn.click()
+                                else:
+                                    dots_svg.click(force=True)
+                                page.wait_for_timeout(1000)
+                                menu_msg = page.locator('button:has-text("Send message"), button:has-text("Надіслати повідомлення"), [role="button"]:has-text("Send message"), [role="button"]:has-text("Надіслати повідомлення")').first
+                                if menu_msg.is_visible():
+                                    menu_msg.click()
+                                    page.wait_for_timeout(2500)
+                                    msg_btn = None
+                        elif msg_btn.is_visible():
                             msg_btn.click()
                             page.wait_for_timeout(2500)
-                            for _ in range(2):
-                                notif = page.locator('button:has-text("Not Now"), [role="button"]:has-text("Not Now")').first
-                                if notif.is_visible():
-                                    notif.click()
-                                    page.wait_for_timeout(500)
-                            msg_box = page.locator('div[role="textbox"][aria-label*="Message" i], div[contenteditable="true"], textarea').first
-                            if msg_box.is_visible():
-                                msg_box.fill(text)
+
+                        for _ in range(2):
+                            notif = page.locator('button:has-text("Not Now"), [role="button"]:has-text("Not Now"), button:has-text("Зараз ні")').first
+                            if notif.is_visible():
+                                notif.click()
                                 page.wait_for_timeout(500)
-                                page.keyboard.press("Enter")
-                                page.wait_for_timeout(1500)
-                                browser.close()
-                                logger.info(f"✅ Instagram Playwright DM надіслано до @{username} (через профіль)")
-                                return True, None
+
+                        msg_box = page.locator('div[role="textbox"], div[contenteditable="true"], textarea').first
+                        if msg_box.is_visible():
+                            msg_box.focus()
+                            msg_box.fill(text)
+                            page.wait_for_timeout(500)
+                            page.keyboard.press("Enter")
+                            page.wait_for_timeout(1500)
+                            browser.close()
+                            logger.info(f"✅ Instagram Playwright DM надіслано до @{username} (через профіль/3 крапки)")
+                            return True, None
 
                         # Спроба 2: Через direct/new
                         page.goto("https://www.instagram.com/direct/new/", wait_until="domcontentloaded", timeout=20000)
