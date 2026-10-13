@@ -164,15 +164,36 @@ class InstagramFunnel(BasePlatformFunnel):
                                         if any(w in c_content.lower() for w in ['like', 'likes', 'view all']):
                                             c_content = lines[idx-2]
 
-                                        # 2. Перевірка: чи автор ВЖЕ відповів у цьому ланцюжку (включно зі словами автора)
+                                        # 2. Перевірка: чи автор ВЖЕ відповів у цьому ланцюжку (включно зі словами автора та згорнутими відповідями)
                                         has_replied = False
                                         sub_window = lines[idx:min(len(lines), idx+6)]
                                         for sub in sub_window:
-                                            if (INSTAGRAM_USERNAME or 'bohdan.gpt').lower() in sub.lower() or any(w in sub.lower() for w in ['dm', 'sent', 'check', 'message', 'author', 'автор']):
+                                            sub_lower = sub.lower()
+                                            if (INSTAGRAM_USERNAME or 'bohdan.gpt').lower() in sub_lower or any(w in sub_lower for w in ['dm', 'sent', 'check', 'message', 'author', 'автор']):
+                                                has_replied = True
+                                                break
+                                            if 'view' in sub_lower and 'repl' in sub_lower:
+                                                has_replied = True
+                                                break
+                                            if 'replies' in sub_lower or ('reply' in sub_lower and any(c.isdigit() for c in sub)):
                                                 has_replied = True
                                                 break
 
                                         c_id = f"ig_{abs(hash(username + c_content + href))}"
+
+                                        # Індивідуальний скріншот рядка коментаря
+                                        c_ss = TEMP_DIR / f"ig_comment_{abs(hash(username + c_content))}.png"
+                                        try:
+                                            c_elem = page.locator('h3, a').filter(has_text=username).first
+                                            if c_elem.is_visible():
+                                                c_row = c_elem.locator('xpath=../../../../../..')
+                                                if c_row.is_visible() and len(c_row.inner_text()) < 300:
+                                                    c_row.screenshot(path=str(c_ss))
+                                                else:
+                                                    c_elem.screenshot(path=str(c_ss))
+                                        except Exception:
+                                            c_ss = comment_ss_path
+
                                         results.append(PlatformComment(
                                             comment_id=c_id,
                                             post_id=href,
@@ -182,7 +203,7 @@ class InstagramFunnel(BasePlatformFunnel):
                                             text=c_content,
                                             has_author_replied=has_replied,
                                             created_time=time_ago,
-                                            screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
+                                            screenshot_path=str(c_ss) if c_ss and c_ss.exists() else None
                                         ))
                         except Exception as post_err:
                             logger.debug(f"Помилка парсингу поста {post_url}: {post_err}")
@@ -218,6 +239,16 @@ class InstagramFunnel(BasePlatformFunnel):
 
                         buttons = [b.inner_text().strip() for b in page.locator('header button, header a').all() if b.inner_text().strip()]
                         
+                        # Робимо скріншот САМЕ ЦЬОГО користувача (шапки профілю з кнопкою Follow / Follow Back)
+                        header = page.locator('header').first
+                        try:
+                            if header.is_visible():
+                                header.screenshot(path=str(proof_path))
+                            else:
+                                page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
+                        except Exception:
+                            proof_path = None
+
                         # Якщо кнопка 'Follow Back' — користувач точно підписаний на нас!
                         is_following = any("follow back" in b.lower() for b in buttons)
 
@@ -237,11 +268,8 @@ class InstagramFunnel(BasePlatformFunnel):
                                     no_results = dialog.locator('text="No results found."').is_visible()
                                     is_following = not no_results
 
-                        # Робимо скріншот профілю з кнопками дій
-                        try:
-                            page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
-                        except Exception:
-                            proof_path = None
+                        browser.close()
+                        return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
 
                         browser.close()
                         return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)

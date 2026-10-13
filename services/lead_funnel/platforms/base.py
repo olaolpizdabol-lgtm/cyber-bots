@@ -17,6 +17,7 @@ class PlatformComment:
     has_author_replied: bool = False
     created_time: Optional[str] = None
     screenshot_path: Optional[str] = None
+    is_following: Optional[bool] = None
 
 
 class BasePlatformFunnel(ABC):

@@ -203,8 +203,24 @@ class FacebookFunnel(BasePlatformFunnel):
                                         c_text = " ".join(c_candidates).strip()
 
                                         if u_name not in ("Bohdan GPT", "Author", "Автор") and c_text:
-                                            has_rep = any("bohdan" in s.lower() for s in txt_lines)
+                                            # Перевірка: чи автор ВЖЕ відповів або у гілці вже є відповіді
+                                            has_rep = (
+                                                any("bohdan" in s.lower() for s in txt_lines) or
+                                                any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
+                                                any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
+                                                any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
+                                            )
                                             c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
+
+                                            # Індивідуальний скріншот САМОГО коментаря (чіткий доказ для Telegram)
+                                            comment_ss_path = TEMP_DIR / f"fb_comment_{abs(hash(u_name + c_text))}.png"
+                                            try:
+                                                art.screenshot(path=str(comment_ss_path))
+                                            except Exception:
+                                                comment_ss_path = None
+
+                                            # Детекція підписки у Facebook: бейдж 'Follow back' прямо в рядку коментаря
+                                            is_following_fb = any("follow back" in l.lower() for l in txt_lines)
 
                                             # Авто-лайк на коментар (якщо не спам)
                                             from services.lead_funnel.intent_detector import detect_comment_intent
@@ -228,7 +244,8 @@ class FacebookFunnel(BasePlatformFunnel):
                                                 text=c_text,
                                                 has_author_replied=has_rep,
                                                 created_time=t_str,
-                                                screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
+                                                screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None,
+                                                is_following=is_following_fb
                                             ))
                                 except Exception:
                                     continue
@@ -338,30 +355,16 @@ class FacebookFunnel(BasePlatformFunnel):
 
     def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
         """
-        Перевіряє статус підписки користувача на сторінку Bohdan GPT та повертає скріншот-доказ.
+        Перевіряє статус підписки користувача у Facebook.
+        У Facebook бейдж 'Follow back' відображається безпосередньо у коментарі користувача (скріншот якого вже збережено).
         """
-        proof_path = TEMP_DIR / f"fb_follower_proof_{abs(hash(username))}.png"
-        if FACEBOOK_STATE_FILE.exists():
-            try:
-                from playwright.sync_api import sync_playwright
-                with BROWSER_LOCK:
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
-                        ctx = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US", viewport={"width": 1280, "height": 800})
-                        page = ctx.new_page()
-                        page.goto(f"https://www.facebook.com/{FACEBOOK_PAGE_ID}/followers", wait_until="domcontentloaded", timeout=15000)
-                        page.wait_for_timeout(2000)
-                        content = page.locator("body").inner_text()
-                        is_following = username.lower() in content.lower()
-                        try:
-                            page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 600})
-                        except Exception:
-                            proof_path = None
-                        browser.close()
-                        return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
-            except Exception as e:
-                logger.debug(f"FB check_follower_status: {e}")
-
+        try:
+            from core.database import get_lead_comment
+            existing = get_lead_comment("facebook", user_id)
+            if existing:
+                return bool(existing.get("is_following")), None
+        except Exception:
+            pass
         return False, None
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:

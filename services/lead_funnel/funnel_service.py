@@ -255,8 +255,12 @@ class LeadFunnelService:
 
             if intent_res.is_lead_magnet():
                 stats["leads"] += 1
-                # 6. Перевірка підписки з фото-доказом (скріншотом профілю)
-                is_following, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
+                # 6. Перевірка підписки: якщо вже визначено з коментаря (comm.is_following) — використовуємо напряму
+                if comm.is_following is not None:
+                    is_following = comm.is_following
+                    proof_photo = None
+                else:
+                    is_following, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
 
                 # Збираємо скріншоти для звіту в Telegram:
                 lead_photos = []
@@ -290,9 +294,9 @@ class LeadFunnelService:
                     notify_telegram_lead(
                         f"🌉 <b>Bridge Lead ({platform_name.upper()}):</b>\n"
                         f"• Користувач: <code>@{comm.username}</code>\n"
-                        f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                        f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
                         f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                        f"⚡ Надіслано відповідь із посиланням на IG bio @bohdan.gpt!",
+                        f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_txt}\"</i>",
                         photo_paths=lead_photos
                     )
                     continue
@@ -329,10 +333,10 @@ class LeadFunnelService:
                             f"⚡️ <b>Lead Magnet DM Delivered!</b>\n"
                             f"• Платформа: <b>{platform_name.upper()}</b>\n"
                             f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
-                            f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                            f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
                             f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                            f"📸 Доказ (скріншот коментаря та підписки) додано!\n"
-                            f"🚀 Надіслано 100+ Prompt Vault у Direct!",
+                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>\n"
+                            f"• 📩 <b>Надіслано в Direct:</b>\n<code>{dm_text}</code>",
                             photo_paths=lead_photos
                         )
                     elif dm_err == "private_dm":
@@ -356,7 +360,8 @@ class LeadFunnelService:
                             f"⚠️ <b>Закритий Direct у користувача:</b>\n"
                             f"• Платформа: <b>{platform_name.upper()}</b>\n"
                             f"• Користувач: <code>@{comm.username}</code>\n"
-                            f"💬 Бот відповів у коментарі з проханням відкрити чат.",
+                            f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
+                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{DEFAULT_REPLY_PRIVATE_DM}\"</i>",
                             photo_paths=lead_photos
                         )
                 else:
@@ -382,10 +387,9 @@ class LeadFunnelService:
                         f"⏳ <b>Очікує підписки (Pending Follow):</b>\n"
                         f"• Платформа: <b>{platform_name.upper()}</b>\n"
                         f"• Користувач: <code>@{comm.username}</code> (Не підписаний ❌)\n"
-                        f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                        f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
                         f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                        f"📸 Доказ (скріншот коментаря та профілю) додано!\n"
-                        f"💬 Бот відповів у коментарях із проханням підписатися.\n"
+                        f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>\n"
                         f"⚡ Як тільки підпишеться — бот автоматично скине Prompt Vault у Direct!",
                         photo_paths=lead_photos
                     )
@@ -409,6 +413,13 @@ class LeadFunnelService:
                     is_following=False,
                     status="replied_public_only",
                     dm_sent=False
+                )
+                notify_telegram_lead(
+                    f"🤖 <b>AI Відповідь на коментар ({platform_name.upper()}):</b>\n"
+                    f"• Користувач: <code>@{comm.username}</code>\n"
+                    f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
+                    f"• 💬 <b>Згенерована відповідь бота:</b>\n<i>\"{intent_res.ai_reply_text}\"</i>",
+                    photo_paths=[comm.screenshot_path] if getattr(comm, "screenshot_path", None) and Path(comm.screenshot_path).exists() else None
                 )
                 time.sleep(random.uniform(8.0, 16.0))
 
@@ -445,7 +456,7 @@ class LeadFunnelService:
                         f"• Платформа: <b>{platform.upper()}</b>\n"
                         f"• Користувач: <code>@{u_name}</code>\n"
                         f"• Щойно підписався на профіль після нагадування! 🚀\n"
-                        f"⚡️ 100+ Prompt Vault автоматично відправлено в Direct!"
+                        f"• 📩 <b>Надіслано в Direct:</b>\n<code>{dm_text}</code>"
                     )
                 elif err == "private_dm":
                     update_lead_status(lead["id"], status="dm_failed_private", is_following=True)
