@@ -51,8 +51,8 @@ class InstagramFunnel(BasePlatformFunnel):
         self._client = cl
         return cl
 
-    def fetch_recent_unanswered_comments(self, limit_posts: int = 5) -> List[PlatformComment]:
-        """Отримує коментарі під останніми Reels/дописами"""
+    def fetch_recent_unanswered_comments(self, limit_posts: int = 6) -> List[PlatformComment]:
+        """Отримує коментарі під останніми Reels/дописами (API + Playwright fallback)"""
         comments: List[PlatformComment] = []
         cl = self._get_client()
         try:
@@ -62,7 +62,6 @@ class InstagramFunnel(BasePlatformFunnel):
                 media_id = m.id
                 raw_comms = cl.media_comments(media_id)
                 for c in raw_comms:
-                    # Чи автор вже відповідав?
                     has_author = (c.user.username == (INSTAGRAM_USERNAME or "bohdan.gpt"))
                     if not has_author:
                         comments.append(PlatformComment(
@@ -78,7 +77,74 @@ class InstagramFunnel(BasePlatformFunnel):
         except Exception as e:
             logger.debug(f"Instagram instagrapi fetch comments: {e}")
 
+        # Фолбек на браузерну сесію Playwright якщо через instagrapi повернуто 0
+        if not comments:
+            comments = self._fetch_comments_via_browser(limit_posts=limit_posts)
+
         return comments
+
+    def _fetch_comments_via_browser(self, limit_posts: int = 6) -> List[PlatformComment]:
+        """Парсинг коментарів через Playwright браузерну сесію (надійний фолбек)"""
+        results: List[PlatformComment] = []
+        state_file = DATA_DIR / "instagram_state.json"
+        if not state_file.exists():
+            return results
+
+        try:
+            from playwright.sync_api import sync_playwright
+            from core.browser_lock import BROWSER_LOCK
+            with BROWSER_LOCK:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    context = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
+                    page = context.new_page()
+                    page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(2500)
+                    links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
+
+                    for href in links[:limit_posts]:
+                        if not href:
+                            continue
+                        post_url = f"https://www.instagram.com{href}"
+                        page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2500)
+
+                        full_text = page.locator('article, [role="dialog"], main').first.inner_text()
+                        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+
+                        for idx, line in enumerate(lines):
+                            if line.lower() == 'reply' and idx >= 2:
+                                comment_text = lines[idx-1]
+                                username = None
+                                time_ago = None
+                                for back in range(2, 6):
+                                    if idx - back >= 0:
+                                        candidate = lines[idx - back]
+                                        if any(unit in candidate for unit in ['m', 'h', 'd', 'w', 'Edited']) and len(candidate) <= 15:
+                                            time_ago = candidate
+                                            if idx - back - 1 >= 0:
+                                                username = lines[idx - back - 1]
+                                            break
+                                if username and username != (INSTAGRAM_USERNAME or 'bohdan.gpt') and 'tag a' not in username.lower() and 'drop an' not in username.lower():
+                                    c_content = comment_text
+                                    if any(w in c_content.lower() for w in ['like', 'likes', 'view all']):
+                                        c_content = lines[idx-2]
+
+                                    c_id = f"ig_{abs(hash(username + c_content + href))}"
+                                    results.append(PlatformComment(
+                                        comment_id=c_id,
+                                        post_id=href,
+                                        post_url=post_url,
+                                        user_id=username,
+                                        username=username,
+                                        text=c_content,
+                                        has_author_replied=False,
+                                        created_time=time_ago
+                                    ))
+                    browser.close()
+        except Exception as e:
+            logger.debug(f"Instagram Playwright fetch comments: {e}")
+        return results
 
     def is_user_following(self, user_id: str, username: str) -> bool:
         """Перевіряє, чи підписаний юзер на @bohdan.gpt"""
