@@ -23,8 +23,32 @@ from services.lead_funnel.platforms.instagram import instagram_funnel
 from services.lead_funnel.platforms.facebook import facebook_funnel
 from services.lead_funnel.platforms.tiktok import tiktok_funnel
 from services.lead_funnel.platforms.youtube import youtube_funnel
+import requests
+from config import CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS
 
 logger = logging.getLogger("funnel_service")
+
+
+def notify_telegram_lead(html_text: str):
+    """Надсилає миттєве Telegram сповіщення власнику бота про нових лідів"""
+    token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
+    if not token or not ALLOWED_USER_IDS:
+        return
+    for uid in ALLOWED_USER_IDS:
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": uid,
+                    "text": html_text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True
+                },
+                timeout=5
+            )
+        except Exception:
+            pass
+
 
 # Варіанти відповідей у коментарях для підписаних користувачів (Spintax / рандомізація проти спам-фільтрів)
 DEFAULT_REPLIES_FOLLOWER = [
@@ -160,6 +184,14 @@ class LeadFunnelService:
                             dm_sent=True
                         )
                         stats["dms_sent"] += 1
+                        notify_telegram_lead(
+                            f"⚡️ <b>Lead Magnet DM Delivered!</b>\n"
+                            f"• Платформа: <b>{platform_name.upper()}</b>\n"
+                            f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
+                            f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                            f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
+                            f"🚀 Надіслано 100+ Prompt Vault у Direct!"
+                        )
                     elif dm_err == "private_dm":
                         # Закритий direct
                         handler.reply_to_comment(comm.comment_id, DEFAULT_REPLY_PRIVATE_DM, post_id=comm.post_id)
@@ -176,6 +208,12 @@ class LeadFunnelService:
                             is_following=True,
                             status="dm_failed_private",
                             dm_sent=False
+                        )
+                        notify_telegram_lead(
+                            f"⚠️ <b>Закритий Direct у користувача:</b>\n"
+                            f"• Платформа: <b>{platform_name.upper()}</b>\n"
+                            f"• Користувач: <code>@{comm.username}</code>\n"
+                            f"💬 Бот відповів у коментарі з проханням відкрити чат."
                         )
                 else:
                     # Сценарій Б: Людина НЕ підписана -> просимо підписатися та додаємо в чергу
@@ -246,6 +284,13 @@ class LeadFunnelService:
                 if ok:
                     update_lead_status(lead["id"], status="converted", is_following=True, dm_sent=True)
                     converted += 1
+                    notify_telegram_lead(
+                        f"🎉 <b>New Follower Converted!</b>\n"
+                        f"• Платформа: <b>{platform.upper()}</b>\n"
+                        f"• Користувач: <code>@{u_name}</code>\n"
+                        f"• Щойно підписався на профіль після нагадування! 🚀\n"
+                        f"⚡️ 100+ Prompt Vault автоматично відправлено в Direct!"
+                    )
                 elif err == "private_dm":
                     update_lead_status(lead["id"], status="dm_failed_private", is_following=True)
             else:

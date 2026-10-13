@@ -17,6 +17,8 @@ ENV_FILES_MAP = [
     ("TIKTOK_CHANNEL_STATE_B64", BASE_DIR / "data" / "tiktok_channel_state.json"),
     ("TIKTOK_STATE_B64", BASE_DIR / "data" / "tiktok_state.json"),
     ("SNAPCHAT_STATE_B64", BASE_DIR / "data" / "snapchat_state.json"),
+    ("FACEBOOK_STATE_B64", BASE_DIR / "data" / "facebook_state.json"),
+    ("INSTAGRAM_STATE_B64", BASE_DIR / "data" / "instagram_state.json"),
 ]
 
 def restore_sessions_from_env():

@@ -135,6 +135,7 @@ class BotStates(StatesGroup):
     waiting_for_new_trigger = State()
     waiting_for_lead_link = State()
     waiting_for_lead_dm = State()
+    waiting_for_funnel_test_input = State()
 
 
 # ---------------------------------------------------------
@@ -2607,4 +2608,65 @@ async def callback_funnel_stats(call: CallbackQuery):
     )
     await call.message.edit_text(text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
     await call.answer()
+
+
+@router.callback_query(F.data == "funnel_test_comment")
+async def callback_funnel_test_comment(call: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_funnel_test_input)
+    text = (
+        "🧪 <b>AI Тестування розпізнавання коментарів:</b>\n\n"
+        "Надішліть будь-який приклад коментаря, щоб побачити як система його класифікує та що саме згенерує у відповідь.\n\n"
+        "<i>Приклади:</i>\n"
+        "• <code>GPT</code>\n"
+        "• <code>Can you please send me the prompts?</code>\n"
+        "• <code>Where can I download this list?</code>\n"
+        "• <code>Awesome video bro, love your setup!</code>\n"
+        "• <code>What camera did you use for this?</code>"
+    )
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer()
+
+
+@router.message(BotStates.waiting_for_funnel_test_input)
+async def message_funnel_test_input(message: Message, state: FSMContext):
+    test_comment = (message.text or "").strip()
+    status_msg = await message.answer("⏳ <i>Аналізую намір коментаря через Hybrid AI Detector...</i>", parse_mode="HTML")
+
+    loop = asyncio.get_event_loop()
+    intent_res = await loop.run_in_executor(None, detect_comment_intent, test_comment)
+
+    dm_text = lead_funnel_service.get_formatted_dm_text()
+    if intent_res.is_lead_magnet():
+        intent_badge = "🎯 <b>LEAD MAGNET REQUEST (Видача лід-магніту)</b>"
+        action_desc = (
+            "<b>1. Якщо користувач ПІДПИСАНИЙ:</b>\n"
+            "• 💬 Відповідь у коментарі: <code>Check your DM's! ⚡</code>\n"
+            f"• 📩 Повідомлення в Direct:\n<pre>{html.escape(dm_text[:250])}...</pre>\n\n"
+            "<b>2. Якщо користувач НЕ ПІДПИСАНИЙ:</b>\n"
+            "• 💬 Відповідь у коментарі: <code>Almost yours! 🎁 Hit Follow on the page, and I'll send the 100+ prompt vault straight to your DMs! ⚡</code>\n"
+            "• ⏳ Запис у чергу очікування на 48 годин до підписки."
+        )
+    elif intent_res.intent == "question_chat":
+        intent_badge = "💬 <b>QUESTION / CHAT (Питання або комплімент)</b>"
+        action_desc = (
+            f"• 🤖 <b>AI-відповідь Боді у коментарі (English):</b>\n"
+            f"<i>\"{html.escape(intent_res.ai_reply_text or '')}\"</i>\n\n"
+            "<i>(Direct НЕ надсилається, підтримується живий engagement під постом)</i>"
+        )
+    else:
+        intent_badge = "🗑️ <b>SPAM / IRRELEVANT</b>"
+        action_desc = "<i>Коментар проігноровано (спам або шум).</i>"
+
+    diag_text = (
+        f"🧪 <b>Результат тестування коментаря:</b>\n\n"
+        f"Вхідний коментар: <i>\"{html.escape(test_comment)}\"</i>\n\n"
+        f"• Результат: {intent_badge}\n"
+        f"• Знайдений тригер: <code>{intent_res.matched_trigger or 'None'}</code>\n"
+        f"• Впевненість (Confidence): <b>{round(intent_res.confidence * 100)}%</b>\n\n"
+        f"{action_desc}"
+    )
+
+    await status_msg.edit_text(diag_text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
+    await state.clear()
+
 

@@ -402,6 +402,9 @@ def get_lead_funnel_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Детальна статистика", callback_data="funnel_stats")
         ],
         [
+            InlineKeyboardButton(text="🧪 Протестувати коментар (AI Test)", callback_data="funnel_test_comment")
+        ],
+        [
             InlineKeyboardButton(text="◀️ Головне меню", callback_data="menu_back")
         ]
     ]
