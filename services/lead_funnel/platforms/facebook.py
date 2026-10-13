@@ -11,6 +11,7 @@ import re
 import time
 import json
 import logging
+import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 
@@ -145,16 +146,16 @@ class FacebookFunnel(BasePlatformFunnel):
                                     c_candidates = []
                                     t_str = None
                                     for l in txt_lines[1:]:
-                                        if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Like", "Reply", "Send message", "Hide"):
+                                        if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Головний шанувальник", "Like", "Reply", "Send message", "Hide", "Подобається", "Коментувати", "Відповісти", "Надіслати повідомлення", "Сховати", "Поділитися", "Share"):
                                             continue
-                                        if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5) or l.isdigit():
+                                        if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's', 'хв', 'год', 'дн', 'днів']) and len(l) <= 6) or l.isdigit():
                                             if not t_str:
                                                 t_str = l
                                             continue
                                         c_candidates.append(l)
 
                                     c_text = " ".join(c_candidates).strip()
-                                    if not c_text or c_text in ("·", "Like", "Reply", "Send message"):
+                                    if not c_text or c_text in ("·", "Like", "Reply", "Send message", "Подобається", "Відповісти"):
                                         continue
 
                                     # Шукаємо справжній comment_id з посилання
@@ -170,7 +171,6 @@ class FacebookFunnel(BasePlatformFunnel):
                                             break
 
                                     if not real_c_id:
-                                        import hashlib
                                         real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
 
                                     # Перевірка: чи автор ВЖЕ відповів (у тексті або згорнута відповідь)
@@ -178,18 +178,21 @@ class FacebookFunnel(BasePlatformFunnel):
                                         any("bohdan" in s.lower() for s in txt_lines) or
                                         any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
                                         any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
-                                        any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
+                                        any("переглянути" in s.lower() and "відповід" in s.lower() for s in txt_lines) or
+                                        any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines) or
+                                        any("відповід" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
                                     )
 
                                     # Індивідуальний скріншот коментаря
-                                    comment_ss = TEMP_DIR / f"fb_comment_{real_c_id[:12]}.png"
+                                    ss_hash = hashlib.sha256(f"{u_name}_{real_c_id}".encode()).hexdigest()[:16]
+                                    comment_ss = TEMP_DIR / f"fb_comment_{ss_hash}.png"
                                     try:
                                         art.screenshot(path=str(comment_ss))
                                     except Exception:
                                         comment_ss = None
 
                                     # Детекція підписки у рядку коментаря
-                                    is_following_fb = any("follow back" in l.lower() for l in txt_lines)
+                                    is_following_fb = any("follow back" in l.lower() or "стежити" in l.lower() or "відстежувати" in l.lower() for l in txt_lines)
 
                                     results.append(PlatformComment(
                                         comment_id=real_c_id,
@@ -258,16 +261,16 @@ class FacebookFunnel(BasePlatformFunnel):
                                             c_candidates = []
                                             t_str = None
                                             for l in txt_lines[1:]:
-                                                if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Like", "Reply", "Send message", "Hide"):
+                                                if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Головний шанувальник", "Like", "Reply", "Send message", "Hide", "Подобається", "Коментувати", "Відповісти", "Надіслати повідомлення", "Сховати", "Поділитися", "Share"):
                                                     continue
-                                                if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5) or l.isdigit():
+                                                if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's', 'хв', 'год', 'дн', 'днів']) and len(l) <= 6) or l.isdigit():
                                                     if not t_str:
                                                         t_str = l
                                                     continue
                                                 c_candidates.append(l)
 
                                             c_text = " ".join(c_candidates).strip()
-                                            if not c_text or c_text in ("·", "Like", "Reply", "Send message"):
+                                            if not c_text or c_text in ("·", "Like", "Reply", "Send message", "Подобається", "Відповісти"):
                                                 continue
 
                                             real_c_id = None
@@ -279,7 +282,6 @@ class FacebookFunnel(BasePlatformFunnel):
                                                     break
 
                                             if not real_c_id:
-                                                import hashlib
                                                 real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
 
                                             # Уникаємо дублювання, якщо цей коментар уже знайдено на стіні
@@ -290,16 +292,19 @@ class FacebookFunnel(BasePlatformFunnel):
                                                 any("bohdan" in s.lower() for s in txt_lines) or
                                                 any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
                                                 any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
-                                                any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
+                                                any("переглянути" in s.lower() and "відповід" in s.lower() for s in txt_lines) or
+                                                any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines) or
+                                                any("відповід" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
                                             )
 
-                                            comment_ss = TEMP_DIR / f"fb_comment_{real_c_id[:12]}.png"
+                                            ss_hash = hashlib.sha256(f"{u_name}_{real_c_id}".encode()).hexdigest()[:16]
+                                            comment_ss = TEMP_DIR / f"fb_comment_{ss_hash}.png"
                                             try:
                                                 art.screenshot(path=str(comment_ss))
                                             except Exception:
                                                 comment_ss = None
 
-                                            is_following_fb = any("follow back" in l.lower() for l in txt_lines)
+                                            is_following_fb = any("follow back" in l.lower() or "стежити" in l.lower() or "відстежувати" in l.lower() for l in txt_lines)
 
                                             results.append(PlatformComment(
                                                 comment_id=real_c_id,
@@ -396,16 +401,39 @@ class FacebookFunnel(BasePlatformFunnel):
 
     def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
         """
-        Перевіряє статус підписки користувача у Facebook.
-        У Facebook бейдж 'Follow back' відображається безпосередньо у коментарі користувача (скріншот якого вже збережено).
+        Перевіряє статус підписки користувача у Facebook та робить скріншот шапки профілю користувача для Telegram-звіту.
         """
+        import hashlib
+        u_hash = hashlib.sha256((username or user_id).encode()).hexdigest()[:16]
+        proof_path = TEMP_DIR / f"fb_proof_{u_hash}.png"
+
+        if proof_path.exists():
+            return False, str(proof_path)
+
         try:
-            from core.database import get_lead_comment
-            existing = get_lead_comment("facebook", user_id)
-            if existing:
-                return bool(existing.get("is_following")), None
-        except Exception:
-            pass
+            from core.browser_lock import BROWSER_LOCK
+            from playwright.sync_api import sync_playwright
+            with BROWSER_LOCK:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    ctx = browser.new_context(
+                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        locale="en-US",
+                        viewport={"width": 1280, "height": 800}
+                    )
+                    page = ctx.new_page()
+                    target_url = user_id if str(user_id).startswith("http") else (
+                        f"https://www.facebook.com/{username}" if username and " " not in username else f"https://www.facebook.com/{user_id}"
+                    )
+                    page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_timeout(2000)
+                    self._dismiss_fb_dialog(page)
+                    page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
+                    browser.close()
+                    return False, str(proof_path)
+        except Exception as p_err:
+            logger.debug(f"FB check_follower_status screenshot error: {p_err}")
+
         return False, None
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:

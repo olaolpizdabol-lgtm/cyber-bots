@@ -2617,14 +2617,29 @@ async def callback_funnel_run_scan(call: CallbackQuery):
 @router.callback_query(F.data == "funnel_stats")
 async def callback_funnel_stats(call: CallbackQuery):
     stats = get_lead_funnel_stats()
+    by_p = stats.get("by_platform", {})
+
+    p_lines = []
+    platform_icons = {"instagram": "📸 Instagram", "facebook": "📘 Facebook", "tiktok": "🎵 TikTok", "youtube": "▶️ YouTube"}
+    for p_key, p_info in by_p.items():
+        title = platform_icons.get(p_key, p_key.capitalize())
+        p_lines.append(f"  • {title}: <b>{p_info['total']}</b> ком. | <b>{p_info['leads']}</b> лідів | <b>{p_info['dms']}</b> DM")
+
+    plat_block = "\n".join(p_lines) if p_lines else "  <i>Немає даних за платформами</i>"
+
     text = (
-        "📊 <b>Повна аналітика Lead Magnet Funnel:</b>\n\n"
+        "📊 <b>Детальна аналітика Lead Magnet Funnel:</b>\n\n"
         f"• Всього проаналізовано коментарів: <b>{stats['total_comments']}</b>\n"
-        f"• Запитів лід-магніту (leads): <b>{stats['total_leads']}</b>\n"
+        f"• Знайдено запитів лід-магніту: <b>{stats['total_leads']}</b>\n"
         f"• Успішно доставлено лід-магнітів: <b>{stats['dms_delivered']}</b>\n"
-        f"• Конвертовано після нагадування: <b>{stats['converted_after_follow']}</b>\n"
-        f"• Наразі в черзі на підписку: <b>{stats['pending_follow']}</b>\n"
+        f"• Конвертовано після підписки: <b>{stats['converted_after_follow']}</b>\n"
+        f"• Наразі очікують підписки: <b>{stats['pending_follow']}</b>\n"
+        f"• Відповідей на питання (AI Chat): <b>{stats['ai_chat_replies']}</b>\n"
         f"• Помилки через закритий Direct: <b>{stats['failed_private_dms']}</b>\n\n"
+        "👥 <b>Співвідношення підписників:</b>\n"
+        f"• Підписані: <b>{stats['followers_count']}</b> ✅\n"
+        f"• Не підписані (потрібна підписка): <b>{stats['non_followers_count']}</b> ⏳\n\n"
+        f"📱 <b>Розбивка за платформами:</b>\n{plat_block}\n\n"
         "⚡ <i>Система працює повністю в фоновому режимі та конвертує коментарі у підписників і лідів.</i>"
     )
     await call.message.edit_text(text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")

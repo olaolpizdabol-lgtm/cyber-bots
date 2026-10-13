@@ -260,12 +260,9 @@ class LeadFunnelService:
 
             if intent_res.is_lead_magnet():
                 stats["leads"] += 1
-                # 6. Перевірка підписки: якщо вже визначено з коментаря (comm.is_following) — використовуємо напряму
-                if comm.is_following is not None:
-                    is_following = comm.is_following
-                    proof_photo = None
-                else:
-                    is_following, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
+                # 6. Перевірка підписки та отримання фото-доказу профілю (proof_photo)
+                status_from_check, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
+                is_following = comm.is_following if comm.is_following is not None else status_from_check
 
                 # Збираємо скріншоти для звіту в Telegram:
                 lead_photos = []

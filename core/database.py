@@ -1535,7 +1535,7 @@ def update_lead_status(
 
 
 def get_lead_funnel_stats() -> Dict[str, Any]:
-    """Повертає детальну аналітику воронки"""
+    """Повертає повну детальну аналітику воронки (загальну та по платформах)"""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1545,18 +1545,51 @@ def get_lead_funnel_stats() -> Dict[str, Any]:
                 SUM(CASE WHEN status IN ('sent_dm', 'converted') THEN 1 ELSE 0 END) as dms_delivered,
                 SUM(CASE WHEN status = 'converted' THEN 1 ELSE 0 END) as converted_after_follow,
                 SUM(CASE WHEN status = 'pending_follow' THEN 1 ELSE 0 END) as pending_follow,
-                SUM(CASE WHEN status = 'dm_failed_private' THEN 1 ELSE 0 END) as failed_private_dms
+                SUM(CASE WHEN status = 'dm_failed_private' THEN 1 ELSE 0 END) as failed_private_dms,
+                SUM(CASE WHEN status = 'replied_public_only' THEN 1 ELSE 0 END) as replied_public,
+                SUM(CASE WHEN status LIKE 'already_%' THEN 1 ELSE 0 END) as already_handled,
+                SUM(CASE WHEN detected_intent = 'question_chat' THEN 1 ELSE 0 END) as ai_chat_replies,
+                SUM(CASE WHEN is_following = 1 THEN 1 ELSE 0 END) as followers_count,
+                SUM(CASE WHEN is_following = 0 THEN 1 ELSE 0 END) as non_followers_count
             FROM lead_funnel_comments
         """)
         row = cursor.fetchone()
-        return {
+        stats = {
             "total_comments": row["total_comments"] or 0,
             "total_leads": row["total_leads"] or 0,
             "dms_delivered": row["dms_delivered"] or 0,
             "converted_after_follow": row["converted_after_follow"] or 0,
             "pending_follow": row["pending_follow"] or 0,
-            "failed_private_dms": row["failed_private_dms"] or 0
+            "failed_private_dms": row["failed_private_dms"] or 0,
+            "replied_public": row["replied_public"] or 0,
+            "already_handled": row["already_handled"] or 0,
+            "ai_chat_replies": row["ai_chat_replies"] or 0,
+            "followers_count": row["followers_count"] or 0,
+            "non_followers_count": row["non_followers_count"] or 0,
         }
+
+        # Розбивка по платформах
+        cursor.execute("""
+            SELECT 
+                platform,
+                COUNT(*) as total,
+                SUM(CASE WHEN detected_intent = 'lead_magnet' THEN 1 ELSE 0 END) as leads,
+                SUM(CASE WHEN status IN ('sent_dm', 'converted') THEN 1 ELSE 0 END) as dms,
+                SUM(CASE WHEN status = 'pending_follow' THEN 1 ELSE 0 END) as pending
+            FROM lead_funnel_comments
+            GROUP BY platform
+        """)
+        by_platform = {}
+        for r in cursor.fetchall():
+            p_name = r["platform"]
+            by_platform[p_name] = {
+                "total": r["total"] or 0,
+                "leads": r["leads"] or 0,
+                "dms": r["dms"] or 0,
+                "pending": r["pending"] or 0
+            }
+        stats["by_platform"] = by_platform
+        return stats
 
 
 def record_vault_click(source: str, ip: Optional[str] = None, user_agent: Optional[str] = None):
