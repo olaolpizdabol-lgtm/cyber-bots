@@ -331,6 +331,17 @@ def init_db():
         for dt in default_triggers:
             cursor.execute("INSERT OR IGNORE INTO lead_funnel_triggers (keyword) VALUES (?)", (dt.strip().upper(),))
 
+        # Трекінг переходів на сайт Vault за джерелами (?from=instagram / tiktok / youtube / facebook)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lead_vault_clicks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                ip TEXT,
+                user_agent TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute("SELECT value FROM settings WHERE key = 'ai_prompt'")
         row = cursor.fetchone()
         if not row:
@@ -1517,6 +1528,29 @@ def get_lead_funnel_stats() -> Dict[str, Any]:
             "pending_follow": row["pending_follow"] or 0,
             "failed_private_dms": row["failed_private_dms"] or 0
         }
+
+
+def record_vault_click(source: str, ip: Optional[str] = None, user_agent: Optional[str] = None):
+    """Фіксує перехід на сайт Vault за реферальним параметром (?from=...)"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        clean_src = (source or "direct").strip().lower()[:50]
+        cursor.execute(
+            "INSERT INTO lead_vault_clicks (source, ip, user_agent) VALUES (?, ?, ?)",
+            (clean_src, str(ip or "")[:50], str(user_agent or "")[:250])
+        )
+        conn.commit()
+
+
+def get_vault_click_stats() -> Dict[str, int]:
+    """Повертає статистику переходів на сайт Vault за джерелами"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT source, COUNT(*) as cnt FROM lead_vault_clicks GROUP BY source")
+        rows = cursor.fetchall()
+        stats = {r["source"]: r["cnt"] for r in rows}
+        stats["total"] = sum(stats.values())
+        return stats
 
 
 init_db()

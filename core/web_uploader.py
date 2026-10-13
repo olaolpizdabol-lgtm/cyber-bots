@@ -247,10 +247,45 @@ async def handle_upload(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok", "path": saved_path})
 
 
+VAULT_HTML_PATH = BASE_DIR / "public" / "vault" / "index.html"
+VAULT_IMAGES_DIR = BASE_DIR / "public" / "vault" / "images"
+
+
+async def handle_vault(request: web.Request) -> web.Response:
+    """Обробляє запити до сторінки PROMPT VAULT з реферальним трекінгом (?from=...)"""
+    from_source = request.query.get("from", "direct").strip().lower()
+    user_agent = request.headers.get("User-Agent", "")
+    ip = request.remote or request.headers.get("X-Forwarded-For", "")
+
+    # Логуємо перехід для аналітики джерел (Instagram, TikTok, YouTube, Facebook)
+    try:
+        from core.database import record_vault_click
+        record_vault_click(from_source, ip=ip, user_agent=user_agent)
+        logger.info(f"🌐 [Vault Hit] Відвідувач із джерела: '{from_source}' (IP: {ip})")
+    except Exception as e:
+        logger.debug(f"Помилка трекінгу кліка Vault: {e}")
+
+    if VAULT_HTML_PATH.exists():
+        return web.FileResponse(str(VAULT_HTML_PATH))
+    return web.Response(text="Prompt Vault page not found on server", status=404)
+
+
 def create_web_uploader_app(bot=None) -> web.Application:
     app = web.Application(client_max_size=500 * 1024 * 1024)  # 500 MB max file
     app["bot"] = bot
-    app.router.add_get("/", handle_index)
+
+    # Головна сторінка або редірект
+    app.router.add_get("/", handle_vault)
     app.router.add_get("/upload", handle_index)
     app.router.add_post("/api/upload", handle_upload)
+
+    # 🚀 PROMPT VAULT САЙТ ТА МЕДІА РЕСУРСИ
+    app.router.add_get("/vault", handle_vault)
+    app.router.add_get("/vault/", handle_vault)
+
+    if VAULT_IMAGES_DIR.exists():
+        app.router.add_static("/vault/images", str(VAULT_IMAGES_DIR))
+        app.router.add_static("/images", str(VAULT_IMAGES_DIR))
+
     return app
+

@@ -46,7 +46,8 @@ from core.database import (
     get_lead_funnel_triggers,
     add_lead_funnel_trigger,
     remove_lead_funnel_trigger,
-    get_lead_funnel_stats
+    get_lead_funnel_stats,
+    get_vault_click_stats
 )
 from core.security_guard import security_guard
 from core.media_processor import media_processor
@@ -2425,23 +2426,35 @@ async def callback_menu_lead_funnel(call: CallbackQuery):
     triggers = get_lead_funnel_triggers(only_active=True)
     triggers_str = ", ".join([f"<code>{t}</code>" for t in triggers]) if triggers else "<i>немає</i>"
     stats = get_lead_funnel_stats()
-    lead_link = lead_funnel_service.get_lead_link()
-    dm_preview = lead_funnel_service.get_formatted_dm_text()
+    click_stats = get_vault_click_stats()
+
+    link_ig = lead_funnel_service.get_lead_link("instagram")
+    link_fb = lead_funnel_service.get_lead_link("facebook")
+    link_tt = lead_funnel_service.get_lead_link("tiktok")
+    link_yt = lead_funnel_service.get_lead_link("youtube")
+    dm_preview = lead_funnel_service.get_formatted_dm_text("instagram")
 
     text = (
-        "🎯 <b>Lead Magnet Funnel (Автоворонка Коментарі ➡️ Direct)</b>\n\n"
+        "🎯 <b>Lead Magnet Funnel & PROMPT VAULT</b>\n\n"
         "Автоматично відстежує коментарі на <b>Instagram, Facebook, TikTok та YouTube</b>, "
-        "перевіряє статус підписки, надсилає 100+ промптів у Direct і відповідає на коментарі англійською мовою.\n\n"
+        "перевіряє підписку, надсилає лід-магніт у Direct і відповідає в коментарях англійською.\n\n"
         f"🎯 <b>Активні тригери ({len(triggers)}):</b>\n{triggers_str}\n\n"
-        f"🔗 <b>Цільове посилання (лінк):</b>\n<code>{html.escape(lead_link)}</code>\n\n"
+        "🌐 <b>Динамічні реферальні посилання на Vault:</b>\n"
+        f"• 📸 <b>Instagram:</b> <code>{html.escape(link_ig)}</code>\n"
+        f"• 📘 <b>Facebook:</b> <code>{html.escape(link_fb)}</code>\n"
+        f"• 🎵 <b>TikTok:</b> <code>{html.escape(link_tt)}</code>\n"
+        f"• ▶️ <b>YouTube:</b> <code>{html.escape(link_yt)}</code>\n\n"
+        "📈 <b>Реальні переходи (кліки) на сайт Vault:</b>\n"
+        f"• Всього відвідувачів: <b>{click_stats.get('total', 0)}</b>\n"
+        f"• 📸 IG: <b>{click_stats.get('instagram', 0)}</b> | 📘 FB: <b>{click_stats.get('facebook', 0)}</b>\n"
+        f"• 🎵 TT: <b>{click_stats.get('tiktok', 0)}</b> | ▶️ YT: <b>{click_stats.get('youtube', 0)}</b> | Прямі: <b>{click_stats.get('direct', 0)}</b>\n\n"
         f"📊 <b>Статистика воронки:</b>\n"
-        f"• Знайдено лід-коментарів: <b>{stats['total_leads']}</b>\n"
+        f"• Знайдено запитів лід-магніту: <b>{stats['total_leads']}</b>\n"
         f"• Успішно надіслано в Direct: <b>{stats['dms_delivered']}</b>\n"
-        f"• Конвертовано після прохання підписатись: <b>{stats['converted_after_follow']}</b>\n"
-        f"• Очікують підписки зараз: <b>{stats['pending_follow']}</b>\n"
-        f"• Закритий Direct у юзерів: <b>{stats['failed_private_dms']}</b>\n\n"
-        "💬 <b>Попередній перегляд повідомлення в Direct:</b>\n"
-        f"<i>\"{html.escape(dm_preview[:200])}...\"</i>"
+        f"• Конвертовано після підписки: <b>{stats['converted_after_follow']}</b>\n"
+        f"• Очікують підписки зараз: <b>{stats['pending_follow']}</b>\n\n"
+        "💬 <b>Попередній перегляд DM (Instagram):</b>\n"
+        f"<i>\"{html.escape(dm_preview[:180])}...\"</i>"
     )
     await call.message.edit_text(text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")
     await call.answer()

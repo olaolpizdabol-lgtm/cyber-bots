@@ -101,8 +101,8 @@ async def main():
         )
         return
 
-    # Запускаємо Web Uploader для завантаження великих файлів якщо задано PORT (Railway)
-    web_port = int(os.getenv("PORT", 0) or 0)
+    # Запускаємо Web Uploader та PROMPT VAULT сервер
+    web_port = int(os.getenv("PORT", 0) or os.getenv("WEB_PORT", 8080))
     if web_port > 0:
         try:
             import aiohttp.web

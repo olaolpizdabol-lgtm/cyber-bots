@@ -93,13 +93,28 @@ class LeadFunnelService:
         tpl = get_setting("lead_funnel_dm_template")
         return tpl if tpl else DEFAULT_DM_TEMPLATE
 
-    def get_lead_link(self) -> str:
-        link = get_setting("lead_funnel_link")
-        return link if link else DEFAULT_LEAD_LINK
+    def get_lead_link(self, platform: str = "instagram") -> str:
+        """
+        Повертає цільове посилання на Vault із динамічним параметром джерела:
+        ?from=instagram / ?from=tiktok / ?from=youtube / ?from=facebook
+        """
+        base_link = get_setting("lead_funnel_link")
+        if not base_link or "t.me/" in base_link:
+            env_url = os.getenv("VAULT_BASE_URL", "").strip()
+            base_link = env_url if env_url else "https://cyber-bots.up.railway.app/vault/"
 
-    def get_formatted_dm_text(self) -> str:
+        clean_base = base_link.split("?")[0].rstrip("/")
+        if not clean_base.endswith("/vault"):
+            clean_base += "/vault/"
+        else:
+            clean_base += "/"
+
+        platform_clean = (platform or "instagram").lower().strip()
+        return f"{clean_base}?from={platform_clean}"
+
+    def get_formatted_dm_text(self, platform: str = "instagram") -> str:
         tpl = self.get_dm_template()
-        link = self.get_lead_link()
+        link = self.get_lead_link(platform=platform)
         return tpl.format(link=link)
 
     def process_platform_comments(self, platform_name: str, limit_posts: int = 5) -> Dict[str, int]:
@@ -133,11 +148,13 @@ class LeadFunnelService:
                 is_following = handler.is_user_following(comm.user_id, comm.username)
 
                 if platform_name in ("tiktok", "youtube"):
-                    # Для TikTok / YouTube: відповідаємо коментарем-мостом
+                    # Для TikTok / YouTube: відповідаємо коментарем-мостом з реферальним посиланням
                     if platform_name == "tiktok":
-                        reply_txt = f"TikTok restricts direct DMs here — drop '{intent_res.matched_trigger or 'GPT'}' on my IG @bohdan.gpt (or tap bio link) and I'll send you the 100+ prompt vault immediately! ⚡"
+                        lead_url = self.get_lead_link("tiktok")
+                        reply_txt = f"TikTok restricts direct DMs — grab the 100+ Prompt Vault here: {lead_url} or drop '{intent_res.matched_trigger or 'GPT'}' on my IG @bohdan.gpt! ⚡"
                     else:
-                        reply_txt = f"The prompt vault link is in the channel description & bio, or DM me '{intent_res.matched_trigger or 'GPT'}' on IG @bohdan.gpt for instant access! ⚡"
+                        lead_url = self.get_lead_link("youtube")
+                        reply_txt = f"Full 100+ Prompt Vault is available here: {lead_url} (or message me '{intent_res.matched_trigger or 'GPT'}' on IG @bohdan.gpt)! ⚡"
 
                     handler.reply_to_comment(comm.comment_id, reply_txt, post_id=comm.post_id)
                     save_lead_comment(
@@ -158,7 +175,7 @@ class LeadFunnelService:
 
                 if is_following:
                     # Сценарій А: Людина підписана -> відправляємо DM + коментар
-                    dm_text = self.get_formatted_dm_text()
+                    dm_text = self.get_formatted_dm_text(platform=platform_name)
                     dm_ok, dm_err = handler.send_direct_message(
                         user_id=comm.user_id,
                         username=comm.username,
@@ -279,7 +296,7 @@ class LeadFunnelService:
             if handler.is_user_following(u_id, u_name):
                 # Користувач підписався! 🎉
                 logger.info(f"🎉 Користувач @{u_name} ({platform}) щойно підписався! Надсилаємо DM...")
-                dm_text = self.get_formatted_dm_text()
+                dm_text = self.get_formatted_dm_text(platform=platform)
                 ok, err = handler.send_direct_message(u_id, u_name, dm_text, comment_id=lead["comment_id"])
                 if ok:
                     update_lead_status(lead["id"], status="converted", is_following=True, dm_sent=True)

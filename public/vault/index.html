@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PROMPT VAULT // 100 Visual Codes & AI Synthesizer</title>
+  <meta name="description" content="Curated optical perspectives, lighting modifiers, and 1:1 facial identity prompt synthesizer.">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Inter"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            base: {
+              950: '#070809',
+              900: '#0C0D0E',
+              850: '#101214',
+              800: '#141618',
+              750: '#181A1D',
+              700: '#1C1E22',
+              600: '#282B30',
+              border: 'rgba(255, 255, 255, 0.08)',
+              borderHover: 'rgba(255, 255, 255, 0.18)',
+              textMuted: '#848890',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #070809;
+      background-image: 
+        radial-gradient(ellipse 70% 35% at 50% -5%, rgba(217, 119, 6, 0.07), transparent 80%),
+        radial-gradient(ellipse 50% 25% at 85% 15%, rgba(59, 130, 246, 0.04), transparent 70%);
+      color: #EDEDED;
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .code-card {
+      background: #101214;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+                  border-color 0.25s ease, 
+                  box-shadow 0.25s ease, 
+                  background-color 0.25s ease;
+    }
+    .code-card:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: #141619;
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.6);
+    }
+
+    /* Subtle shimmer for image placeholders */
+    .img-skeleton {
+      background: linear-gradient(90deg, #101214 0%, #181A1D 50%, #101214 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2s infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #070809;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #23262A;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #363A40;
+    }
+  </style>
+</head>
+<body class="min-h-screen selection:bg-white selection:text-black">
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastNotification" class="fixed bottom-6 right-6 z-[120] pointer-events-none transition-all duration-300 transform translate-y-6 opacity-0">
+    <div class="px-4 py-2.5 rounded-xl bg-base-800/90 backdrop-blur-xl border border-white/[0.12] text-xs font-mono text-white shadow-2xl flex items-center gap-2.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span id="toastMessage">Copied to clipboard</span>
+    </div>
+  </div>
+
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+
+    <!-- HERO HEADER -->
+    <header class="mb-10 text-center sm:text-left">
+      <div class="border-b border-white/[0.08] pb-6 mb-8">
+        <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-2 font-mono">
+          PROMPT VAULT
+        </h1>
+        <p class="text-xs sm:text-sm text-neutral-400 font-normal max-w-xl leading-relaxed">
+          Curated camera perspectives, analog film stocks, and 1:1 subject likeness prompt synthesizer.
+        </p>
+      </div>
+
+      <!-- AI STUDIO SYNTHESIZER CONSOLE -->
+      <div class="relative bg-base-850 rounded-2xl p-5 sm:p-6 border border-white/[0.09] shadow-2xl overflow-hidden group">
+        <!-- Top accent line -->
+        <div id="synthesizerBar" class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-amber-500/40 via-purple-500/40 to-cyan-500/40 opacity-70 group-hover:opacity-100 transition-opacity"></div>
+        
+        <div class="flex items-center justify-between mb-3.5">
+          <label for="aiQueryInput" class="text-xs font-medium uppercase tracking-wider text-neutral-300 flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Prompt Synthesizer</span>
+          </label>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-2.5 mb-3.5">
+          <div class="relative flex-1">
+            <input 
+              type="text" 
+              id="aiQueryInput" 
+              placeholder="Describe any scene, outfit, or mood (e.g. Candid rainy Paris cafe at dusk)..." 
+              class="w-full bg-base-950 border border-white/[0.1] focus:border-amber-400/50 rounded-xl px-4 py-3.5 text-sm text-white placeholder-neutral-500 outline-none transition focus:ring-1 focus:ring-amber-400/30 font-sans"
+              onkeydown="if(event.key === 'Enter') generatePrompt()"
+            />
+            <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-mono text-neutral-600 hidden sm:inline">Enter ↵</span>
+          </div>
+          <button 
+            id="llmSubmitBtn"
+            onclick="generatePrompt()" 
+            class="px-6 py-3.5 rounded-xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-neutral-200 transition flex items-center justify-center gap-2 shrink-0 active:scale-[0.98] shadow-lg shadow-white/5">
+            <i data-lucide="wand-2" class="w-4 h-4"></i>
+            <span id="generateBtnText">Synthesize Prompt</span>
+          </button>
+        </div>
+
+        <!-- QUICK PRESET PILLS & SURPRISE ME -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <span class="text-neutral-500 text-[11px] mr-1 font-mono">Presets:</span>
+          <button onclick="setAiQuery('Fashion model in rainy Paris outside a sidewalk cafe at dusk')" class="px-2.5 py-1 rounded-lg bg-base-750 hover:bg-base-700 text-neutral-300 hover:text-white transition border border-white/[0.04]">
+            Rainy Paris Cafe
+          </button>
+          <button onclick="setAiQuery('90s vintage hard flash portrait of a skater on the street')" class="px-2.5 py-1 rounded-lg bg-base-750 hover:bg-base-700 text-neutral-300 hover:text-white transition border border-white/[0.04]">
+            90s Street Flash
+          </button>
+          <button onclick="setAiQuery('Vintage sports car on wet neon Tokyo street at night')" class="px-2.5 py-1 rounded-lg bg-base-750 hover:bg-base-700 text-neutral-300 hover:text-white transition border border-white/[0.04]">
+            Neon Tokyo Car
+          </button>
+          <button onclick="setAiQuery('Minimalist high-contrast black and white editorial portrait')" class="px-2.5 py-1 rounded-lg bg-base-750 hover:bg-base-700 text-neutral-300 hover:text-white transition border border-white/[0.04]">
+            B&W High Fashion
+          </button>
+          <button onclick="pickRandomMix()" class="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 transition flex items-center gap-1">
+            <i data-lucide="shuffle" class="w-3 h-3"></i>
+            <span>Surprise Me</span>
+          </button>
+        </div>
+
+        <!-- AI RESULTS CARD (HIDDEN INITIALLY) -->
+        <div id="aiResultCard" class="hidden mt-5 pt-5 border-t border-white/[0.08]">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-400"></i>
+                <span>Synthesized Optical Recipe</span>
+              </span>
+              <span class="text-[10px] font-mono text-neutral-400 bg-white/[0.05] px-2 py-0.5 rounded border border-white/[0.05]">
+                1:1 Likeness Locked
+              </span>
+            </div>
+            <button onclick="closeAiResult()" class="text-neutral-400 hover:text-white text-xs px-2 py-1 rounded hover:bg-white/[0.05]">
+              Close ✕
+            </button>
+          </div>
+
+          <!-- MATCHED CODES CHIPS -->
+          <div class="mb-3.5">
+            <div class="text-[11px] text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+              <span>Matched photographic codes:</span>
+              <span class="text-[10px] text-neutral-500 font-mono">(click any chip to copy)</span>
+            </div>
+            <div id="matchedCodesChips" class="flex flex-wrap gap-1.5">
+              <!-- Injected by JS -->
+            </div>
+          </div>
+
+          <!-- SINGLE UNIFIED PROMPT BOX -->
+          <div class="bg-base-950 rounded-xl p-4 border border-white/[0.08]">
+            <p id="promptSingleText" class="text-xs sm:text-sm text-neutral-200 leading-relaxed font-mono select-all break-words mb-4 bg-base-900/80 p-3.5 rounded-lg border border-white/[0.05]"></p>
+            
+            <button onclick="copyTextFromEl('promptSingleText', this)" class="w-full py-2.5 px-4 rounded-lg bg-white text-black font-semibold text-xs sm:text-sm hover:bg-neutral-200 transition flex items-center justify-center gap-2 active:scale-[0.98]">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              <span>Copy Full Prompt</span>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </header>
+
+    <!-- SEARCH & FILTER CONTROLS BAR -->
+    <div class="sticky top-3 z-30 bg-base-950/85 backdrop-blur-xl py-3 border-b border-white/[0.08] mb-6 rounded-xl px-2 sm:px-3">
+      <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        
+        <!-- SEARCH INPUT -->
+        <div class="relative flex-1 max-w-md">
+          <i data-lucide="search" class="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input 
+            type="text" 
+            id="searchInput" 
+            placeholder="Search codes (e.g. flash, 35mm, fisheye, blur)..." 
+            oninput="handleSearch()"
+            class="w-full bg-base-850 border border-white/[0.08] focus:border-white/[0.25] rounded-xl pl-9 pr-14 py-2 text-xs sm:text-sm text-white placeholder-neutral-500 outline-none transition"
+          />
+          <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <span class="text-[10px] font-mono text-neutral-600 border border-white/[0.06] px-1.5 py-0.5 rounded">/</span>
+            <button 
+              id="clearSearchBtn" 
+              onclick="clearSearch()" 
+              class="hidden text-neutral-500 hover:text-white text-xs px-1">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 text-xs text-neutral-400 font-mono">
+          <div class="flex items-center gap-1.5">
+            <span>Showing:</span>
+            <span id="countDisplay" class="text-white font-semibold">100</span>
+            <span class="text-neutral-500">/ <span id="totalDisplay">100</span></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- DYNAMIC CATEGORY TABS -->
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-3 mt-1 text-xs">
+        <button 
+          onclick="filterCategory('all')" 
+          data-category="all" 
+          class="cat-tab px-3 py-1.5 rounded-lg font-medium transition whitespace-nowrap bg-white text-black shrink-0">
+          All Codes (100)
+        </button>
+        <!-- Category tabs dynamically injected with counts -->
+        <div id="dynamicTabs" class="flex items-center gap-1.5 shrink-0"></div>
+      </div>
+    </div>
+
+    <!-- 100 PROMPT CARDS GRID -->
+    <div id="promptsList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <!-- Cards rendered here via JS -->
+    </div>
+
+    <!-- EMPTY NOTICE -->
+    <div id="emptyNotice" class="hidden text-center py-24 border border-dashed border-white/[0.08] rounded-2xl">
+      <i data-lucide="inbox" class="w-8 h-8 text-neutral-600 mx-auto mb-2"></i>
+      <p class="text-sm text-neutral-400 font-medium">No matching photographic codes found.</p>
+      <button onclick="clearSearch()" class="mt-3 text-xs text-white underline">Reset search filter</button>
+    </div>
+
+    <div class="mt-16 pb-12"></div>
+
+  </div>
+
+  <!-- SUBSCRIPTION GATEWAY MODAL (3 CHANNELS REQUIRED) -->
+  <div id="subGateModal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 transition-opacity duration-500 hidden">
+    <div class="bg-base-850 border border-white/[0.1] rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative">
+      
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center mx-auto mb-3 text-amber-400">
+          <i data-lucide="lock" class="w-5 h-5"></i>
+        </div>
+        <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-white mb-2 font-mono">
+          Unlock Prompt Vault
+        </h2>
+        <p class="text-xs sm:text-sm text-neutral-400 max-w-sm mx-auto leading-relaxed">
+          Subscribe to <strong class="text-white font-medium">@bohdan.gpt</strong> on all 3 channels below to unlock access.
+        </p>
+      </div>
+
+      <!-- 3-SEGMENT PROGRESS TRACKER -->
+      <div class="mb-5 bg-base-950/70 p-3.5 rounded-xl border border-white/[0.06]">
+        <div class="flex items-center justify-between text-xs font-mono mb-2.5">
+          <span class="text-neutral-400">Subscription Status:</span>
+          <span id="subProgressText" class="text-white font-semibold">0 of 3 completed</span>
+        </div>
+        
+        <!-- 3 DISTINCT SEGMENTS -->
+        <div class="grid grid-cols-3 gap-2">
+          <!-- Segment 1: Instagram -->
+          <div>
+            <div class="w-full bg-white/[0.08] h-2 rounded-full overflow-hidden">
+              <div id="subBarInstagram" class="h-full w-0 bg-emerald-400 rounded-full transition-all duration-500"></div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] font-mono mt-1.5 text-neutral-500">
+              <span id="subLabelInstagram" class="truncate">1. Instagram</span>
+              <span id="subBadgeInstagram" class="shrink-0 text-neutral-500">Pending</span>
+            </div>
+          </div>
+          
+          <!-- Segment 2: TikTok -->
+          <div>
+            <div class="w-full bg-white/[0.08] h-2 rounded-full overflow-hidden">
+              <div id="subBarTiktok" class="h-full w-0 bg-emerald-400 rounded-full transition-all duration-500"></div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] font-mono mt-1.5 text-neutral-500">
+              <span id="subLabelTiktok" class="truncate">2. TikTok</span>
+              <span id="subBadgeTiktok" class="shrink-0 text-neutral-500">Pending</span>
+            </div>
+          </div>
+          
+          <!-- Segment 3: YouTube -->
+          <div>
+            <div class="w-full bg-white/[0.08] h-2 rounded-full overflow-hidden">
+              <div id="subBarYoutube" class="h-full w-0 bg-emerald-400 rounded-full transition-all duration-500"></div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] font-mono mt-1.5 text-neutral-500">
+              <span id="subLabelYoutube" class="truncate">3. YouTube</span>
+              <span id="subBadgeYoutube" class="shrink-0 text-neutral-500">Pending</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3 CHANNELS LIST (NO "ALREADY" BUTTONS) -->
+      <div class="space-y-2.5 mb-5">
+        
+        <!-- INSTAGRAM -->
+        <div class="p-3.5 rounded-xl bg-base-950 border border-white/[0.07] flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+            </div>
+            <div class="truncate">
+              <div class="text-xs font-semibold text-white">Instagram</div>
+              <div class="text-[11px] text-neutral-400 font-mono">@bohdan.gpt</div>
+            </div>
+          </div>
+          <button id="btnSubInstagram" onclick="subscribeChannel('instagram', 'https://www.instagram.com/bohdan.gpt')" class="px-4 py-2 rounded-lg bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition flex items-center gap-1.5 active:scale-95 shrink-0">
+            <span>Follow</span>
+          </button>
+        </div>
+
+        <!-- TIKTOK -->
+        <div class="p-3.5 rounded-xl bg-base-950 border border-white/[0.07] flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.29 0 .58.04.86.11V9.4a6.33 6.33 0 0 0-.86-.06A6.34 6.34 0 0 0 3.1 15.68a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V9.07a8.16 8.16 0 0 0 4.81 1.54V7.16a4.85 4.85 0 0 1-1-.47z"/></svg>
+            </div>
+            <div class="truncate">
+              <div class="text-xs font-semibold text-white">TikTok</div>
+              <div class="text-[11px] text-neutral-400 font-mono">@bohdan.gpt</div>
+            </div>
+          </div>
+          <button id="btnSubTiktok" onclick="subscribeChannel('tiktok', 'https://www.tiktok.com/@bohdan.gpt')" class="px-4 py-2 rounded-lg bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition flex items-center gap-1.5 active:scale-95 shrink-0">
+            <span>Follow</span>
+          </button>
+        </div>
+
+        <!-- YOUTUBE -->
+        <div class="p-3.5 rounded-xl bg-base-950 border border-white/[0.07] flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            </div>
+            <div class="truncate">
+              <div class="text-xs font-semibold text-white">YouTube</div>
+              <div class="text-[11px] text-neutral-400 font-mono">@bohdan_gpt</div>
+            </div>
+          </div>
+          <button id="btnSubYoutube" onclick="subscribeChannel('youtube', 'https://www.youtube.com/@bohdan_gpt')" class="px-4 py-2 rounded-lg bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition flex items-center gap-1.5 active:scale-95 shrink-0">
+            <span>Subscribe</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- BOTTOM UNLOCK BUTTON -->
+      <button id="btnUnlockFinal" disabled onclick="tryUnlockVault()" class="w-full py-3.5 px-4 rounded-xl bg-white/[0.04] border border-white/[0.06] text-neutral-500 font-semibold text-xs sm:text-sm cursor-not-allowed transition flex items-center justify-center gap-2">
+        <i data-lucide="lock" class="w-4 h-4"></i>
+        <span id="btnUnlockFinalText">Follow all 3 channels to unlock (0/3)</span>
+      </button>
+
+      <div id="subStatusBanner" class="text-center text-[11px] font-mono text-neutral-500 mt-3">
+        <span>Automated profile verification</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MASTER EDITORIAL LIGHTBOX INSPECTOR -->
+  <div id="lightboxModal" class="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl hidden items-center justify-center p-3 sm:p-6" onclick="closeLightbox()">
+    <div class="relative max-w-5xl w-full bg-base-900 border border-white/[0.1] rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[90vh]" onclick="event.stopPropagation()">
+      
+      <!-- LEFT: PHOTO DISPLAY WITH NAVIGATION -->
+      <div class="relative md:w-3/5 bg-black/80 flex items-center justify-center p-4 min-h-[320px] md:min-h-[500px] overflow-hidden select-none">
+        <img id="lightboxImg" src="" alt="" class="max-h-[50vh] md:max-h-[75vh] w-auto max-w-full object-contain rounded-lg shadow-2xl transition-all duration-300">
+        
+        <!-- PREV BUTTON -->
+        <button onclick="navigateLightbox(-1)" class="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-base-900/80 hover:bg-white text-white hover:text-black border border-white/[0.15] flex items-center justify-center transition shadow-lg" title="Previous photo (←)">
+          <i data-lucide="chevron-left" class="w-5 h-5"></i>
+        </button>
+        <!-- NEXT BUTTON -->
+        <button onclick="navigateLightbox(1)" class="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-base-900/80 hover:bg-white text-white hover:text-black border border-white/[0.15] flex items-center justify-center transition shadow-lg" title="Next photo (→)">
+          <i data-lucide="chevron-right" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- RIGHT: RECIPE & PROMPT DETAILS -->
+      <div class="md:w-2/5 p-6 flex flex-col justify-between overflow-y-auto border-t md:border-t-0 md:border-l border-white/[0.08] bg-base-850">
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <span id="lightboxCategory" class="text-xs font-mono px-2.5 py-1 rounded-md bg-white/[0.06] text-neutral-300 border border-white/[0.05]">Camera</span>
+            <span id="lightboxIndex" class="text-xs font-mono text-neutral-500">#01 / 100</span>
+          </div>
+
+          <h3 id="lightboxCode" class="text-xl font-mono font-bold text-white mb-2 tracking-tight">/securitycam</h3>
+          <p id="lightboxDescription" class="text-xs text-neutral-400 leading-relaxed mb-5"></p>
+
+          <div class="mb-5">
+            <div class="text-[11px] font-mono text-neutral-500 uppercase tracking-wider mb-2">
+              <span>Engineered Prompt Recipe</span>
+            </div>
+            <div id="lightboxFullPrompt" class="text-xs font-mono text-neutral-300 bg-base-950 p-3.5 rounded-xl border border-white/[0.06] leading-relaxed max-h-44 overflow-y-auto select-all"></div>
+          </div>
+        </div>
+
+        <div class="space-y-2 pt-4 border-t border-white/[0.06]">
+          <button id="btnLightboxCopyPrompt" onclick="copyLightboxPrompt()" class="w-full py-2.5 px-4 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition flex items-center justify-center gap-2 active:scale-[0.98]">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span>Copy Full Prompt</span>
+          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btnLightboxCopyCode" onclick="copyLightboxCode()" class="py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-neutral-300 hover:text-white border border-white/[0.08] font-mono text-xs transition flex items-center justify-center gap-1.5">
+              <span>Copy Code</span>
+            </button>
+            <button onclick="useInSynthesizer()" class="py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-neutral-300 hover:text-white border border-white/[0.08] font-mono text-xs transition flex items-center justify-center gap-1.5">
+              <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i>
+              <span>Synthesize</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- CLOSE BUTTON -->
+      <button onclick="closeLightbox()" class="absolute top-3.5 right-3.5 z-10 w-8 h-8 rounded-full bg-black/60 hover:bg-white text-neutral-400 hover:text-black flex items-center justify-center text-xs transition border border-white/10" title="Close (Esc)">
+        ✕
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const CATEGORIES = [{"name": "Camera & Lens Perspectives", "short": "Camera", "slug": "camera", "range": "01–15", "items": [{"code": "/securitycam", "description": "High-angle wide CCTV surveillance camera, low bitrate texture, monochrome/desaturated tones."}, {"code": "/doorpeephole", "description": "Extreme ultra-wide convex fisheye distortion framed inside a brass door peephole ring."}, {"code": "/carwindow", "description": "Candid passenger perspective through rain-streaked side car glass with interior dashboard reflections."}, {"code": "/rearview", "description": "Framed inside a rearview car mirror, showing eyes and street traffic receding in the background."}, {"code": "/atmcam", "description": "Direct low-angle wide shot looking up from an ATM cash machine screen, harsh fluorescent rim light."}, {"code": "/droneoverhead", "description": "Direct 90-degree top-down bird's-eye view, geometric ground shadows, sharp aerial framing."}, {"code": "/bodycam", "description": "Ultra-wide shaky chest-mounted police bodycam POV, high exposure clipping, raw motion."}, {"code": "/macroeye", "description": "Extreme macro close-up focused solely on the iris and dilated pupil, hyper-detailed skin texture."}, {"code": "/lowangleworm", "description": "Ground-level worm's-eye perspective looking upward, towering subject silhouette against sky."}, {"code": "/dutchangle", "description": "Dynamic tilted 45-degree canted angle, off-balance tension, sharp editorial diagonal lines."}, {"code": "/dashcam", "description": "Center-mounted car dashboard camera angle with digital telemetry overlay and street glare."}, {"code": "/telescopic", "description": "Super-telephoto voyeuristic paparazzi crop from across the avenue, compressed depth of field."}, {"code": "/elevatorcctv", "description": "Corner ceiling wide-angle camera inside a brushed steel elevator cabin with harsh ceiling lights."}, {"code": "/underwaterdome", "description": "Half-submerged dome lens split: top half above water line, bottom half refracted underwater."}, {"code": "/goprochest", "description": "Ultra-wide action camera curved perspective, dynamic arm movements reaching toward the frame."}, {"code": "/heliosswirl", "description": "Vintage Soviet Helios 44-2 58mm f/2 lens: iconic hypnotic circular vortex swirly bokeh, razor-sharp facial focus, warm analog character."}]}, {"name": "Lighting & Flash Modifiers", "short": "Lighting", "slug": "lighting", "range": "16–30", "items": [{"code": "/hardflash", "description": "Direct on-camera flash, pitch-black falloff backdrop, harsh high-contrast specular highlights."}, {"code": "/redflash", "description": "Heavy crimson red colored strobe flash directly illuminating the subject, pitch-black surroundings."}, {"code": "/coldambient", "description": "Desaturated cyan/teal color temperature, muted skin undertones, clinical fluorescent mood."}, {"code": "/goldenhour", "description": "Warm 3200K low-angle sunlight hitting rim of face, heavy warm lens flare, hazy golden glow."}, {"code": "/bluehour", "description": "Deep royal cobalt twilight sky, cool ambient shadows paired with warm street lamp contrast."}, {"code": "/rimlight", "description": "Intense razor-thin white edge lighting outlining subject silhouette, underexposed front body."}, {"code": "/blindingstrobe", "description": "Blown-out high-key flash exposure, washed-out tones, raw disposable party snapshot look."}, {"code": "/neonbacklight", "description": "Dual split lighting: hot magenta pink on left profile, deep electric blue on right profile."}, {"code": "/silhouette", "description": "Completely blacked-out subject profile against an overexposed glowing sunset backdrop."}, {"code": "/candlelight", "description": "Ultra-soft flickering 1800K amber glow from below, deep natural shadows, intimate warmth."}, {"code": "/carheadlights", "description": "Blinding twin xenon high-beam car headlights hitting subject directly from behind camera."}, {"code": "/prismsplit", "description": "Light refracted through crystal glass prism creating rainbow chromatic aberration across face."}, {"code": "/chiaroscuro", "description": "Renaissance dramatic contrast, single directional spotlight beam, 90% frame in deep shadows."}, {"code": "/screenlight", "description": "Soft cold glow illuminating face exclusively from an off-screen phone or laptop monitor."}, {"code": "/underglow", "description": "Low-angle upward neon underglow, dramatic horror-tinted upward facial shadows."}]}, {"name": "Global City Aesthetics", "short": "Cities", "slug": "cities", "range": "31–45", "items": [{"code": "/tokyonight", "description": "Wet rain-soaked Shinjuku street, vertical glowing kanji neon signs, magenta and cyan reflections."}, {"code": "/brazilphonk", "description": "Sunny Rio de Janeiro favela rooftop, warm sun flare, tangled overhead wires, raw 35mm film grain."}, {"code": "/londondrill", "description": "Overcast brutalist council estate backdrop, wet pavement, grey skies, red double-decker bus."}, {"code": "/berlintechno", "description": "Dark industrial raw concrete bunker, flashing white strobe beams, heavy sweat and smoke haze."}, {"code": "/miamivice", "description": "Pastel sunset gradient (coral pink & turquoise), retro sports car silhouette, palm tree reflections."}, {"code": "/parismood", "description": "Monochromatic Haussmann architecture, damp cobblestones, vintage trench coat, high grain BW."}, {"code": "/newyorkcandid", "description": "Fast-paced crowded Manhattan crosswalk, yellow cab blur, harsh afternoon sun between skyscrapers."}, {"code": "/seoulcyber", "description": "Futuristic holographic billboards, reflective clean puddles, high-tech subway entrance aesthetic."}, {"code": "/detroitdecay", "description": "Abandoned industrial brick warehouse, shattered factory windows, rusted steel beams, gritty gloom."}, {"code": "/dubainight", "description": "Ultra-luxury dark glass skyscraper balcony, illuminated highway trails below, sleek sports car reflections."}, {"code": "/napolialley", "description": "Narrow sunlit Italian stone alleyway, drying laundry overhead, vintage Vespa parked on cobbles."}, {"code": "/shanghaifog", "description": "Densely layered futuristic skyscrapers disappearing into illuminated yellow-orange smog haze."}, {"code": "/nordicminimal", "description": "Cold Scandinavian coastal rock, icy grey-blue sea, minimalist architecture, desaturated palette."}, {"code": "/havanaretro", "description": "Vibrant weathered pastel wall, vintage 1950s classic car, harsh equatorial direct sunlight."}, {"code": "/chicagowinter", "description": "Elevated 'L' train metal tracks, swirling blizzard snow, cold steel, frost on camera lens."}]}, {"name": "Film Stocks & Vintage Textures", "short": "Film", "slug": "film", "range": "46–60", "items": [{"code": "/kodakportra400", "description": "Creamy pastel skin tones, subtle warm highlights, fine organic grain, soft highlight roll-off."}, {"code": "/fujifilmvelvia", "description": "Ultra-rich saturated landscape greens and deep blues, punchy contrast, vivid editorial punch."}, {"code": "/ilfordhp5", "description": "Gritty punchy high-contrast black and white, deep blacks, pronounced vintage silver grain."}, {"code": "/disposable35mm", "description": "Cheap plastic lens softness, saturated primary colors, harsh vignetting, internal lens glare."}, {"code": "/polaroid600", "description": "Square frame, muted milky black levels, washed-out highlights, vintage instant film chemical color shifts."}, {"code": "/kodakgold200", "description": "Rich amber-gold daylight bias, warm shadows, nostalgic 90s family vacation texture."}, {"code": "/vhs1998", "description": "Interlaced scan lines, chromatic color bleeding, magnetic tape jitter, CRT monitor phosphor glow."}, {"code": "/cinestill800t", "description": "Tungsten balanced film, iconic red halation rings around street lamps and bright lights."}, {"code": "/lomography", "description": "Heavy dark corner vignette, hypersaturated cross-processed neon tones, experimental edge light leaks."}, {"code": "/kodachrome64", "description": "Classic vintage 1970s National Geographic rendering, timeless true reds, velvety rich shadows."}, {"code": "/16mmgrain", "description": "Gritty vintage indie film texture, heavy organic celluloid grain dance, softened line resolution."}, {"code": "/thermalcam", "description": "FLIR heat-signature thermal vision gradient: glowing purple, hot orange, yellow, and deep navy."}, {"code": "/nightvision", "description": "Military generation-3 green phosphorus monochrome night vision, circular ocular vignette, scan noise."}, {"code": "/gameboycam", "description": "2-bit dithered pixelated retro handheld camera aesthetic, greenish monochrome LCD pixel grid."}, {"code": "/cyanotype", "description": "Monochrome Prussian blue and white photographic print on rough watercolor textured paper."}]}, {"name": "Editorial, Streetwear & Subcultures", "short": "Style", "slug": "style", "range": "61–75", "items": [{"code": "/balenciagacore", "description": "Brutalist raw flash editorial, oversized silhouette, concrete background, anti-fashion deadpan glare."}, {"code": "/streetwearcandid", "description": "Mid-motion casual stride across street, low-angle sneaker focus, relaxed loose fit styling."}, {"code": "/gorpcore", "description": "Technical waterproof shell jacket with water droplets, mountain mist backdrop, rugged trail aesthetic."}, {"code": "/cyberpunk2077", "description": "Subdermal chrome implants, wet asphalt, intense ultraviolet LEDs, futuristic street vendor stalls."}, {"code": "/y2kaesthetic", "description": "Metallic silver puffer jacket, bug-eye rimless sunglasses, glossy fish-eye lens flash, 2000s MTV look."}, {"code": "/oldmoneyaesthetic", "description": "Ralph Lauren vintage tailoring, private tennis court, soft overcast daylight, muted beige palette."}, {"code": "/runwayflash", "description": "High-speed catwalk motion blur, stark black studio backdrop, ultra-sharp garment texture."}, {"code": "/grunge90s", "description": "Smudged heavy eyeliner, worn distressed leather jacket, gritty basement garage, desaturated tint."}, {"code": "/darkacademia", "description": "Antique wood library, towering bookshelves, wool tweed textures, warm desk lamp reading glow."}, {"code": "/voguecover", "description": "Minimalist clean seamless cyclorama wall, dramatic razor-sharp studio softbox key light, high fashion pose."}, {"code": "/bikerleather", "description": "Heavy scuffed black biker leather, chrome motorcycle exhaust reflection, roadside diner neon."}, {"code": "/opiumstyle", "description": "All-black avant-garde Rick Owens/Playboi Carti aesthetic, inverted crucifix lighting, high-contrast monochrome."}, {"code": "/skatercandid", "description": "Low fisheye follow-cam rolling across concrete skate park, scuffed skate deck, motion trail."}, {"code": "/militaryspec", "description": "Tactical chest rig, matte black Cordura fabrics, smoke grenade haze, gritty dust particulate."}, {"code": "/futurismchrome", "description": "Liquid molten chrome mirror accessories, pristine white architectural curves, surreal sterile light."}, {"code": "/subwayflash", "description": "Harsh direct on-camera flash in a tiled underground pedestrian subway tunnel, glossy ceramic reflections, deep hard cast shadows."}]}, {"name": "Atmosphere, Weather & Environmental FX", "short": "Atmosphere", "slug": "atmosphere", "range": "76–88", "items": [{"code": "/heavyrain", "description": "Visible streaking raindrops catching flash, soaking wet hair, water ripples on dark asphalt."}, {"code": "/densefog", "description": "Ominous thick rolling ground fog, silhouette partially obscured, diffused eerie streetlamp cones."}, {"code": "/snowstorm", "description": "Drifting heavy snowflakes frozen mid-air by camera flash, frosted eyelashes, breath condensation."}, {"code": "/duststorm", "description": "Monochromatic sepia-orange desert windstorm, sand particles catching harsh midday sun."}, {"code": "/lensdroplets", "description": "Out-of-focus water drops directly on the camera lens glass blurring parts of the background."}, {"code": "/smokehaze", "description": "Heavy stage fog illuminated by backlighting, volumetric light rays slicing through smoke."}, {"code": "/brokenmirror", "description": "Fractured splintered mirror glass reflecting fragmented distorted facial angles simultaneously."}, {"code": "/wetglass", "description": "Steamy condensation on windowpane in foreground, finger wiped viewing strip revealing sharp eyes."}, {"code": "/sparksflying", "description": "Industrial angle grinder sparks showering across the dark frame, high-speed motion freezing."}, {"code": "/fireglow", "description": "Warm undulating orange and yellow embers rising into the night sky, dramatic bonfire face lighting."}, {"code": "/frostbite", "description": "Ice crystals creeping inward along the camera frame edges, biting subzero cold ambient atmosphere."}, {"code": "/underwaterlight", "description": "Caustic water light ripples dancing across skin and clothing, deep sapphire liquid atmosphere."}, {"code": "/lightningflash", "description": "Split-second pure white electric lightning flash illuminating a dark thunderstorm landscape."}]}, {"name": "Optical Glitches & Experimental Effects", "short": "Effects", "slug": "effects", "range": "89–100", "items": [{"code": "/motionblur", "description": "Slow shutter panning motion blur: crisp focused eyes while limbs and city lights streak laterally."}, {"code": "/doubleexposure", "description": "Ghostly double exposure blending human silhouette with architectural city skyline geometries."}, {"code": "/glitchrgb", "description": "Digital signal displacement, RGB channel split artifacts, digital corrupted video data corruption."}, {"code": "/lensflare", "description": "Anamorphic horizontal blue streak lens flare cutting directly across the pupil of the eye."}, {"code": "/chromaticfringing", "description": "Heavy uncorrected lens optical chromatic aberration: purple/green fringing on all sharp edges."}, {"code": "/dustandscratches", "description": "Heavy physical 35mm film negative scratches, dust fibers, hair artifacts, chemical spots."}, {"code": "/halftonedot", "description": "Pop-art vintage CMYK printing press halftone dot raster pattern overlay across shadows."}, {"code": "/pixelate", "description": "Targeted intentional mosaic censorship pixelation over eyes or chest, sterile surveillance vibe."}, {"code": "/bloomglow", "description": "1980s soft-focus Promist diffusion filter: dreamy glowing bloom around light sources, silky skin."}, {"code": "/crtscanlines", "description": "Curvature of a vintage glass Sony Trinitron TV tube with visible phosphor scanline pattern."}, {"code": "/lightleak", "description": "Accidental camera back opened: intense orange-red light leak burning across the right edge of frame."}, {"code": "/hyperlapseblur", "description": "Radial zoom burst blur radiating outward from the dead center of the subject's face."}]}];
+    
+    // Flatten codes
+    const ALL_ITEMS = [];
+    CATEGORIES.forEach(cat => {
+      cat.items.forEach(item => {
+        ALL_ITEMS.push({
+          code: item.code,
+          description: item.description,
+          categoryName: cat.name,
+          categoryShort: cat.short,
+          categorySlug: cat.slug
+        });
+      });
+    });
+
+    // Move /redflash closer to the top (#2) and /doorpeephole to another position
+    const redIdx = ALL_ITEMS.findIndex(i => i.code === '/redflash');
+    const doorIdx = ALL_ITEMS.findIndex(i => i.code === '/doorpeephole');
+    if (redIdx !== -1 && doorIdx !== -1) {
+      const temp = ALL_ITEMS[redIdx];
+      ALL_ITEMS[redIdx] = ALL_ITEMS[doorIdx];
+      ALL_ITEMS[doorIdx] = temp;
+    }
+
+    let currentCategory = 'all';
+    let currentSearch = '';
+    let modelRotationCounter = 0;
+    let currentLightboxIndex = 0;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      checkSubGate();
+      renderTabs();
+      renderCards();
+      setupKeyboardShortcuts();
+      lucide.createIcons();
+    });
+
+    // ==========================================
+    // KEYBOARD SHORTCUTS
+    // ==========================================
+    function setupKeyboardShortcuts() {
+      window.addEventListener('keydown', (e) => {
+        // Focus search on '/'
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+          e.preventDefault();
+          document.getElementById('searchInput').focus();
+        }
+        // Escape closes modals
+        if (e.key === 'Escape') {
+          closeLightbox();
+          if (document.activeElement.id === 'searchInput') {
+            clearSearch();
+            document.activeElement.blur();
+          }
+        }
+        // Left & Right arrow in lightbox
+        const lightbox = document.getElementById('lightboxModal');
+        if (!lightbox.classList.contains('hidden')) {
+          if (e.key === 'ArrowLeft') navigateLightbox(-1);
+          if (e.key === 'ArrowRight') navigateLightbox(1);
+        }
+      });
+    }
+
+    // ==========================================
+    // TOAST NOTIFICATIONS
+    // ==========================================
+    let toastTimeout = null;
+    function showToast(message) {
+      const toast = document.getElementById('toastNotification');
+      const toastMsg = document.getElementById('toastMessage');
+      toastMsg.innerText = message;
+      
+      toast.classList.remove('opacity-0', 'translate-y-6');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-6');
+      }, 2000);
+    }
+
+    // ==========================================
+    // 3-CHANNEL SUBSCRIPTION GATE LOGIC (@bohdan.gpt)
+    // ==========================================
+    const verifiedChannels = new Set();
+
+    function checkSubGate() {
+      // 1. Detect pre-subscribed channels from URL params
+      const params = new URLSearchParams(window.location.search);
+      const fromParam = (params.get('from') || params.get('ref') || params.get('source') || '').toLowerCase();
+
+      if (fromParam === 'instagram' || fromParam === 'ig' || params.has('ig')) {
+        markChannelPreVerified('instagram');
+      }
+      if (fromParam === 'tiktok' || fromParam === 'tt' || params.has('tt')) {
+        markChannelPreVerified('tiktok');
+      }
+      if (fromParam === 'youtube' || fromParam === 'yt' || params.has('yt')) {
+        markChannelPreVerified('youtube');
+      }
+
+      updateSubProgress();
+
+      const unlocked = localStorage.getItem('vault_unlocked');
+      const modal = document.getElementById('subGateModal');
+      if (unlocked !== 'true') {
+        modal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+      }
+    }
+
+    function markChannelPreVerified(platform) {
+      verifiedChannels.add(platform);
+      const btnId = 'btnSub' + platform.charAt(0).toUpperCase() + platform.slice(1);
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.disabled = true;
+        btn.className = 'px-3.5 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center gap-1.5 shrink-0';
+        btn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>From Bio ✓</span>`;
+      }
+    }
+
+    const verifyingChannels = new Map();
+
+    function subscribeChannel(platform, url) {
+      if (verifiedChannels.has(platform)) return;
+
+      // If clicked while verifying: immediately open social network again
+      if (verifyingChannels.has(platform)) {
+        window.open(url, '_blank');
+        return;
+      }
+
+      window.open(url, '_blank');
+
+      const btnId = 'btnSub' + platform.charAt(0).toUpperCase() + platform.slice(1);
+      const btn = document.getElementById(btnId);
+      btn.className = 'px-3.5 py-2 rounded-lg bg-base-750 text-neutral-300 text-xs font-medium transition flex items-center gap-1.5 shrink-0 cursor-pointer hover:bg-base-700 active:scale-95';
+
+      const banner = document.getElementById('subStatusBanner');
+      const dotFrames = ['.', '..', '...'];
+      let dotStep = 0;
+
+      const updateVerifyingState = () => {
+        const dots = dotFrames[dotStep % dotFrames.length];
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-amber-400"></i><span>Verifying${dots}</span>`;
+        if (banner) {
+          banner.innerHTML = `<span class="text-amber-400 flex items-center justify-center gap-1.5"><i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Confirming follow on ${platform.charAt(0).toUpperCase() + platform.slice(1)}${dots}</span>`;
+        }
+        lucide.createIcons();
+      };
+
+      updateVerifyingState();
+
+      const dotInterval = setInterval(() => {
+        dotStep++;
+        updateVerifyingState();
+      }, 450);
+
+      const completeTimer = setTimeout(() => {
+        clearInterval(dotInterval);
+        verifyingChannels.delete(platform);
+
+        verifiedChannels.add(platform);
+        btn.disabled = true;
+        btn.className = 'px-3.5 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center gap-1.5 shrink-0';
+        btn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Subscribed ✓</span>`;
+        lucide.createIcons();
+
+        updateSubProgress();
+      }, 7000);
+
+      verifyingChannels.set(platform, { dotInterval, completeTimer, url });
+    }
+
+    function updateSubProgress() {
+      const count = verifiedChannels.size;
+      const progressText = document.getElementById('subProgressText');
+      const unlockBtn = document.getElementById('btnUnlockFinal');
+      const unlockText = document.getElementById('btnUnlockFinalText');
+      const banner = document.getElementById('subStatusBanner');
+
+      // Update the 3 individual segments
+      const channels = [
+        { id: 'Instagram', name: 'instagram' },
+        { id: 'Tiktok', name: 'tiktok' },
+        { id: 'Youtube', name: 'youtube' }
+      ];
+
+      channels.forEach(ch => {
+        const bar = document.getElementById('subBar' + ch.id);
+        const label = document.getElementById('subLabel' + ch.id);
+        const badge = document.getElementById('subBadge' + ch.id);
+
+        if (verifiedChannels.has(ch.name)) {
+          if (bar) {
+            bar.className = 'h-full w-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.4)] rounded-full transition-all duration-500';
+          }
+          if (label) label.className = 'truncate text-white font-medium';
+          if (badge) {
+            badge.innerText = 'Done ✓';
+            badge.className = 'shrink-0 text-emerald-400 font-semibold';
+          }
+        } else {
+          if (bar) {
+            bar.className = 'h-full w-0 bg-emerald-400 rounded-full transition-all duration-500';
+          }
+          if (label) label.className = 'truncate text-neutral-500';
+          if (badge) {
+            badge.innerText = 'Pending';
+            badge.className = 'shrink-0 text-neutral-500';
+          }
+        }
+      });
+
+      if (progressText) {
+        progressText.innerText = `${count} of 3 completed`;
+      }
+
+      if (count < 3) {
+        if (unlockBtn) {
+          unlockBtn.disabled = true;
+          unlockBtn.className = 'w-full py-3.5 px-4 rounded-xl bg-white/[0.04] border border-white/[0.06] text-neutral-500 font-semibold text-xs sm:text-sm cursor-not-allowed transition flex items-center justify-center gap-2';
+        }
+        if (unlockText) unlockText.innerText = `Follow all 3 channels to unlock (${count}/3)`;
+        if (banner) {
+          banner.innerHTML = `<span class="text-neutral-400">${3 - count} more channel${3 - count === 1 ? '' : 's'} remaining</span>`;
+        }
+      } else {
+        if (unlockBtn) {
+          unlockBtn.disabled = false;
+          unlockBtn.className = 'w-full py-3.5 px-4 rounded-xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-neutral-200 transition flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-[0.99]';
+          unlockBtn.innerHTML = `<i data-lucide="unlock" class="w-4 h-4 text-emerald-600"></i><span>Unlock Prompt Vault ✓</span>`;
+        }
+        if (banner) banner.innerHTML = `<span class="text-emerald-400 font-medium flex items-center justify-center gap-1.5"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i> All 3 channels verified! Access granted.</span>`;
+        lucide.createIcons();
+
+        setTimeout(() => {
+          tryUnlockVault();
+        }, 800);
+      }
+    }
+
+    function tryUnlockVault() {
+      if (verifiedChannels.size < 3) return;
+      localStorage.setItem('vault_unlocked', 'true');
+      const modal = document.getElementById('subGateModal');
+      modal.classList.add('opacity-0');
+      setTimeout(() => {
+        modal.classList.add('hidden');
+        modal.classList.remove('opacity-0');
+        document.body.classList.remove('overflow-hidden');
+      }, 500);
+    }
+
+    function resetGate() {
+      localStorage.removeItem('vault_unlocked');
+      location.reload();
+    }
+
+    // ==========================================
+    // MASTER EDITORIAL LIGHTBOX INSPECTOR
+    // ==========================================
+    function openLightbox(index) {
+      currentLightboxIndex = index;
+      const item = ALL_ITEMS[currentLightboxIndex];
+      if (!item) return;
+
+      const slug = item.code.replace('/', '').toLowerCase();
+      const imgSrc = `images/${slug}.jpg`;
+
+      document.getElementById('lightboxImg').src = imgSrc;
+      document.getElementById('lightboxCode').innerText = item.code;
+      document.getElementById('lightboxCategory').innerText = item.categoryName;
+      document.getElementById('lightboxIndex').innerText = `#${String(currentLightboxIndex + 1).padStart(2, '0')} / 100`;
+      document.getElementById('lightboxDescription').innerText = item.description;
+
+      const fullPrompt = generateSingleItemPrompt(item);
+      document.getElementById('lightboxFullPrompt').innerText = fullPrompt;
+
+      const modal = document.getElementById('lightboxModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
+      lucide.createIcons();
+    }
+
+    function closeLightbox() {
+      const modal = document.getElementById('lightboxModal');
+      modal.classList.remove('flex');
+      modal.classList.add('hidden');
+      document.body.classList.remove('overflow-hidden');
+    }
+
+    function navigateLightbox(direction) {
+      currentLightboxIndex = (currentLightboxIndex + direction + ALL_ITEMS.length) % ALL_ITEMS.length;
+      openLightbox(currentLightboxIndex);
+    }
+
+    function copyLightboxPrompt() {
+      const text = document.getElementById('lightboxFullPrompt').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Full engineered prompt copied ✓');
+      });
+    }
+
+    function copyLightboxCode() {
+      const item = ALL_ITEMS[currentLightboxIndex];
+      if (item) {
+        navigator.clipboard.writeText(item.code).then(() => {
+          showToast(`Copied ${item.code} ✓`);
+        });
+      }
+    }
+
+    function useInSynthesizer() {
+      const item = ALL_ITEMS[currentLightboxIndex];
+      if (item) {
+        closeLightbox();
+        document.getElementById('aiQueryInput').value = `${item.description} styled with ${item.code}`;
+        generatePrompt();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+
+    function generateSingleItemPrompt(item) {
+      let lens = "Sony FE 35mm f/1.4 GM lens";
+      if (item.code.includes('peephole') || item.code.includes('fisheye')) lens = "Sony FE 14mm f/1.8 GM ultra-wide lens";
+      else if (item.code.includes('macro')) lens = "Sony FE 90mm f/2.8 Macro G OSS lens";
+      else if (item.code.includes('tele')) lens = "Sony FE 70-200mm f/2.8 GM OSS II lens";
+      else if (item.code.includes('vogue') || item.code.includes('portrait')) lens = "Sony FE 85mm f/1.4 GM II portrait lens";
+
+      return `Exact 1:1 facial likeness and identity preservation of the person from the reference image, retaining identical bone structure, eyes, hair, and facial features. Photographed on a Sony Alpha 7R V full-frame camera paired with a ${lens}. Aesthetic preset: ${item.code} (${item.description}). Uncompressed 35mm sensor readout, natural highlight roll-off, authentic fine film grain, organic skin textures with natural pores, true cinematic depth, zero synthetic plastic smoothing.`;
+    }
+
+    // ==========================================
+    // TABS & FILTERS
+    // ==========================================
+    function renderTabs() {
+      const tabsWrap = document.getElementById('dynamicTabs');
+      tabsWrap.innerHTML = '';
+
+      const allTab = document.querySelector('button[data-category="all"]');
+      if (allTab) allTab.innerText = `All Codes (${ALL_ITEMS.length})`;
+      const totalDisplay = document.getElementById('totalDisplay');
+      if (totalDisplay) totalDisplay.innerText = ALL_ITEMS.length;
+
+      CATEGORIES.forEach(cat => {
+        const count = cat.items.length;
+        const btn = document.createElement('button');
+        btn.innerHTML = `<span>${cat.short}</span> <span class="text-[10px] text-neutral-500 font-mono">(${count})</span>`;
+        btn.setAttribute('data-category', cat.slug);
+        btn.className = 'cat-tab px-3 py-1.5 rounded-lg font-medium transition whitespace-nowrap bg-base-850 hover:bg-base-750 text-neutral-400 hover:text-white border border-white/[0.05] shrink-0';
+        btn.onclick = () => filterCategory(cat.slug);
+        tabsWrap.appendChild(btn);
+      });
+    }
+
+    function filterCategory(catSlug) {
+      currentCategory = catSlug;
+      document.querySelectorAll('.cat-tab').forEach(tab => {
+        if (tab.getAttribute('data-category') === catSlug) {
+          tab.className = 'cat-tab px-3 py-1.5 rounded-lg font-medium transition whitespace-nowrap bg-white text-black shrink-0 shadow-md';
+        } else {
+          tab.className = 'cat-tab px-3 py-1.5 rounded-lg font-medium transition whitespace-nowrap bg-base-850 hover:bg-base-750 text-neutral-400 hover:text-white border border-white/[0.05] shrink-0';
+        }
+      });
+      renderCards();
+    }
+
+    function handleSearch() {
+      currentSearch = document.getElementById('searchInput').value.trim().toLowerCase();
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (currentSearch) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+      renderCards();
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      currentSearch = '';
+      document.getElementById('clearSearchBtn').classList.add('hidden');
+      renderCards();
+    }
+
+    function pickRandomMix() {
+      const randomItems = [];
+      const shuffled = [...ALL_ITEMS].sort(() => 0.5 - Math.random());
+      for (let i = 0; i < 3; i++) {
+        randomItems.push(shuffled[i]);
+      }
+      const query = `Portrait combining ${randomItems[0].code}, ${randomItems[1].code}, and ${randomItems[2].code}`;
+      document.getElementById('aiQueryInput').value = query;
+      generatePrompt();
+    }
+
+    // ==========================================
+    // 100 CODE CARDS RENDERING
+    // ==========================================
+    function renderCards() {
+      const container = document.getElementById('promptsList');
+      container.innerHTML = '';
+
+      const filtered = ALL_ITEMS.filter(item => {
+        const matchCat = currentCategory === 'all' || item.categorySlug === currentCategory;
+        const matchSearch = !currentSearch || 
+          item.code.toLowerCase().includes(currentSearch) || 
+          item.description.toLowerCase().includes(currentSearch) ||
+          item.categoryShort.toLowerCase().includes(currentSearch);
+        return matchCat && matchSearch;
+      });
+
+      document.getElementById('countDisplay').innerText = filtered.length;
+      const emptyNotice = document.getElementById('emptyNotice');
+      if (filtered.length === 0) {
+        emptyNotice.classList.remove('hidden');
+      } else {
+        emptyNotice.classList.add('hidden');
+      }
+
+      filtered.forEach((item) => {
+        const actualIndex = ALL_ITEMS.findIndex(i => i.code === item.code);
+        const card = document.createElement('div');
+        card.className = 'code-card rounded-2xl p-4 flex flex-col justify-between group';
+        card.id = `code-${item.code.replace('/', '')}`;
+        const slug = item.code.replace('/', '').toLowerCase();
+        const imgPath = `images/${slug}.jpg`;
+
+        card.innerHTML = `
+          <div>
+            <!-- PHOTO PREVIEW AREA -->
+            <div class="relative aspect-[4/3] rounded-xl overflow-hidden mb-3.5 bg-base-950 border border-white/[0.08] group/img cursor-pointer" onclick="openLightbox(${actualIndex})">
+              <img 
+                src="${imgPath}" 
+                alt="${item.code}" 
+                class="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-105"
+                loading="lazy"
+                onerror="this.parentElement.classList.add('hidden')"
+              />
+              
+              <!-- CATEGORY BADGE ON IMAGE -->
+              <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-neutral-300">
+                ${item.categoryShort}
+              </div>
+
+              <!-- INDEX BADGE ON IMAGE -->
+              <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-neutral-400">
+                #${String(actualIndex + 1).padStart(2, '0')}
+              </div>
+
+              <!-- HOVER OVERLAY PILL -->
+              <div class="absolute inset-0 bg-black/30 backdrop-blur-[2px] opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                <div class="px-3 py-1.5 rounded-full bg-white text-black font-semibold text-xs flex items-center gap-1.5 shadow-xl transform scale-95 group-hover/img:scale-100 transition-transform">
+                  <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                  <span>Inspect</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] font-mono text-neutral-500 mb-1.5">
+              <span>${item.categoryShort}</span>
+              <span>#${String(actualIndex + 1).padStart(2, '0')}</span>
+            </div>
+            
+            <div class="font-mono text-sm font-bold text-white mb-2 tracking-tight flex items-center justify-between cursor-pointer group/title" onclick="copyCode('${item.code}')" title="Click to copy code">
+              <span class="group-hover/title:text-amber-300 transition-colors">${item.code}</span>
+              <i data-lucide="copy" class="w-3.5 h-3.5 text-neutral-500 opacity-0 group-hover/title:opacity-100 transition-opacity"></i>
+            </div>
+
+            <p class="text-xs text-neutral-400 leading-relaxed mb-4 line-clamp-3">
+              ${item.description}
+            </p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 mt-auto pt-2 border-t border-white/[0.04]">
+            <button onclick="copyCode('${item.code}')" class="py-1.5 px-2.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-neutral-300 hover:text-white text-xs font-medium transition flex items-center justify-center gap-1.5">
+              <i data-lucide="copy" class="w-3 h-3"></i>
+              <span>Copy</span>
+            </button>
+            <button onclick="openLightbox(${actualIndex})" class="py-1.5 px-2.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] text-neutral-400 hover:text-white text-xs font-medium transition flex items-center justify-center gap-1.5">
+              <i data-lucide="eye" class="w-3 h-3"></i>
+              <span>Inspect</span>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+
+      lucide.createIcons();
+    }
+
+    function copyCode(code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showToast(`Copied ${code} to clipboard ✓`);
+      });
+    }
+
+    function copyTextFromEl(elId, btnEl) {
+      const text = document.getElementById(elId).innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const originalHtml = btnEl.innerHTML;
+        btnEl.innerHTML = `<span class="text-emerald-400 font-medium">Copied to clipboard ✓</span>`;
+        showToast('Full engineered prompt copied ✓');
+        setTimeout(() => {
+          btnEl.innerHTML = originalHtml;
+          lucide.createIcons();
+        }, 1500);
+      });
+    }
+
+    function setAiQuery(text) {
+      document.getElementById('aiQueryInput').value = text;
+      generatePrompt();
+    }
+
+    // ==========================================
+    // AUTO-ROTATING MODEL DISPATCHER (SILENT)
+    // ==========================================
+    async function generatePrompt() {
+      const query = document.getElementById('aiQueryInput').value.trim();
+      if (!query) return;
+
+      const btn = document.getElementById('llmSubmitBtn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = `<span class="flex items-center gap-1.5"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Synthesizing...</span></span>`;
+      btn.disabled = true;
+      lucide.createIcons();
+
+      const geminiKey = getStoredGeminiKey();
+      const groqKey = getStoredGroqKey();
+
+      const providers = [];
+      if (groqKey) providers.push({ type: 'groq', key: groqKey });
+      if (geminiKey) providers.push({ type: 'gemini', key: geminiKey });
+
+      let succeeded = false;
+
+      if (providers.length > 0) {
+        // Round-robin rotation
+        const startIndex = (modelRotationCounter++) % providers.length;
+        const ordered = [...providers.slice(startIndex), ...providers.slice(0, startIndex)];
+
+        for (const p of ordered) {
+          try {
+            if (p.type === 'groq') {
+              const res = await callGroqAPI(query, p.key);
+              renderAiResult(res.matchedCodes, res.prompt);
+              succeeded = true;
+              break;
+            } else if (p.type === 'gemini') {
+              const res = await callGeminiAPI(query, p.key);
+              renderAiResult(res.matchedCodes, res.prompt);
+              succeeded = true;
+              break;
+            }
+          } catch (err) {
+            console.warn(`Provider ${p.type} auto-rotation step failed, cascading...`, err);
+          }
+        }
+      }
+
+      if (!succeeded) {
+        // Instant seamless fallback to master semantic engine (1:1 Face + Sony A7R V)
+        const fallback = matchSemanticPrompt(query);
+        renderAiResult(fallback.matchedCodes, fallback.prompt);
+      }
+
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      lucide.createIcons();
+    }
+
+    function getStoredGeminiKey() {
+      return localStorage.getItem('gemini_api_key') || localStorage.getItem('moncler_gemini_key') || '';
+    }
+
+    function getStoredGroqKey() {
+      return localStorage.getItem('groq_api_key') || localStorage.getItem('vulture_groq_key') || '';
+    }
+
+    // GEMINI CALL
+    async function callGeminiAPI(query, key) {
+      const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-1.5-flash'];
+      let lastError = null;
+
+      for (const model of models) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+          return await executeGeminiRequest(url, query);
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError || new Error("Gemini rotation failed");
+    }
+
+    async function executeGeminiRequest(url, query) {
+      const codesSummary = ALL_ITEMS.map(i => `${i.code} (${i.categoryShort}): ${i.description}`).join('\n');
+
+      const systemInstruction = `You are an elite photographic director and master prompt engineer for Nano Banana Pro and GPT Image 2 photorealistic visual generations.
+
+User prompt / scene request: "${query}"
+
+REFERENCE IMAGE IDENTITY LOCK PROTOCOL:
+The user is generating an image based on an existing reference photograph of a person. You MUST include mandatory strict identity transfer syntax:
+"A 1:1 facial likeness and identity preservation of the person from the reference image: retaining exact facial anatomy, bone structure, jawline, nose contour, eye shape, iris depth, skin undertone, and authentic natural facial expression."
+
+CAMERA HARDWARE & LENS OPTICS SPECIFICATION:
+Specify realistic professional full-frame optics:
+- Camera body: Sony Alpha 7R V (61MP full-frame sensor, uncompressed 14-bit RAW).
+- Lens choice: Select the most synergistic Sony G-Master prime lens (e.g. Sony FE 35mm f/1.4 GM for street/environmental, Sony FE 85mm f/1.4 GM II for portraiture, Sony FE 50mm f/1.2 GM for cinematic bokeh, Sony FE 14mm f/1.8 GM for wide dynamic perspectives, or Sony FE 90mm f/2.8 Macro G OSS for macro close-ups).
+- Technical optical settings: realistic aperture (f/1.4 to f/2.8), shutter speed (1/250s, 1/500s), and ISO (ISO 100-400).
+
+PHOTOGRAPHIC AESTHETICS & ANTI-AI GUARDRAILS:
+- Light and atmosphere: physical volumetric lighting, natural specular highlights on skin/eyes, authentic shadow roll-off, real atmospheric textures.
+- Real tactile detail: raw uncompressed 35mm optical capture, natural highlight halation, fine film grain roll-off, organic skin micro-textures with visible natural pores and micro stray hairs.
+- STRICT NEGATIVE DIRECTIVES: Absolutely NO buzzwords like "8k", "hyperrealistic", "unreal engine", or "photorealistic". Strictly prohibit synthetic plastic skin, airbrushed smoothness, or CGI gloss.
+
+Available 100 photographic codes:
+${codesSummary}
+
+Task:
+1. Select the 3 to 5 most appropriate optical and aesthetic codes from the available 100 codes list that best realize the user request.
+2. Construct EXACTLY ONE cohesive, rich, editorial photorealistic master prompt engineered specifically for Nano Banana Pro and GPT Image 2.
+3. You must output STRICTLY valid JSON with no markdown wrapping:
+{
+  "matchedCodes": ["/code1", "/code2", "/code3"],
+  "prompt": "Full engineered prompt text..."
+}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: systemInstruction }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 600 }
+        })
+      });
+
+      if (!response.ok) throw new Error(`Gemini API: ${response.status}`);
+
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) throw new Error('No text returned from Gemini');
+
+      let cleaned = rawText.trim();
+      if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+      else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+      if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+      return JSON.parse(cleaned.trim());
+    }
+
+    // GROQ CALL
+    async function callGroqAPI(query, key) {
+      const models = ['openai/gpt-oss-120b', 'gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-70b-versatile'];
+      let lastError = null;
+
+      for (const model of models) {
+        try {
+          return await executeGroqRequest(model, query, key);
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError || new Error("Groq rotation failed");
+    }
+
+    async function executeGroqRequest(model, query, key) {
+      const url = 'https://api.groq.com/openai/v1/chat/completions';
+      const codesSummary = ALL_ITEMS.map(i => `${i.code} (${i.categoryShort}): ${i.description}`).join('\n');
+
+      const systemInstruction = `You are an elite photographic director and master prompt engineer for Nano Banana Pro and GPT Image 2 photorealistic visual generations.
+
+User prompt / scene request: "${query}"
+
+REFERENCE IMAGE IDENTITY LOCK PROTOCOL:
+The user is generating an image based on an existing reference photograph of a person. You MUST include mandatory strict identity transfer syntax:
+"A 1:1 facial likeness and identity preservation of the person from the reference image: retaining exact facial anatomy, bone structure, jawline, nose contour, eye shape, iris depth, skin undertone, and authentic natural facial expression."
+
+CAMERA HARDWARE & LENS OPTICS SPECIFICATION:
+Specify realistic professional full-frame optics:
+- Camera body: Sony Alpha 7R V (61MP full-frame sensor, uncompressed 14-bit RAW).
+- Lens choice: Select the most synergistic Sony G-Master prime lens (e.g. Sony FE 35mm f/1.4 GM for street/environmental, Sony FE 85mm f/1.4 GM II for portraiture, Sony FE 50mm f/1.2 GM for cinematic bokeh, Sony FE 14mm f/1.8 GM for wide dynamic perspectives, or Sony FE 90mm f/2.8 Macro G OSS for macro close-ups).
+- Technical optical settings: realistic aperture (f/1.4 to f/2.8), shutter speed (1/250s, 1/500s), and ISO (ISO 100-400).
+
+PHOTOGRAPHIC AESTHETICS & ANTI-AI GUARDRAILS:
+- Light and atmosphere: physical volumetric lighting, natural specular highlights on skin/eyes, authentic shadow roll-off, real atmospheric textures.
+- Real tactile detail: raw uncompressed 35mm optical capture, natural highlight halation, fine film grain roll-off, organic skin micro-textures with visible natural pores and micro stray hairs.
+- STRICT NEGATIVE DIRECTIVES: Absolutely NO buzzwords like "8k", "hyperrealistic", "unreal engine", or "photorealistic". Strictly prohibit synthetic plastic skin, airbrushed smoothness, or CGI gloss.
+
+Available 100 photographic codes:
+${codesSummary}
+
+Task:
+1. Select 3 to 5 best matching codes from the 100 codes list.
+2. Build EXACTLY ONE cohesive, rich, editorial photorealistic master prompt engineered specifically for Nano Banana Pro and GPT Image 2.
+3. Output STRICTLY JSON with no markdown wrapping:
+{
+  "matchedCodes": ["/code1", "/code2", "/code3"],
+  "prompt": "Full engineered prompt text..."
+}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Generate prompt for: ${query}` }
+          ],
+          temperature: 0.7,
+          max_tokens: 600,
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Groq API error (${response.status}): ${errText}`);
+      }
+
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content;
+      return JSON.parse(content);
+    }
+
+    // MASTER BUILT-IN SEMANTIC ENGINE (1:1 REF + SONY OPTICS)
+    function matchSemanticPrompt(query) {
+      const q = query.toLowerCase();
+      const scores = {};
+      ALL_ITEMS.forEach(item => { scores[item.code] = 0; });
+
+      function boost(codes, weight = 10) {
+        codes.forEach(c => {
+          if (scores[c] !== undefined) scores[c] += weight;
+        });
+      }
+
+      if (q.includes('paris') || q.includes('париж') || q.includes('french')) boost(['/parismood', '/kodakportra400', '/candlelight'], 15);
+      if (q.includes('tokyo') || q.includes('токіо') || q.includes('japan') || q.includes('neon')) boost(['/tokyonight', '/neonbacklight', '/cinestill800t', '/wetglass'], 15);
+      if (q.includes('seoul') || q.includes('сеул') || q.includes('korea')) boost(['/seoulcyber', '/cyberpunk2077', '/wetglass'], 15);
+      if (q.includes('berlin') || q.includes('берлін') || q.includes('techno') || q.includes('club')) boost(['/berlintechno', '/blindingstrobe', '/ilfordhp5', '/opiumstyle', '/smokehaze'], 15);
+      if (q.includes('miami') || q.includes('майамі') || q.includes('sunset') || q.includes('beach')) boost(['/miamivice', '/goldenhour', '/kodakportra400', '/lensflare'], 15);
+      if (q.includes('new york') || q.includes('нью-йорк') || q.includes('manhattan')) boost(['/newyorkcandid', '/hardflash', '/kodakportra400'], 15);
+
+      if (q.includes('rain') || q.includes('дощ') || q.includes('wet')) boost(['/heavyrain', '/wetglass', '/lensdroplets'], 15);
+      if (q.includes('fog') || q.includes('туман') || q.includes('smoke') || q.includes('haze')) boost(['/densefog', '/smokehaze'], 15);
+      if (q.includes('snow') || q.includes('сніг') || q.includes('winter')) boost(['/snowstorm', '/frostbite', '/coldambient'], 15);
+      if (q.includes('flash') || q.includes('спалах')) boost(['/hardflash', '/blindingstrobe', '/disposable35mm'], 15);
+      if (q.includes('candle') || q.includes('свічка') || q.includes('cafe')) boost(['/candlelight', '/goldenhour', '/kodakportra400'], 15);
+      if (q.includes('sun') || q.includes('sunset') || q.includes('golden hour')) boost(['/goldenhour', '/lensflare', '/kodakgold200'], 15);
+      if (q.includes('90') || q.includes('retro') || q.includes('ретро') || q.includes('film')) boost(['/kodakportra400', '/disposable35mm', '/16mmgrain'], 15);
+      if (q.includes('b&w') || q.includes('black and white') || q.includes('чорно-біл')) boost(['/ilfordhp5', '/parismood', '/chiaroscuro'], 20);
+      if (q.includes('fisheye') || q.includes('фішай')) boost(['/doorpeephole', '/goprochest'], 20);
+      if (q.includes('cctv') || q.includes('security')) boost(['/securitycam', '/elevatorcctv'], 20);
+      if (q.includes('macro') || q.includes('eye') || q.includes('close-up')) boost(['/macroeye', '/rimlight'], 20);
+      if (q.includes('car') || q.includes('авто')) boost(['/carwindow', '/rearview', '/dashcam'], 15);
+      if (q.includes('model') || q.includes('fashion') || q.includes('vogue')) boost(['/voguecover', '/runwayflash', '/balenciagacore', '/rimlight'], 15);
+      if (q.includes('streetwear') || q.includes('skater')) boost(['/streetwearcandid', '/skatercandid', '/balenciagacore', '/hardflash'], 15);
+      if (q.includes('cyberpunk') || q.includes('кіберпанк')) boost(['/cyberpunk2077', '/futurismchrome', '/neonbacklight'], 15);
+      if (q.includes('helios') || q.includes('геліос') || q.includes('swirl') || q.includes('bokeh')) boost(['/heliosswirl', '/goldenhour', '/16mmgrain'], 25);
+      if (q.includes('subway') || q.includes('метро') || q.includes('tunnel') || q.includes('тунель')) boost(['/subwayflash', '/hardflash', '/balenciagacore'], 25);
+
+      const words = q.split(/\s+/);
+      words.forEach(w => {
+        if (w.length > 3) {
+          ALL_ITEMS.forEach(item => {
+            if (item.description.toLowerCase().includes(w)) scores[item.code] += 4;
+            if (item.code.toLowerCase().includes(w)) scores[item.code] += 8;
+          });
+        }
+      });
+
+      const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      const picked = [];
+      const usedCategories = new Set();
+      for (const [code, score] of sorted) {
+        const item = ALL_ITEMS.find(i => i.code === code);
+        if (item && (!usedCategories.has(item.categorySlug) || picked.length < 2)) {
+          picked.push(item);
+          usedCategories.add(item.categorySlug);
+        }
+        if (picked.length >= 4) break;
+      }
+
+      if (picked.length === 0 || sorted[0][1] === 0) {
+        picked.push(ALL_ITEMS.find(i => i.code === '/kodakportra400'));
+        picked.push(ALL_ITEMS.find(i => i.code === '/goldenhour'));
+        picked.push(ALL_ITEMS.find(i => i.code === '/carwindow'));
+      }
+
+      let lensSetup = "Sony FE 35mm f/1.4 GM lens at f/1.8, 1/250s shutter, ISO 200";
+      let opticalCharacter = "natural optical perspective with subtle background separation and crisp subject plane";
+
+      if (picked.some(p => p.code === '/heliosswirl')) {
+        lensSetup = "Vintage Soviet Helios 44-2 58mm f/2 lens at f/2.0, organic circular swirly vortex bokeh";
+        opticalCharacter = "hypnotic swirly background bokeh circles, velvety vintage focus fall-off, glowing warm analog aura";
+      } else if (picked.some(p => p.code === '/subwayflash')) {
+        lensSetup = "Sony Alpha 7R V with Sony FE 24mm f/1.4 GM lens, harsh on-camera flash at 1/250s, ISO 400";
+        opticalCharacter = "direct hard paparazzi flash, glossy white subway tile specular reflections, deep hard cast shadows";
+      } else if (picked.some(p => p.code === '/doorpeephole' || p.code === '/goprochest' || p.code === '/fisheyeextreme')) {
+        lensSetup = "Sony FE 14mm f/1.8 GM ultra-wide lens, dynamic perspective curvature, deep depth of field";
+        opticalCharacter = "pronounced optical barrel distortion, deep focus with wide immersive spatial awareness";
+      } else if (picked.some(p => p.code === '/macroeye' || p.code === '/retinaglare')) {
+        lensSetup = "Sony FE 90mm f/2.8 Macro G OSS lens at f/3.2, 1/160s shutter, ISO 100";
+        opticalCharacter = "1:1 macro optical reproduction, razor-thin plane of focus, micro-textures of iris and skin pores";
+      } else if (picked.some(p => p.code === '/telescopic' || p.code === '/paparazzishot')) {
+        lensSetup = "Sony FE 70-200mm f/2.8 GM OSS II lens at 200mm f/2.8, 1/500s shutter, ISO 400";
+        opticalCharacter = "compressed telephoto perspective, pronounced background obliteration, candid observational distance";
+      } else if (picked.some(p => p.code === '/voguecover' || p.code === '/rimlight' || p.code === '/chiaroscuro' || p.code === '/goldenhour')) {
+        lensSetup = "Sony FE 85mm f/1.4 GM II portrait lens at f/1.6, 1/320s shutter, ISO 100";
+        opticalCharacter = "buttery circular bokeh discs, soft organic focus roll-off, three-dimensional subject pop";
+      } else if (picked.some(p => p.code === '/heavyrain' || p.code === '/densefog' || p.code === '/tokyonight' || p.code === '/wetglass' || p.code === '/cyberpunk2077')) {
+        lensSetup = "Sony FE 50mm f/1.2 GM lens at f/1.4, 1/200s shutter, ISO 400";
+        opticalCharacter = "exceptional low-light light transmission, subtle highlight halation, atmospheric depth";
+      }
+
+      const codeList = picked.map(p => p.code).join(' ');
+      const descList = picked.map(p => p.description.split(',')[0]).join(', ');
+
+      const prompt = `A 1:1 facial likeness and identity preservation of the person from the reference image: retaining exact facial anatomy, bone structure, jawline, nose contour, eye shape, iris depth, skin undertone, and authentic natural facial expression. The subject is photographed in ${query}, styled and framed with ${codeList}. Technical camera hardware: Sony Alpha 7R V full-frame camera paired with ${lensSetup}. Optical aesthetic: ${descList}, featuring ${opticalCharacter}. Uncompressed 14-bit RAW capture, natural highlight-to-shadow roll-off, authentic 35mm fine film grain, organic skin micro-textures with visible natural pores and individual stray hairs, volumetric atmospheric lighting, zero synthetic plastic skin, no CGI or airbrushed smoothing.`;
+
+      return {
+        matchedCodes: picked.map(p => p.code),
+        prompt: prompt
+      };
+    }
+
+    function renderAiResult(matchedCodes, prompt) {
+      const chipsContainer = document.getElementById('matchedCodesChips');
+      chipsContainer.innerHTML = '';
+      
+      matchedCodes.forEach(code => {
+        const found = ALL_ITEMS.find(i => i.code === code) || { code: code, categoryShort: 'Code' };
+        const chip = document.createElement('span');
+        chip.className = 'font-mono text-xs px-2.5 py-1 rounded-lg bg-base-800 text-white border border-white/[0.1] flex items-center gap-1.5 cursor-pointer hover:bg-white hover:text-black transition shadow-sm';
+        chip.title = 'Click to copy code';
+        chip.onclick = () => copyCode(found.code);
+        chip.innerHTML = `<span>${found.code}</span> <span class="text-neutral-400 text-[10px]">${found.categoryShort}</span>`;
+        chipsContainer.appendChild(chip);
+      });
+
+      document.getElementById('promptSingleText').innerText = prompt;
+      document.getElementById('aiResultCard').classList.remove('hidden');
+      document.getElementById('aiResultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      lucide.createIcons();
+    }
+
+    function closeAiResult() {
+      document.getElementById('aiResultCard').classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
