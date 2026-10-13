@@ -116,6 +116,21 @@ DEFAULT_REPLIES_NON_FOLLOWER = [
     "Just follow the page and check your DMs in 2 seconds — sending it right over! 🚀"
 ]
 
+# Варіанти відповідей для Facebook (клікабельні прямі посилання на Vault)
+DEFAULT_REPLIES_FACEBOOK_DM_FALLBACK = [
+    "Here is your instant access to the 100+ Prompt Vault: {link} 🚀 Enjoy and bookmark it! ⚡",
+    "Grab the complete Prompt Vault right here: {link} 🔥 Let me know what you build with these! ⚡",
+    "Vault access unlocked! ⚡ Click here for the 100+ AI Prompts & codes: {link} 🚀",
+    "Here you go! 🎁 Instant access to the full prompt database: {link} ⚡"
+]
+
+DEFAULT_REPLIES_FACEBOOK_NON_FOLLOWER = [
+    "Almost yours! 🎁 Grab the full 100+ Prompt Vault right here: {link} ⚡ Follow the page for daily drops! 🔥",
+    "Here is your direct access: {link} 🚀 Make sure to Follow the page for daily new AI prompts! ⚡",
+    "Unlocked! ⚡ Access the complete Prompt Vault right here: {link} 🔥 Drop a follow for new daily updates! 🚀",
+    "Got you covered! 🎁 Direct vault link: {link} ⚡ Follow the page so you don't miss tomorrow's drop!"
+]
+
 # Відповідь якщо у користувача закритий Direct
 DEFAULT_REPLY_PRIVATE_DM = "Tried to DM you, but your inbox is private! 📩 Check the link in my bio or message me first! ⚡"
 
@@ -324,7 +339,10 @@ class LeadFunnelService:
                     )
 
                     if dm_ok:
-                        reply_comment = random.choice(DEFAULT_REPLIES_FOLLOWER)
+                        if platform_name == "facebook":
+                            reply_comment = f"Sent to your Messenger! 📩 You can also access the full vault directly here: {self.get_lead_link('facebook')} ⚡"
+                        else:
+                            reply_comment = random.choice(DEFAULT_REPLIES_FOLLOWER)
                         handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
                         save_lead_comment(
                             platform=platform_name,
@@ -352,8 +370,12 @@ class LeadFunnelService:
                             photo_paths=lead_photos
                         )
                     else:
-                        # Закритий direct або обмеження платформи -> публічно направляємо на bio та надсилаємо звіт
-                        handler.reply_to_comment(comm.comment_id, DEFAULT_REPLY_PRIVATE_DM, post_id=comm.post_id)
+                        # Закритий direct або обмеження платформи -> публічно направляємо на bio або скидаємо прямий лінк (FB)
+                        if platform_name == "facebook":
+                            reply_comment = random.choice(DEFAULT_REPLIES_FACEBOOK_DM_FALLBACK).format(link=self.get_lead_link("facebook"))
+                        else:
+                            reply_comment = DEFAULT_REPLY_PRIVATE_DM
+                        handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
                         save_lead_comment(
                             platform=platform_name,
                             comment_id=comm.comment_id,
@@ -373,12 +395,15 @@ class LeadFunnelService:
                             f"• Платформа: <b>{platform_name.upper()}</b>\n"
                             f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
                             f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{DEFAULT_REPLY_PRIVATE_DM}\"</i>",
+                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>",
                             photo_paths=lead_photos
                         )
                 else:
-                    # Сценарій Б: Людина НЕ підписана -> просимо підписатися та додаємо в чергу
-                    reply_comment = random.choice(DEFAULT_REPLIES_NON_FOLLOWER)
+                    # Сценарій Б: Людина НЕ підписана -> просимо підписатися та додаємо в чергу (на FB одразу даємо прямий лінк!)
+                    if platform_name == "facebook":
+                        reply_comment = random.choice(DEFAULT_REPLIES_FACEBOOK_NON_FOLLOWER).format(link=self.get_lead_link("facebook"))
+                    else:
+                        reply_comment = random.choice(DEFAULT_REPLIES_NON_FOLLOWER)
                     handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
                     save_lead_comment(
                         platform=platform_name,

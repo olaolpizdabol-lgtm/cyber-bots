@@ -89,27 +89,28 @@ class FacebookFunnel(BasePlatformFunnel):
             page.evaluate('''() => {
                 document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => {
                     const txt = el.innerText || "";
-                    if (txt.includes('Log In') || txt.includes('Увійти') || txt.includes('Перегляньте більше') || txt.includes('See more') || txt.includes('Cookies') || txt.includes('файли cookie')) {
+                    if (txt.includes('Log In') || txt.includes('Увійти') || txt.includes('Перегляньте більше') || 
+                        txt.includes('See more') || txt.includes('Cookies') || txt.includes('файли cookie') ||
+                        txt.includes('See more on Facebook') || txt.includes('See more from')) {
                         el.remove();
                     }
                 });
                 document.body.style.overflow = "auto";
             }''')
             for _ in range(2):
+                close_btn = page.locator('[aria-label="Close"], [aria-label="Закрити"], [aria-label="Close dialog"]').first
+                if close_btn.is_visible():
+                    close_btn.click(force=True)
+                    page.wait_for_timeout(600)
                 dialog = page.locator('[role="dialog"]').first
                 if dialog.is_visible():
                     cont_btn = dialog.locator('button:has-text("Продовжити"), button:has-text("Continue"), [role="button"]:has-text("Продовжити"), [role="button"]:has-text("Continue")').first
                     if cont_btn.is_visible():
-                        cont_btn.click()
+                        cont_btn.click(force=True)
                         page.wait_for_timeout(800)
                         continue
-                    close_btn = dialog.locator('[aria-label="Close"], [aria-label="Закрити"], [aria-label="Close dialog"]').first
-                    if close_btn.is_visible():
-                        close_btn.click()
-                        page.wait_for_timeout(800)
-                    else:
-                        page.keyboard.press("Escape")
-                        page.wait_for_timeout(500)
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(400)
         except Exception:
             pass
 
@@ -438,19 +439,41 @@ class FacebookFunnel(BasePlatformFunnel):
                         page.wait_for_timeout(2500)
                         self._dismiss_fb_dialog(page)
 
-                        # Клікаємо кнопку коментування або поле вводу
-                        c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
-                        if c_btn.is_visible():
-                            c_btn.dispatch_event("click")
-                            page.wait_for_timeout(1000)
+                        # 1. Перевіряємо чи є конкретна кнопка Відповісти (Reply) під цією статтею/коментарем
+                        reply_clicked = False
+                        articles = page.locator('div[role="article"]').all()
+                        for art in articles:
+                            txt = art.inner_text()
+                            if comment_id in txt or (len(txt) > 6 and any(w in txt for w in comment_id.split("_"))):
+                                rep_btn = art.locator('span:has-text("Reply"), span:has-text("Відповісти"), [role="button"]:has-text("Reply"), [role="button"]:has-text("Відповісти")').first
+                                if rep_btn.is_visible():
+                                    rep_btn.click(force=True)
+                                    page.wait_for_timeout(800)
+                                    reply_clicked = True
+                                    break
 
+                        # 2. Якщо не знайдено вкладеної гілки — тиснемо головну кнопку Коментувати
+                        if not reply_clicked:
+                            c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
+                            if c_btn.is_visible():
+                                c_btn.dispatch_event("click")
+                                page.wait_for_timeout(1000)
+
+                        self._dismiss_fb_dialog(page)
+
+                        # 3. Знаходимо активне поле вводу Lexical / Draft.js / textarea
                         textbox = page.locator('div[role="textbox"], div[contenteditable="true"], textarea').first
                         if textbox.is_visible():
-                            textbox.focus()
-                            textbox.fill(text)
-                            page.wait_for_timeout(400)
+                            textbox.scroll_into_view_if_needed()
+                            textbox.click(force=True)
+                            page.wait_for_timeout(300)
+                            try:
+                                textbox.fill(text)
+                            except Exception:
+                                page.keyboard.type(text, delay=20)
+                            page.wait_for_timeout(500)
                             page.keyboard.press("Enter")
-                            page.wait_for_timeout(2000)
+                            page.wait_for_timeout(2500)
                             browser.close()
                             logger.info(f"✅ [Facebook Playwright] Опубліковано відповідь на {comment_id}: '{text}'")
                             return True, None
