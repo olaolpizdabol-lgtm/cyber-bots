@@ -101,13 +101,64 @@ class FacebookFunnel(BasePlatformFunnel):
                         context = browser.new_context(**context_kwargs)
 
                     page = context.new_page()
-                    target_url = f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
-                    page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_timeout(3000)
 
-                    # Шукаємо блоки коментарів
+                    # 1. Скануємо вкладку Reels сторінки (де найбільше коментарів)
+                    reels_tab_url = f"https://www.facebook.com/profile.php?id={FACEBOOK_PAGE_ID}&sk=reels_tab"
+                    page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(2500)
+                    reels_links = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
+
+                    # Перевіряємо перші відео з Reels
+                    for r_href in reels_links[:limit_posts]:
+                        if not r_href or r_href.startswith("/reel/?"):
+                            continue
+                        r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
+                        try:
+                            page.goto(r_url, wait_until="domcontentloaded", timeout=20000)
+                            page.wait_for_timeout(2000)
+
+                            # Відкриваємо коментарі (клік по іконці коментарів)
+                            c_btn = page.locator('[aria-label*="Comment"], [aria-label*="comment"]').first
+                            if c_btn.is_visible():
+                                c_btn.click()
+                                page.wait_for_timeout(1500)
+
+                            # Прокручуємо коментарі
+                            for _ in range(3):
+                                page.mouse.wheel(0, 1000)
+                                page.wait_for_timeout(600)
+
+                            # Читаємо коментарі
+                            c_dialog = page.locator('div[role="dialog"], div[role="main"]').first
+                            txt_content = c_dialog.inner_text() if c_dialog.count() > 0 else ""
+                            lines = [l.strip() for l in txt_content.split('\n') if l.strip()]
+
+                            for idx, line in enumerate(lines):
+                                if line.lower() == 'reply' and idx >= 2:
+                                    c_body = lines[idx-1]
+                                    u_candidate = lines[idx-2] if idx >= 2 else "fb_user"
+                                    if u_candidate not in ("Bohdan GPT", "Author", "Автор", "Reply"):
+                                        has_rep = any("bohdan" in sub.lower() for sub in lines[idx:min(len(lines), idx+4)])
+                                        c_id_gen = f"fb_{abs(hash(u_candidate + c_body + r_url))}"
+                                        results.append(PlatformComment(
+                                            comment_id=c_id_gen,
+                                            post_id=r_url,
+                                            post_url=r_url,
+                                            user_id=c_id_gen,
+                                            username=u_candidate,
+                                            text=c_body,
+                                            has_author_replied=has_rep
+                                        ))
+                        except Exception:
+                            continue
+
+                    # 2. Також перевіряємо основну стрічку сторінки
+                    page.goto(f"https://www.facebook.com/{FACEBOOK_PAGE_ID}", wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_timeout(2500)
+
+                    # Шукаємо блоки коментарів на стіні
                     comment_nodes = page.locator('div[role="article"]').all()
-                    for node in comment_nodes[:15]:
+                    for node in comment_nodes[:10]:
                         try:
                             txt = node.inner_text().strip()
                             lines = [l.strip() for l in txt.split("\n") if l.strip()]
@@ -119,7 +170,7 @@ class FacebookFunnel(BasePlatformFunnel):
                                     results.append(PlatformComment(
                                         comment_id=c_id_gen,
                                         post_id=FACEBOOK_PAGE_ID,
-                                        post_url=target_url,
+                                        post_url=f"https://www.facebook.com/{FACEBOOK_PAGE_ID}",
                                         user_id=c_id_gen,
                                         username=user_candidate,
                                         text=comment_body,
