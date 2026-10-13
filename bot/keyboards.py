@@ -391,7 +391,8 @@ def get_lead_funnel_menu_keyboard() -> InlineKeyboardMarkup:
     """Меню керування автоматизацією Lead Magnet Funnel (Comment-to-DM)"""
     buttons = [
         [
-            InlineKeyboardButton(text="⚡ Запустити перевірку коментарів зараз", callback_data="funnel_run_now")
+            InlineKeyboardButton(text="⚡️ Швидкий скан (Останні пости)", callback_data="funnel_run_fast"),
+            InlineKeyboardButton(text="🌐 Повний скан (УСІ 59+ відео)", callback_data="funnel_run_all")
         ],
         [
             InlineKeyboardButton(text="📋 Ключові слова-тригери", callback_data="funnel_triggers"),

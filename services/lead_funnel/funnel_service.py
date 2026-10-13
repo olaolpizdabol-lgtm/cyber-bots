@@ -134,9 +134,11 @@ class LeadFunnelService:
         link = self.get_lead_link(platform=platform)
         return tpl.format(link=link)
 
-    def process_platform_comments(self, platform_name: str, limit_posts: int = 5) -> Dict[str, int]:
+    def process_platform_comments(self, platform_name: str, limit_posts: Optional[int] = 5, max_replies_batch: int = 25) -> Dict[str, int]:
         """
-        Перевіряє та обробляє всі свіжі коментарі для обраної платформи.
+        Перевіряє та обробляє всі свіжі або всі історичні коментарі для обраної платформи.
+        limit_posts=None означає глибокий скан УСІХ доступних відео.
+        max_replies_batch обмежує кількість активних відповідей за 1 раз для захисту від блокувань Meta.
         """
         handler = self.platforms.get(platform_name)
         if not handler:
@@ -144,18 +146,44 @@ class LeadFunnelService:
 
         stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0}
         comments = handler.fetch_recent_unanswered_comments(limit_posts=limit_posts)
-        logger.info(f"[{platform_name.upper()}] Отримано {len(comments)} коментарів для перевірки")
+        logger.info(f"[{platform_name.upper()}] Отримано {len(comments)} коментарів для перевірки (limit_posts={limit_posts})")
 
         triggers = get_lead_funnel_triggers(only_active=True)
 
         for comm in comments:
-            # Перевіряємо, чи цей коментар уже є в базі
+            # 1. Захист від перевищення годинного ліміту платформи (Meta anti-ban)
+            if stats["leads"] >= max_replies_batch:
+                logger.info(
+                    f"[{platform_name.upper()}] 🛡 Досягнуто безпечний ліміт пачки ({max_replies_batch} відповідей). "
+                    f"Залишок коментарів буде опрацьовано у наступних циклах для уникнення блокувань."
+                )
+                break
+
+            # 2. Перевіряємо, чи цей коментар уже є в базі
             existing = get_lead_comment(platform_name, comm.comment_id)
             if existing:
                 continue
 
+            # 3. Якщо автор ВЖЕ відповів (перевірено через DOM сторінки/відео)
+            if comm.has_author_replied:
+                save_lead_comment(
+                    platform=platform_name,
+                    comment_id=comm.comment_id,
+                    post_id=comm.post_id,
+                    post_url=comm.post_url,
+                    user_id=comm.user_id,
+                    username=comm.username,
+                    comment_text=comm.text,
+                    detected_intent="already_replied",
+                    matched_trigger=None,
+                    is_following=False,
+                    status="already_replied_manual",
+                    dm_sent=False
+                )
+                continue
+
             stats["processed"] += 1
-            # 1. Розпізнавання наміру
+            # 4. Розпізнавання наміру
             intent_res = detect_comment_intent(comm.text, custom_triggers=triggers)
             logger.info(f"[{platform_name}] Comment from {comm.username}: '{comm.text[:40]}' -> Intent: {intent_res.intent}")
 
@@ -267,6 +295,9 @@ class LeadFunnelService:
                     )
                     stats["pending_follow"] += 1
 
+                # Анти-бан пауза між активними діями/відповідями (8-16 секунд)
+                time.sleep(random.uniform(8.0, 16.0))
+
             elif intent_res.intent == "question_chat" and intent_res.ai_reply_text:
                 # Відповідаємо розумно згенерованим текстом
                 handler.reply_to_comment(comm.comment_id, intent_res.ai_reply_text, post_id=comm.post_id)
@@ -284,9 +315,7 @@ class LeadFunnelService:
                     status="replied_public_only",
                     dm_sent=False
                 )
-
-            # Анти-бан пауза між відповідями (5-15 секунд)
-            time.sleep(random.uniform(5.0, 15.0))
+                time.sleep(random.uniform(8.0, 16.0))
 
         return stats
 

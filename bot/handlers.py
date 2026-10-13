@@ -2576,17 +2576,24 @@ async def message_new_lead_dm(message: Message, state: FSMContext):
         await message.answer("⚠️ Шаблон обов'язково повинен містити тег <code>{link}</code>, щоб бот знав, куди вставляти посилання.")
 
 
-@router.callback_query(F.data == "funnel_run_now")
-async def callback_funnel_run_now(call: CallbackQuery):
-    await call.answer("⚡ Запускаю перевірку коментарів та очікуючих підписок...", show_alert=False)
-    status_msg = await call.message.answer("⏳ <i>Сканую нові коментарі на Instagram, Facebook, TikTok та YouTube...</i>", parse_mode="HTML")
+@router.callback_query(F.data.in_({"funnel_run_now", "funnel_run_fast", "funnel_run_all"}))
+async def callback_funnel_run_scan(call: CallbackQuery):
+    is_full_scan = (call.data == "funnel_run_all")
+    limit = None if is_full_scan else 6
+    mode_title = "🌐 <b>Глибокий скан УСІХ 59+ відео</b>" if is_full_scan else "⚡ <b>Швидкий скан активних відео</b>"
+
+    await call.answer("⚡ Запускаю перевірку воронки...", show_alert=False)
+    status_msg = await call.message.answer(
+        f"{mode_title}\n<i>Сканую коментарі на Instagram (@bohdan.gpt), Facebook, TikTok та YouTube...</i>",
+        parse_mode="HTML"
+    )
 
     loop = asyncio.get_event_loop()
-    # 1. Обробка свіжих коментарів
+    # 1. Обробка коментарів
     total_stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0}
     for platform in ["instagram", "facebook", "tiktok", "youtube"]:
         try:
-            p_stats = await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, 5)
+            p_stats = await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit)
             for k, v in p_stats.items():
                 total_stats[k] = total_stats.get(k, 0) + v
         except Exception as e:
@@ -2596,7 +2603,8 @@ async def callback_funnel_run_now(call: CallbackQuery):
     converted = await loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads)
 
     summary_text = (
-        "🚀 <b>Результати перевірки воронки:</b>\n\n"
+        f"🚀 <b>Результати перевірки воронки:</b>\n"
+        f"• Режим: {mode_title}\n\n"
         f"• Перевірено коментарів: <b>{total_stats['processed']}</b>\n"
         f"• Знайдено запитів лід-магніту: <b>{total_stats['leads']}</b>\n"
         f"• Надіслано Direct повідомлень (підписаним): <b>{total_stats['dms_sent']}</b>\n"

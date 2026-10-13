@@ -308,12 +308,21 @@ async def main():
         logger.info("🎯 Фоновий моніторинг Lead Magnet Funnel (коментарі & конверсія підписок) активовано.")
         from services.lead_funnel import lead_funnel_service
         await asyncio.sleep(60)
+        cycle_count = 0
         while True:
             try:
+                cycle_count += 1
                 loop = asyncio.get_event_loop()
+                # Раз на 12 циклів (~кожні 2 години) запускається Глибокий скан УСІХ 59+ відео (limit_posts=None)
+                # Кожні 10 хвилин — швидкий скан найсвіжіших/активних постів (limit_posts=6)
+                is_deep_sweep = (cycle_count % 12 == 0)
+                limit = None if is_deep_sweep else 6
+                mode_label = "🌐 Глибокий скан (УСІ відео)" if is_deep_sweep else "⚡ Швидкий скан (активні відео)"
+                logger.info(f"Запуск циклу #{cycle_count} воронки: {mode_label}...")
+
                 for platform in ["instagram", "facebook", "tiktok", "youtube"]:
                     try:
-                        await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, 3)
+                        await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit)
                     except Exception as pe:
                         logger.debug(f"Lead funnel {platform} poll: {pe}")
 

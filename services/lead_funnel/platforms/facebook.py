@@ -108,11 +108,20 @@ class FacebookFunnel(BasePlatformFunnel):
                     reels_tab_url = f"https://www.facebook.com/profile.php?id={FACEBOOK_PAGE_ID}&sk=reels_tab"
                     page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=20000)
                     page.wait_for_timeout(2500)
-                    reels_links = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
 
-                    # Перевіряємо перші відео з Reels
-                    for r_href in reels_links[:limit_posts]:
-                        if not r_href or r_href.startswith("/reel/?"):
+                    # Якщо потрібен повний скан — прокручуємо стрічку Reels
+                    if limit_posts is None or limit_posts > 6:
+                        for _ in range(6):
+                            page.mouse.wheel(0, 2000)
+                            page.wait_for_timeout(700)
+
+                    raw_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
+                    unique_reels = list(dict.fromkeys([l for l in raw_reels if l and not l.startswith("/reel/?")]))
+                    target_reels = unique_reels if limit_posts is None else unique_reels[:limit_posts]
+
+                    # Перевіряємо відео з Reels
+                    for r_href in target_reels:
+                        if not r_href:
                             continue
                         r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
                         try:

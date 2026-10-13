@@ -38,15 +38,22 @@ class TikTokFunnel(BasePlatformFunnel):
                     page.goto("https://www.tiktok.com/@bohdan.gpt", wait_until="domcontentloaded", timeout=15000)
                     page.wait_for_timeout(3000)
 
-                    # Знаходимо перше відео
-                    video_links = page.locator('a[href*="/video/"]').all()
-                    if video_links:
-                        first_vid_url = video_links[0].get_attribute("href")
-                        if first_vid_url:
-                            page.goto(first_vid_url, wait_until="domcontentloaded", timeout=15000)
-                            page.wait_for_timeout(3000)
+                    # Знаходимо відео профілю
+                    if limit_posts is None or limit_posts > 5:
+                        for _ in range(4):
+                            page.mouse.wheel(0, 2000)
+                            page.wait_for_timeout(600)
+
+                    raw_vids = [a.get_attribute("href") for a in page.locator('a[href*="/video/"]').all()]
+                    unique_vids = list(dict.fromkeys([l for l in raw_vids if l]))
+                    target_vids = unique_vids if limit_posts is None else unique_vids[:limit_posts]
+
+                    for vid_url in target_vids:
+                        try:
+                            page.goto(vid_url, wait_until="domcontentloaded", timeout=15000)
+                            page.wait_for_timeout(2500)
                             comment_elems = page.locator('[data-e2e="comment-level-1"]').all()
-                            for c in comment_elems[:10]:
+                            for c in comment_elems[:15]:
                                 try:
                                     text = c.inner_text()
                                     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -57,8 +64,8 @@ class TikTokFunnel(BasePlatformFunnel):
                                             c_id_gen = f"tt_{abs(hash(text))}"
                                             results.append(PlatformComment(
                                                 comment_id=c_id_gen,
-                                                post_id=first_vid_url,
-                                                post_url=first_vid_url,
+                                                post_id=vid_url,
+                                                post_url=vid_url,
                                                 user_id=c_id_gen,
                                                 username=u_name,
                                                 text=c_body,
@@ -66,6 +73,9 @@ class TikTokFunnel(BasePlatformFunnel):
                                             ))
                                 except Exception:
                                     continue
+                        except Exception as vid_err:
+                            logger.debug(f"Помилка парсингу TikTok відео {vid_url}: {vid_err}")
+                            continue
                     browser.close()
         except Exception as e:
             logger.debug(f"TikTok fetch comments: {e}")

@@ -51,13 +51,14 @@ class InstagramFunnel(BasePlatformFunnel):
         self._client = cl
         return cl
 
-    def fetch_recent_unanswered_comments(self, limit_posts: int = 6) -> List[PlatformComment]:
-        """Отримує коментарі під останніми Reels/дописами (API + Playwright fallback)"""
+    def fetch_recent_unanswered_comments(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
+        """Отримує коментарі під публікаціями (API + Playwright fallback для всіх відео)"""
         comments: List[PlatformComment] = []
         cl = self._get_client()
         try:
+            amt = limit_posts if limit_posts is not None else 50
             user_id = cl.user_id_from_username(INSTAGRAM_USERNAME or "bohdan.gpt")
-            medias = cl.user_medias(user_id, amount=limit_posts)
+            medias = cl.user_medias(user_id, amount=amt)
             for m in medias:
                 media_id = m.id
                 raw_comms = cl.media_comments(media_id)
@@ -83,8 +84,8 @@ class InstagramFunnel(BasePlatformFunnel):
 
         return comments
 
-    def _fetch_comments_via_browser(self, limit_posts: int = 6) -> List[PlatformComment]:
-        """Парсинг коментарів через Playwright браузерну сесію (надійний фолбек)"""
+    def _fetch_comments_via_browser(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
+        """Парсинг коментарів через Playwright браузерну сесію для ВСІХ публікацій"""
         results: List[PlatformComment] = []
         state_file = DATA_DIR / "instagram_state.json"
         if not state_file.exists():
@@ -100,47 +101,83 @@ class InstagramFunnel(BasePlatformFunnel):
                     page = context.new_page()
                     page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
                     page.wait_for_timeout(2500)
-                    links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
 
-                    for href in links[:limit_posts]:
+                    # Якщо потрібно просканувати всі пости — скролимо профіль
+                    if limit_posts is None or limit_posts > 12:
+                        for _ in range(8):
+                            page.mouse.wheel(0, 2500)
+                            page.wait_for_timeout(700)
+
+                    raw_links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
+                    unique_links = list(dict.fromkeys([l for l in raw_links if l]))
+                    target_links = unique_links if limit_posts is None else unique_links[:limit_posts]
+
+                    for href in target_links:
                         if not href:
                             continue
                         post_url = f"https://www.instagram.com{href}"
-                        page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
-                        page.wait_for_timeout(2500)
+                        try:
+                            page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
+                            page.wait_for_timeout(2000)
 
-                        full_text = page.locator('article, [role="dialog"], main').first.inner_text()
-                        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+                            # 1. Розгортаємо приховані коментарі та пагінацію (lazy-load)
+                            try:
+                                # Прокручуємо контейнер коментарів вниз, щоб підвантажити сховані
+                                for _ in range(4):
+                                    page.mouse.wheel(0, 1200)
+                                    page.wait_for_timeout(800)
 
-                        for idx, line in enumerate(lines):
-                            if line.lower() == 'reply' and idx >= 2:
-                                comment_text = lines[idx-1]
-                                username = None
-                                time_ago = None
-                                for back in range(2, 6):
-                                    if idx - back >= 0:
-                                        candidate = lines[idx - back]
-                                        if any(unit in candidate for unit in ['m', 'h', 'd', 'w', 'Edited']) and len(candidate) <= 15:
-                                            time_ago = candidate
-                                            if idx - back - 1 >= 0:
-                                                username = lines[idx - back - 1]
-                                            break
-                                if username and username != (INSTAGRAM_USERNAME or 'bohdan.gpt') and 'tag a' not in username.lower() and 'drop an' not in username.lower():
-                                    c_content = comment_text
-                                    if any(w in c_content.lower() for w in ['like', 'likes', 'view all']):
-                                        c_content = lines[idx-2]
+                                # Клікаємо кнопку 'View hidden comments' якщо Meta приховала коментарі
+                                hidden_btn = page.locator('text="View hidden comments", [aria-label*="hidden comments"]').first
+                                if hidden_btn.is_visible():
+                                    hidden_btn.click()
+                                    page.wait_for_timeout(1000)
+                            except Exception:
+                                pass
 
-                                    c_id = f"ig_{abs(hash(username + c_content + href))}"
-                                    results.append(PlatformComment(
-                                        comment_id=c_id,
-                                        post_id=href,
-                                        post_url=post_url,
-                                        user_id=username,
-                                        username=username,
-                                        text=c_content,
-                                        has_author_replied=False,
-                                        created_time=time_ago
-                                    ))
+                            full_text = page.locator('article, [role="dialog"], main').first.inner_text()
+                            lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+
+                            for idx, line in enumerate(lines):
+                                if line.lower() == 'reply' and idx >= 2:
+                                    comment_text = lines[idx-1]
+                                    username = None
+                                    time_ago = None
+                                    for back in range(2, 6):
+                                        if idx - back >= 0:
+                                            candidate = lines[idx - back]
+                                            if any(unit in candidate for unit in ['m', 'h', 'd', 'w', 'Edited']) and len(candidate) <= 15:
+                                                time_ago = candidate
+                                                if idx - back - 1 >= 0:
+                                                    username = lines[idx - back - 1]
+                                                break
+                                    if username and username != (INSTAGRAM_USERNAME or 'bohdan.gpt') and 'tag a' not in username.lower() and 'drop an' not in username.lower():
+                                        c_content = comment_text
+                                        if any(w in c_content.lower() for w in ['like', 'likes', 'view all']):
+                                            c_content = lines[idx-2]
+
+                                        # 2. Перевірка: чи автор ВЖЕ відповів у цьому ланцюжку
+                                        has_replied = False
+                                        sub_window = lines[idx:min(len(lines), idx+5)]
+                                        for sub in sub_window:
+                                            if (INSTAGRAM_USERNAME or 'bohdan.gpt').lower() in sub.lower() and any(w in sub.lower() for w in ['dm', 'sent', 'check', 'message']):
+                                                has_replied = True
+                                                break
+
+                                        c_id = f"ig_{abs(hash(username + c_content + href))}"
+                                        results.append(PlatformComment(
+                                            comment_id=c_id,
+                                            post_id=href,
+                                            post_url=post_url,
+                                            user_id=username,
+                                            username=username,
+                                            text=c_content,
+                                            has_author_replied=has_replied,
+                                            created_time=time_ago
+                                        ))
+                        except Exception as post_err:
+                            logger.debug(f"Помилка парсингу поста {post_url}: {post_err}")
+                            continue
                     browser.close()
         except Exception as e:
             logger.debug(f"Instagram Playwright fetch comments: {e}")
