@@ -21,7 +21,9 @@ from config import BASE_DIR, DATA_DIR
 
 logger = logging.getLogger("facebook_funnel")
 
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "1383757231485870").strip()
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "61594989335713").strip()
+if FACEBOOK_PAGE_ID == "1383757231485870":
+    FACEBOOK_PAGE_ID = "61594989335713"
 FACEBOOK_PAGE_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip()
 FACEBOOK_STATE_FILE = DATA_DIR / "facebook_state.json"
 
@@ -123,32 +125,56 @@ class FacebookFunnel(BasePlatformFunnel):
                                 c_btn.click()
                                 page.wait_for_timeout(1500)
 
-                            # Прокручуємо коментарі
-                            for _ in range(3):
-                                page.mouse.wheel(0, 1000)
+                            # 1.1 Перемикаємо фільтр з 'Most relevant' на 'All comments' (розкриває приховані коментарі)
+                            try:
+                                rel_btn = page.get_by_text("Most relevant").first
+                                if rel_btn.is_visible():
+                                    rel_btn.click()
+                                    page.wait_for_timeout(800)
+                                    all_opt = page.get_by_text("All comments").first
+                                    if all_opt.is_visible():
+                                        all_opt.click()
+                                        page.wait_for_timeout(1500)
+                            except Exception:
+                                pass
+
+                            # Прокручуємо коментарі вниз для підвантаження історії
+                            for _ in range(4):
+                                page.mouse.wheel(0, 1200)
                                 page.wait_for_timeout(600)
 
-                            # Читаємо коментарі
-                            c_dialog = page.locator('div[role="dialog"], div[role="main"]').first
-                            txt_content = c_dialog.inner_text() if c_dialog.count() > 0 else ""
-                            lines = [l.strip() for l in txt_content.split('\n') if l.strip()]
+                            # Вибираємо всі коментарі як окремі статті div[role="article"]
+                            comment_articles = page.locator('div[role="article"]').all()
+                            for art in comment_articles:
+                                try:
+                                    txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
+                                    if len(txt_lines) >= 2 and any(k in txt_lines for k in ["Reply", "Send message", "Hide"]):
+                                        u_name = txt_lines[0]
+                                        # Шукаємо тіло коментаря (текст перед кнопками дій)
+                                        reply_idx = -1
+                                        for k_idx, item in enumerate(txt_lines):
+                                            if item in ("Reply", "Send message", "Hide"):
+                                                reply_idx = k_idx
+                                                break
+                                        if reply_idx >= 1:
+                                            c_text = txt_lines[reply_idx - 1]
+                                            t_str = txt_lines[1] if len(txt_lines) > 2 and any(u in txt_lines[1] for u in ['m', 'h', 'd', 'w', '·']) else None
 
-                            for idx, line in enumerate(lines):
-                                if line.lower() == 'reply' and idx >= 2:
-                                    c_body = lines[idx-1]
-                                    u_candidate = lines[idx-2] if idx >= 2 else "fb_user"
-                                    if u_candidate not in ("Bohdan GPT", "Author", "Автор", "Reply"):
-                                        has_rep = any("bohdan" in sub.lower() for sub in lines[idx:min(len(lines), idx+4)])
-                                        c_id_gen = f"fb_{abs(hash(u_candidate + c_body + r_url))}"
-                                        results.append(PlatformComment(
-                                            comment_id=c_id_gen,
-                                            post_id=r_url,
-                                            post_url=r_url,
-                                            user_id=c_id_gen,
-                                            username=u_candidate,
-                                            text=c_body,
-                                            has_author_replied=has_rep
-                                        ))
+                                            if u_name not in ("Bohdan GPT", "Author", "Автор"):
+                                                has_rep = any("bohdan" in s.lower() for s in txt_lines)
+                                                c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
+                                                results.append(PlatformComment(
+                                                    comment_id=c_id_gen,
+                                                    post_id=r_url,
+                                                    post_url=r_url,
+                                                    user_id=c_id_gen,
+                                                    username=u_name,
+                                                    text=c_text,
+                                                    has_author_replied=has_rep,
+                                                    created_time=t_str
+                                                ))
+                                except Exception:
+                                    continue
                         except Exception:
                             continue
 
