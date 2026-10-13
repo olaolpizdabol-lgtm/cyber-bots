@@ -316,6 +316,30 @@ class InstagramFunnel(BasePlatformFunnel):
                         browser = p.chromium.launch(headless=True)
                         ctx = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
+
+                        # Спроба 1: Прямий перехід на профіль користувача та клік "Message"
+                        page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+                        msg_btn = page.locator('header [role="button"]:has-text("Message"), header button:has-text("Message"), header div:has-text("Message")').first
+                        if msg_btn.is_visible():
+                            msg_btn.click()
+                            page.wait_for_timeout(2500)
+                            for _ in range(2):
+                                notif = page.locator('button:has-text("Not Now"), [role="button"]:has-text("Not Now")').first
+                                if notif.is_visible():
+                                    notif.click()
+                                    page.wait_for_timeout(500)
+                            msg_box = page.locator('div[role="textbox"][aria-label*="Message" i], div[contenteditable="true"], textarea').first
+                            if msg_box.is_visible():
+                                msg_box.fill(text)
+                                page.wait_for_timeout(500)
+                                page.keyboard.press("Enter")
+                                page.wait_for_timeout(1500)
+                                browser.close()
+                                logger.info(f"✅ Instagram Playwright DM надіслано до @{username} (через профіль)")
+                                return True, None
+
+                        # Спроба 2: Через direct/new
                         page.goto("https://www.instagram.com/direct/new/", wait_until="domcontentloaded", timeout=20000)
                         page.wait_for_timeout(2000)
                         search_inp = page.locator('input[placeholder*="Search" i], input[name*="query" i]').first
@@ -343,7 +367,7 @@ class InstagramFunnel(BasePlatformFunnel):
             except Exception as b_err:
                 logger.warning(f"Instagram Playwright DM error: {b_err}")
 
-        return False, "dm_failed"
+        return False, "private_dm"
 
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Відповідає на коментар у публічній стрічці"""

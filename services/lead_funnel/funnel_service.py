@@ -45,8 +45,46 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
     valid_photos = [p for p in (photo_paths or []) if p and Path(p).exists()]
 
     for uid in ALLOWED_USER_IDS:
-        try:
-            if not valid_photos:
+        sent_ok = False
+        if valid_photos:
+            try:
+                if len(valid_photos) == 1:
+                    with open(valid_photos[0], "rb") as f:
+                        r = requests.post(
+                            f"https://api.telegram.org/bot{token}/sendPhoto",
+                            data={"chat_id": uid, "caption": html_text, "parse_mode": "HTML"},
+                            files={"photo": f},
+                            timeout=12
+                        )
+                        if r.status_code == 200:
+                            sent_ok = True
+                else:
+                    files = {}
+                    media = []
+                    for idx, p_path in enumerate(valid_photos[:5]):
+                        files[f"photo{idx}"] = open(p_path, "rb")
+                        m_item = {"type": "photo", "media": f"attach://photo{idx}"}
+                        if idx == 0:
+                            m_item["caption"] = html_text
+                            m_item["parse_mode"] = "HTML"
+                        media.append(m_item)
+                    try:
+                        r = requests.post(
+                            f"https://api.telegram.org/bot{token}/sendMediaGroup",
+                            data={"chat_id": uid, "media": json.dumps(media)},
+                            files=files,
+                            timeout=15
+                        )
+                        if r.status_code == 200:
+                            sent_ok = True
+                    finally:
+                        for f in files.values():
+                            f.close()
+            except Exception as photo_err:
+                logger.warning(f"Telegram notification photo error: {photo_err}")
+
+        if not sent_ok:
+            try:
                 requests.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json={
@@ -57,36 +95,8 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
                     },
                     timeout=8
                 )
-            elif len(valid_photos) == 1:
-                with open(valid_photos[0], "rb") as f:
-                    requests.post(
-                        f"https://api.telegram.org/bot{token}/sendPhoto",
-                        data={"chat_id": uid, "caption": html_text, "parse_mode": "HTML"},
-                        files={"photo": f},
-                        timeout=12
-                    )
-            else:
-                files = {}
-                media = []
-                for idx, p_path in enumerate(valid_photos[:5]):
-                    files[f"photo{idx}"] = open(p_path, "rb")
-                    m_item = {"type": "photo", "media": f"attach://photo{idx}"}
-                    if idx == 0:
-                        m_item["caption"] = html_text
-                        m_item["parse_mode"] = "HTML"
-                    media.append(m_item)
-                try:
-                    requests.post(
-                        f"https://api.telegram.org/bot{token}/sendMediaGroup",
-                        data={"chat_id": uid, "media": json.dumps(media)},
-                        files=files,
-                        timeout=15
-                    )
-                finally:
-                    for f in files.values():
-                        f.close()
-        except Exception as e:
-            logger.debug(f"Telegram notification error: {e}")
+            except Exception as e:
+                logger.error(f"Telegram notification sendMessage error: {e}")
 
 
 # Варіанти відповідей у коментарях для підписаних користувачів (Spintax / рандомізація проти спам-фільтрів)
@@ -341,8 +351,8 @@ class LeadFunnelService:
                             f"• 📩 <b>Надіслано в Direct:</b>\n<code>{dm_text}</code>",
                             photo_paths=lead_photos
                         )
-                    elif dm_err == "private_dm":
-                        # Закритий direct
+                    else:
+                        # Закритий direct або обмеження платформи -> публічно направляємо на bio та надсилаємо звіт
                         handler.reply_to_comment(comm.comment_id, DEFAULT_REPLY_PRIVATE_DM, post_id=comm.post_id)
                         save_lead_comment(
                             platform=platform_name,
@@ -355,13 +365,13 @@ class LeadFunnelService:
                             detected_intent="lead_magnet",
                             matched_trigger=intent_res.matched_trigger,
                             is_following=True,
-                            status="dm_failed_private",
+                            status="dm_failed_private" if dm_err == "private_dm" else "dm_failed",
                             dm_sent=False
                         )
                         notify_telegram_lead(
                             f"⚠️ <b>Закритий Direct у користувача:</b>\n"
                             f"• Платформа: <b>{platform_name.upper()}</b>\n"
-                            f"• Користувач: <code>@{comm.username}</code>\n"
+                            f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
                             f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
                             f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{DEFAULT_REPLY_PRIVATE_DM}\"</i>",
                             photo_paths=lead_photos
