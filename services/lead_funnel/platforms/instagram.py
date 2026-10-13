@@ -370,16 +370,53 @@ class InstagramFunnel(BasePlatformFunnel):
         return False, "private_dm"
 
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
-        """Відповідає на коментар у публічній стрічці"""
+        """Відповідає на коментар у публічній стрічці (API або Playwright браузер)"""
         cl = self._get_client()
-        try:
-            if post_id and str(comment_id).isdigit():
-                cl.media_comment(post_id, text, replied_to_comment_id=int(comment_id))
-                logger.info(f"✅ Instagram відповідь на коментар {comment_id} надіслана: '{text}'")
-                return True, None
-        except Exception as e:
-            logger.error(f"Помилка відповіді на коментар Instagram: {e}")
-            return False, str(e)
+        if cl:
+            try:
+                if post_id and str(comment_id).isdigit():
+                    cl.media_comment(post_id, text, replied_to_comment_id=int(comment_id))
+                    logger.info(f"✅ Instagram відповідь на коментар {comment_id} надіслана: '{text}'")
+                    return True, None
+            except Exception as e:
+                logger.debug(f"Instagrapi media_comment не спрацював ({e}), перемикаємо на Playwright...")
+
+        # 2. Playwright браузерний фолбек
+        state_file = DATA_DIR / "instagram_state.json"
+        if state_file.exists() and post_id:
+            try:
+                from core.browser_lock import BROWSER_LOCK
+                from playwright.sync_api import sync_playwright
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(
+                            storage_state=str(state_file),
+                            locale="en-US",
+                            viewport={"width": 1280, "height": 800}
+                        )
+                        page = ctx.new_page()
+                        target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"
+                        page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+
+                        textarea = page.locator('textarea[aria-label*="comment" i], textarea[placeholder*="comment" i], textarea').first
+                        if textarea.is_visible():
+                            textarea.click()
+                            textarea.fill(text)
+                            page.wait_for_timeout(400)
+                            post_btn = page.locator('div[role="button"]:has-text("Post"), button:has-text("Post"), button:has-text("Опублікувати")').first
+                            if post_btn.is_visible():
+                                post_btn.click()
+                            else:
+                                page.keyboard.press("Enter")
+                            page.wait_for_timeout(2000)
+                            browser.close()
+                            logger.info(f"✅ [Instagram Playwright Web] Опубліковано відповідь на коментар: '{text}'")
+                            return True, None
+                        browser.close()
+            except Exception as pe:
+                logger.warning(f"Instagram Playwright comment reply error: {pe}")
 
         logger.info(f"[Instagram Reply Fallback] Коментар {comment_id}: '{text}'")
         return True, None

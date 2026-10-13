@@ -86,10 +86,24 @@ class FacebookFunnel(BasePlatformFunnel):
     def _dismiss_fb_dialog(self, page):
         """Закриває спливаюче вікно входу Meta/Facebook, якщо воно з'явилося"""
         try:
+            page.evaluate('''() => {
+                document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => {
+                    const txt = el.innerText || "";
+                    if (txt.includes('Log In') || txt.includes('Увійти') || txt.includes('Перегляньте більше') || txt.includes('See more') || txt.includes('Cookies') || txt.includes('файли cookie')) {
+                        el.remove();
+                    }
+                });
+                document.body.style.overflow = "auto";
+            }''')
             for _ in range(2):
                 dialog = page.locator('[role="dialog"]').first
                 if dialog.is_visible():
-                    close_btn = dialog.locator('[aria-label="Close"], [aria-label="Закрити"]').first
+                    cont_btn = dialog.locator('button:has-text("Продовжити"), button:has-text("Continue"), [role="button"]:has-text("Продовжити"), [role="button"]:has-text("Continue")').first
+                    if cont_btn.is_visible():
+                        cont_btn.click()
+                        page.wait_for_timeout(800)
+                        continue
+                    close_btn = dialog.locator('[aria-label="Close"], [aria-label="Закрити"], [aria-label="Close dialog"]').first
                     if close_btn.is_visible():
                         close_btn.click()
                         page.wait_for_timeout(800)
@@ -384,13 +398,13 @@ class FacebookFunnel(BasePlatformFunnel):
             except Exception as e:
                 logger.debug(f"Помилка відправки FB Graph API: {e}")
 
-        # 2. Браузерний фолбек
-        logger.info(f"[Facebook DM Mock/Browser fallback] Direct message для {username}: {text[:50]}...")
-        return True, None
+        # 2. Браузерний фолбек: якщо Graph API недоступний (Dev mode), повертаємо restricted_dm для публічної відповіді
+        logger.info(f"[Facebook DM] Прямий Direct до @{username} обмежено платформою Meta, перемикаємо на публічну відповідь...")
+        return False, "restricted_dm"
 
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """
-        Публікує публічну відповідь на коментар у Facebook.
+        Публікує публічну відповідь на коментар у Facebook (Graph API або Playwright).
         """
         # 1. Graph API
         if FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_") and not comment_id.startswith("fb_"):
@@ -403,7 +417,47 @@ class FacebookFunnel(BasePlatformFunnel):
             except Exception as e:
                 logger.debug(f"Помилка FB Graph API публічної відповіді: {e}")
 
-        # 2. Браузерне підтвердження
+        # 2. Браузерна публікація через Playwright
+        if FACEBOOK_STATE_FILE.exists():
+            try:
+                from core.browser_lock import BROWSER_LOCK
+                from playwright.sync_api import sync_playwright
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(
+                            storage_state=str(FACEBOOK_STATE_FILE),
+                            locale="en-US",
+                            viewport={"width": 1280, "height": 800}
+                        )
+                        page = ctx.new_page()
+                        target_url = post_id if post_id and str(post_id).startswith("http") else (
+                            f"https://www.facebook.com{post_id}" if post_id else f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
+                        )
+                        page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2500)
+                        self._dismiss_fb_dialog(page)
+
+                        # Клікаємо кнопку коментування або поле вводу
+                        c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
+                        if c_btn.is_visible():
+                            c_btn.dispatch_event("click")
+                            page.wait_for_timeout(1000)
+
+                        textbox = page.locator('div[role="textbox"], div[contenteditable="true"], textarea').first
+                        if textbox.is_visible():
+                            textbox.focus()
+                            textbox.fill(text)
+                            page.wait_for_timeout(400)
+                            page.keyboard.press("Enter")
+                            page.wait_for_timeout(2000)
+                            browser.close()
+                            logger.info(f"✅ [Facebook Playwright] Опубліковано відповідь на {comment_id}: '{text}'")
+                            return True, None
+                        browser.close()
+            except Exception as pe:
+                logger.warning(f"Facebook Playwright reply_to_comment error: {pe}")
+
         logger.info(f"[Facebook Public Comment Reply] Відповідаємо на {comment_id}: '{text}'")
         return True, None
 
