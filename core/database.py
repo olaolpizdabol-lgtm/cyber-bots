@@ -1432,7 +1432,21 @@ def has_user_received_lead(platform: str, username: str) -> bool:
         cursor.execute("""
             SELECT id FROM lead_funnel_comments 
             WHERE platform = ? AND LOWER(username) = LOWER(?) 
-            AND (dm_sent_at IS NOT NULL OR status IN ('sent_dm', 'converted', 'already_replied_manual'))
+            AND (dm_sent_at IS NOT NULL OR status IN ('sent_dm', 'converted', 'already_replied_manual', 'already_sent_earlier'))
+            LIMIT 1
+        """, (platform, username.strip()))
+        return cursor.fetchone() is not None
+
+
+def is_user_already_handled(platform: str, username: str) -> bool:
+    """Перевіряє, чи цей користувач уже занесений у воронку (відповідь, DM, очікування підписки тощо), щоб уникнути спаму."""
+    if not username:
+        return False
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM lead_funnel_comments 
+            WHERE platform = ? AND LOWER(username) = LOWER(?)
             LIMIT 1
         """, (platform, username.strip()))
         return cursor.fetchone() is not None

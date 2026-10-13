@@ -18,7 +18,8 @@ from core.database import (
     get_pending_follow_leads,
     update_lead_status,
     get_lead_funnel_stats,
-    has_user_received_lead
+    has_user_received_lead,
+    is_user_already_handled
 )
 from services.lead_funnel.intent_detector import detect_comment_intent
 from services.lead_funnel.platforms.instagram import instagram_funnel
@@ -197,9 +198,13 @@ class LeadFunnelService:
                 )
                 break
 
-            # 2. Перевіряємо, чи цей коментар уже є в базі
+            # 2. Перевіряємо, чи цей коментар уже є в базі або чи користувача вже оброблено
             existing = get_lead_comment(platform_name, comm.comment_id)
             if existing:
+                continue
+
+            if is_user_already_handled(platform_name, comm.username):
+                logger.info(f"[{platform_name}] ⏭️ Користувач @{comm.username} вже оброблений раніше. Пропускаємо повторну обробку.")
                 continue
 
             # 3. Розпізнавання наміру (intent)

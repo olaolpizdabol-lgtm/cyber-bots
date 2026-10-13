@@ -82,8 +82,24 @@ class FacebookFunnel(BasePlatformFunnel):
         comments.extend(self._fetch_comments_via_browser(limit_posts=limit_posts))
         return comments
 
+    def _dismiss_fb_dialog(self, page):
+        """Закриває спливаюче вікно входу Meta/Facebook, якщо воно з'явилося"""
+        try:
+            for _ in range(2):
+                dialog = page.locator('[role="dialog"]').first
+                if dialog.is_visible():
+                    close_btn = dialog.locator('[aria-label="Close"], [aria-label="Закрити"]').first
+                    if close_btn.is_visible():
+                        close_btn.click()
+                        page.wait_for_timeout(800)
+                    else:
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(500)
+        except Exception:
+            pass
+
     def _fetch_comments_via_browser(self, limit_posts: int = 5) -> List[PlatformComment]:
-        """Зчитує коментарі безпосередньо зі сторінки через браузер"""
+        """Зчитує коментарі безпосередньо зі сторінки Bohdan GPT через браузер Playwright"""
         results: List[PlatformComment] = []
         try:
             from playwright.sync_api import sync_playwright
@@ -92,7 +108,8 @@ class FacebookFunnel(BasePlatformFunnel):
                     browser = p.chromium.launch(headless=True)
                     context_kwargs = {
                         "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "locale": "en-US"
+                        "locale": "en-US",
+                        "viewport": {"width": 1280, "height": 800}
                     }
                     if FACEBOOK_STATE_FILE.exists():
                         try:
@@ -104,180 +121,204 @@ class FacebookFunnel(BasePlatformFunnel):
 
                     page = context.new_page()
 
-                    # 1. Скануємо вкладку Reels сторінки (де найбільше коментарів)
-                    reels_tab_url = f"https://www.facebook.com/profile.php?id={FACEBOOK_PAGE_ID}&sk=reels_tab"
-                    page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(2500)
+                    # 1. Спершу скануємо головну стіну сторінки (де Facebook відкрито відображає всі останні коментарі)
+                    wall_url = f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
+                    try:
+                        page.goto(wall_url, wait_until="domcontentloaded", timeout=25000)
+                        page.wait_for_timeout(2500)
+                        self._dismiss_fb_dialog(page)
 
-                    # Якщо потрібен повний скан — прокручуємо стрічку Reels
-                    if limit_posts is None or limit_posts > 6:
-                        for _ in range(6):
-                            page.mouse.wheel(0, 2000)
-                            page.wait_for_timeout(700)
+                        # Прокручуємо стіну для підвантаження постів та коментарів
+                        for _ in range(5):
+                            page.mouse.wheel(0, 1500)
+                            page.wait_for_timeout(800)
 
-                    # Шукаємо посилання на Reels у головному блоці сторінки (ігноруючи панель сповіщень)
-                    main_loc = page.locator('[role="main"], main').first
-                    raw_reels = [a.get_attribute("href") for a in main_loc.locator('a[href*="/reel/"]').all()]
-                    unique_reels = []
-                    for l in raw_reels:
-                        if l and "/reel/" in l and "notif" not in l:
-                            clean_l = l.split("?")[0]
-                            if clean_l not in unique_reels:
-                                unique_reels.append(clean_l)
-
-                    # Фолбек якщо main не повернув Reels
-                    if not unique_reels:
-                        all_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
-                        unique_reels = list(dict.fromkeys([l.split("?")[0] for l in all_reels if l and "notif" not in l and not l.startswith("/reel/?")]))
-
-                    target_reels = unique_reels if limit_posts is None else unique_reels[:limit_posts]
-
-                    # Перевіряємо відео з Reels
-                    for r_href in target_reels:
-                        if not r_href:
-                            continue
-                        r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
-                        try:
-                            page.goto(r_url, wait_until="domcontentloaded", timeout=20000)
-                            page.wait_for_timeout(2000)
-
-                            # Відкриваємо коментарі (клік по іконці коментарів)
-                            c_btn = page.locator('[aria-label*="Comment"], [aria-label*="comment"]').first
-                            if c_btn.is_visible():
-                                c_btn.click()
-                                page.wait_for_timeout(1500)
-
-                            # 1.1 Перемикаємо фільтр з 'Most relevant' на 'All comments' (розкриває приховані коментарі)
+                        wall_articles = page.locator('div[role="article"]').all()
+                        for art in wall_articles:
                             try:
-                                dropdown = page.locator('div[role="button"]:has-text("Most relevant"), [aria-haspopup="menu"]:has-text("relevant")').first
-                                if dropdown.is_visible():
-                                    dropdown.click()
-                                    page.wait_for_timeout(1000)
-                                    all_opt = page.locator('[role="menuitem"]').filter(has_text="All comments").first
-                                    if not all_opt.is_visible():
-                                        all_opt = page.get_by_text("All comments").first
-                                    if all_opt.is_visible():
-                                        all_opt.click()
-                                        page.wait_for_timeout(2000)
-                            except Exception as drop_err:
-                                logger.debug(f"FB All comments dropdown: {drop_err}")
+                                txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
+                                if len(txt_lines) >= 2:
+                                    u_name = txt_lines[0]
+                                    if u_name in ("Bohdan GPT", "Автор", "Author", "Explore the things you love"):
+                                        continue
 
-                            # Прокручуємо коментарі у правому контейнері для підвантаження історії
-                            page.mouse.move(1000, 400)
-                            for _ in range(5):
-                                page.mouse.wheel(0, 1500)
-                                page.wait_for_timeout(700)
-
-                            # Зберігаємо скріншот коментарів для Telegram-звіту
-                            r_shortcode = r_href.strip("/").split("/")[-1]
-                            comment_ss_path = TEMP_DIR / f"fb_comment_ss_{r_shortcode}.png"
-                            try:
-                                page.screenshot(path=str(comment_ss_path), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 800})
-                            except Exception:
-                                comment_ss_path = None
-
-                            # Вибираємо всі коментарі як окремі статті div[role="article"]
-                            comment_articles = page.locator('div[role="article"]').all()
-                            for art in comment_articles:
-                                try:
-                                    txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
-                                    if len(txt_lines) >= 2 and any(k in txt_lines for k in ["Reply", "Send message", "Hide"]):
-                                        u_name = txt_lines[0]
-                                        # Знаходимо межу кнопок дій
-                                        reply_idx = len(txt_lines)
-                                        for k_idx, item in enumerate(txt_lines):
-                                            if item in ("Reply", "Send message", "Hide"):
-                                                reply_idx = k_idx
-                                                break
-
-                                        c_candidates = []
-                                        t_str = None
-                                        for l in txt_lines[1:reply_idx]:
-                                            if l in ("·", "Follow back", "Author", "Автор", "Top fan"):
-                                                continue
-                                            if any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5:
+                                    c_candidates = []
+                                    t_str = None
+                                    for l in txt_lines[1:]:
+                                        if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Like", "Reply", "Send message", "Hide"):
+                                            continue
+                                        if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5) or l.isdigit():
+                                            if not t_str:
                                                 t_str = l
+                                            continue
+                                        c_candidates.append(l)
+
+                                    c_text = " ".join(c_candidates).strip()
+                                    if not c_text or c_text in ("·", "Like", "Reply", "Send message"):
+                                        continue
+
+                                    # Шукаємо справжній comment_id з посилання
+                                    real_c_id = None
+                                    comm_post_url = wall_url
+                                    for lnk in art.locator('a').all():
+                                        h = lnk.get_attribute('href') or ''
+                                        m = re.search(r'comment_id=([0-9a-zA-Z_]+)', h)
+                                        if m:
+                                            real_c_id = m.group(1)
+                                            if "/reel/" in h or "/posts/" in h:
+                                                comm_post_url = h.split("?")[0]
+                                            break
+
+                                    if not real_c_id:
+                                        import hashlib
+                                        real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
+
+                                    # Перевірка: чи автор ВЖЕ відповів (у тексті або згорнута відповідь)
+                                    has_rep = (
+                                        any("bohdan" in s.lower() for s in txt_lines) or
+                                        any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
+                                        any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
+                                        any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
+                                    )
+
+                                    # Індивідуальний скріншот коментаря
+                                    comment_ss = TEMP_DIR / f"fb_comment_{real_c_id[:12]}.png"
+                                    try:
+                                        art.screenshot(path=str(comment_ss))
+                                    except Exception:
+                                        comment_ss = None
+
+                                    # Детекція підписки у рядку коментаря
+                                    is_following_fb = any("follow back" in l.lower() for l in txt_lines)
+
+                                    results.append(PlatformComment(
+                                        comment_id=real_c_id,
+                                        post_id=comm_post_url,
+                                        post_url=comm_post_url,
+                                        user_id=u_name,
+                                        username=u_name,
+                                        text=c_text,
+                                        has_author_replied=has_rep,
+                                        created_time=t_str,
+                                        screenshot_path=str(comment_ss) if comment_ss and comment_ss.exists() else None,
+                                        is_following=is_following_fb
+                                    ))
+                            except Exception:
+                                continue
+                    except Exception as wall_err:
+                        logger.debug(f"FB wall scan error: {wall_err}")
+
+                    # 2. Скануємо вкладку Reels сторінки
+                    reels_tab_url = f"https://www.facebook.com/profile.php?id={FACEBOOK_PAGE_ID}&sk=reels_tab"
+                    try:
+                        page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+                        self._dismiss_fb_dialog(page)
+
+                        main_loc = page.locator('[role="main"], main').first
+                        raw_reels = [a.get_attribute("href") for a in main_loc.locator('a[href*="/reel/"]').all()]
+                        unique_reels = []
+                        for l in raw_reels:
+                            if l and "/reel/" in l and "notif" not in l:
+                                clean_l = l.split("?")[0]
+                                if clean_l not in unique_reels:
+                                    unique_reels.append(clean_l)
+
+                        target_reels = unique_reels if limit_posts is None else unique_reels[:limit_posts]
+
+                        for r_href in target_reels:
+                            if not r_href:
+                                continue
+                            r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
+                            try:
+                                page.goto(r_url, wait_until="domcontentloaded", timeout=20000)
+                                page.wait_for_timeout(2000)
+                                self._dismiss_fb_dialog(page)
+
+                                c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
+                                if c_btn.is_visible():
+                                    c_btn.click(force=True)
+                                    page.wait_for_timeout(1500)
+                                    self._dismiss_fb_dialog(page)
+
+                                page.mouse.move(1000, 400)
+                                for _ in range(4):
+                                    page.mouse.wheel(0, 1500)
+                                    page.wait_for_timeout(600)
+
+                                comment_articles = page.locator('div[role="article"]').all()
+                                for art in comment_articles:
+                                    try:
+                                        txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
+                                        if len(txt_lines) >= 2:
+                                            u_name = txt_lines[0]
+                                            if u_name in ("Bohdan GPT", "Author", "Автор", "Explore the things you love"):
                                                 continue
-                                            c_candidates.append(l)
 
-                                        c_text = " ".join(c_candidates).strip()
+                                            c_candidates = []
+                                            t_str = None
+                                            for l in txt_lines[1:]:
+                                                if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Like", "Reply", "Send message", "Hide"):
+                                                    continue
+                                                if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's']) and len(l) <= 5) or l.isdigit():
+                                                    if not t_str:
+                                                        t_str = l
+                                                    continue
+                                                c_candidates.append(l)
 
-                                        if u_name not in ("Bohdan GPT", "Author", "Автор") and c_text:
-                                            # Перевірка: чи автор ВЖЕ відповів або у гілці вже є відповіді
+                                            c_text = " ".join(c_candidates).strip()
+                                            if not c_text or c_text in ("·", "Like", "Reply", "Send message"):
+                                                continue
+
+                                            real_c_id = None
+                                            for lnk in art.locator('a').all():
+                                                h = lnk.get_attribute('href') or ''
+                                                m = re.search(r'comment_id=([0-9a-zA-Z_]+)', h)
+                                                if m:
+                                                    real_c_id = m.group(1)
+                                                    break
+
+                                            if not real_c_id:
+                                                import hashlib
+                                                real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
+
+                                            # Уникаємо дублювання, якщо цей коментар уже знайдено на стіні
+                                            if any(r.comment_id == real_c_id for r in results):
+                                                continue
+
                                             has_rep = (
                                                 any("bohdan" in s.lower() for s in txt_lines) or
                                                 any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
                                                 any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
                                                 any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
                                             )
-                                            c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
 
-                                            # Індивідуальний скріншот САМОГО коментаря (чіткий доказ для Telegram)
-                                            comment_ss_path = TEMP_DIR / f"fb_comment_{abs(hash(u_name + c_text))}.png"
+                                            comment_ss = TEMP_DIR / f"fb_comment_{real_c_id[:12]}.png"
                                             try:
-                                                art.screenshot(path=str(comment_ss_path))
+                                                art.screenshot(path=str(comment_ss))
                                             except Exception:
-                                                comment_ss_path = None
+                                                comment_ss = None
 
-                                            # Детекція підписки у Facebook: бейдж 'Follow back' прямо в рядку коментаря
                                             is_following_fb = any("follow back" in l.lower() for l in txt_lines)
 
-                                            # Авто-лайк на коментар (якщо не спам)
-                                            from services.lead_funnel.intent_detector import detect_comment_intent
-                                            intent_fb = detect_comment_intent(c_text)
-                                            if intent_fb.intent != "spam":
-                                                try:
-                                                    like_btn = art.locator('[aria-label="Like"]').first
-                                                    if like_btn.is_visible():
-                                                        like_btn.click()
-                                                        page.wait_for_timeout(350)
-                                                        logger.info(f"❤️ [Facebook] Лайкнули коментар від {u_name}: '{c_text[:30]}'")
-                                                except Exception as l_err:
-                                                    logger.debug(f"FB comment like error: {l_err}")
-
                                             results.append(PlatformComment(
-                                                comment_id=c_id_gen,
+                                                comment_id=real_c_id,
                                                 post_id=r_url,
                                                 post_url=r_url,
-                                                user_id=c_id_gen,
+                                                user_id=u_name,
                                                 username=u_name,
                                                 text=c_text,
                                                 has_author_replied=has_rep,
                                                 created_time=t_str,
-                                                screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None,
+                                                screenshot_path=str(comment_ss) if comment_ss and comment_ss.exists() else None,
                                                 is_following=is_following_fb
                                             ))
-                                except Exception:
-                                    continue
-                        except Exception:
-                            continue
-
-                    # 2. Також перевіряємо основну стрічку сторінки
-                    page.goto(f"https://www.facebook.com/{FACEBOOK_PAGE_ID}", wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_timeout(2500)
-
-                    # Шукаємо блоки коментарів на стіні
-                    comment_nodes = page.locator('div[role="article"]').all()
-                    for node in comment_nodes[:10]:
-                        try:
-                            txt = node.inner_text().strip()
-                            lines = [l.strip() for l in txt.split("\n") if l.strip()]
-                            if len(lines) >= 2:
-                                user_candidate = lines[0]
-                                comment_body = lines[1]
-                                if user_candidate not in ("Bohdan GPT", "Автор", "Author"):
-                                    c_id_gen = f"fb_{abs(hash(txt))}"
-                                    results.append(PlatformComment(
-                                        comment_id=c_id_gen,
-                                        post_id=FACEBOOK_PAGE_ID,
-                                        post_url=f"https://www.facebook.com/{FACEBOOK_PAGE_ID}",
-                                        user_id=c_id_gen,
-                                        username=user_candidate,
-                                        text=comment_body,
-                                        has_author_replied=False
-                                    ))
-                        except Exception:
-                            continue
+                                    except Exception:
+                                        continue
+                            except Exception:
+                                continue
+                    except Exception as reels_err:
+                        logger.debug(f"FB reels scan error: {reels_err}")
 
                     browser.close()
         except Exception as e:

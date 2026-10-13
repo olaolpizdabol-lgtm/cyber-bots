@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
-from config import INSTAGRAM_USERNAME, INSTAGRAM_SESSION_FILE, DATA_DIR
+from config import INSTAGRAM_USERNAME, INSTAGRAM_SESSION_FILE, DATA_DIR, TEMP_DIR
 from services.proxy_manager import proxy_manager
 
 logger = logging.getLogger("instagram_funnel")
@@ -33,50 +33,55 @@ class InstagramFunnel(BasePlatformFunnel):
         if self._client:
             return self._client
 
-        from instagrapi import Client
-        cl = Client()
-        proxy_url = proxy_manager.proxy_url
-        if proxy_url and proxy_manager.is_proxy_alive():
-            cl.set_proxy(proxy_url)
+        try:
+            from instagrapi import Client
+            cl = Client()
+            proxy_url = proxy_manager.proxy_url
+            if proxy_url and proxy_manager.is_proxy_alive():
+                cl.set_proxy(proxy_url)
 
-        session_path = Path(INSTAGRAM_SESSION_FILE)
-        if session_path.exists():
-            try:
-                cl.load_settings(str(session_path))
-                self._client = cl
-                return cl
-            except Exception as e:
-                logger.warning(f"Не вдалося завантажити instagrapi сесію: {e}")
+            session_path = Path(INSTAGRAM_SESSION_FILE)
+            if session_path.exists():
+                try:
+                    cl.load_settings(str(session_path))
+                    self._client = cl
+                    return cl
+                except Exception as e:
+                    logger.warning(f"Не вдалося завантажити instagrapi сесію: {e}")
 
-        self._client = cl
-        return cl
+            self._client = cl
+            return cl
+        except Exception as e:
+            logger.debug(f"instagrapi unavailable: {e}")
+            return None
 
     def fetch_recent_unanswered_comments(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
         """Отримує коментарі під публікаціями (API + Playwright fallback для всіх відео)"""
         comments: List[PlatformComment] = []
         cl = self._get_client()
-        try:
-            amt = limit_posts if limit_posts is not None else 50
-            user_id = cl.user_id_from_username(INSTAGRAM_USERNAME or "bohdan.gpt")
-            medias = cl.user_medias(user_id, amount=amt)
-            for m in medias:
-                media_id = m.id
-                raw_comms = cl.media_comments(media_id)
-                for c in raw_comms:
-                    has_author = (c.user.username == (INSTAGRAM_USERNAME or "bohdan.gpt"))
-                    if not has_author:
-                        comments.append(PlatformComment(
-                            comment_id=str(c.pk),
-                            post_id=str(media_id),
-                            post_url=f"https://www.instagram.com/p/{m.code}/",
-                            user_id=str(c.user.pk),
-                            username=c.user.username,
-                            text=c.text,
-                            has_author_replied=False,
-                            created_time=c.created_at_utc.isoformat() if hasattr(c, "created_at_utc") else None
-                        ))
-        except Exception as e:
-            logger.debug(f"Instagram instagrapi fetch comments: {e}")
+        if cl:
+            try:
+                amt = limit_posts if limit_posts is not None else 50
+                user_id = cl.user_id_from_username(INSTAGRAM_USERNAME or "bohdan.gpt")
+                medias = cl.user_medias(user_id, amount=amt)
+                for m in medias:
+                    media_id = m.id
+                    raw_comms = cl.media_comments(media_id)
+                    for c in raw_comms:
+                        has_author = (c.user.username == (INSTAGRAM_USERNAME or "bohdan.gpt"))
+                        if not has_author:
+                            comments.append(PlatformComment(
+                                comment_id=str(c.pk),
+                                post_id=str(media_id),
+                                post_url=f"https://www.instagram.com/p/{m.code}/",
+                                user_id=str(c.user.pk),
+                                username=c.user.username,
+                                text=c.text,
+                                has_author_replied=False,
+                                created_time=c.created_at_utc.isoformat() if hasattr(c, "created_at_utc") else None
+                            ))
+            except Exception as e:
+                logger.debug(f"Instagram instagrapi fetch comments: {e}")
 
         # Фолбек на браузерну сесію Playwright якщо через instagrapi повернуто 0
         if not comments:
@@ -179,10 +184,11 @@ class InstagramFunnel(BasePlatformFunnel):
                                                 has_replied = True
                                                 break
 
-                                        c_id = f"ig_{abs(hash(username + c_content + href))}"
+                                        import hashlib
+                                        c_id = f"ig_{hashlib.sha256((username.lower() + '_' + c_content.strip() + '_' + href).encode()).hexdigest()[:16]}"
 
                                         # Індивідуальний скріншот рядка коментаря
-                                        c_ss = TEMP_DIR / f"ig_comment_{abs(hash(username + c_content))}.png"
+                                        c_ss = TEMP_DIR / f"ig_comment_{c_id[3:]}.png"
                                         try:
                                             c_elem = page.locator('h3, a').filter(has_text=username).first
                                             if c_elem.is_visible():
@@ -284,20 +290,60 @@ class InstagramFunnel(BasePlatformFunnel):
         return is_f
 
     def send_direct_message(self, user_id: str, username: str, text: str, comment_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
-        """Надсилає повідомлення в Direct"""
+        """Надсилає повідомлення в Direct (instagrapi з фолбеком на браузерний Playwright)"""
         cl = self._get_client()
-        try:
-            target_pk = int(user_id) if str(user_id).isdigit() else cl.user_id_from_username(username)
-            cl.direct_send(text, user_ids=[target_pk])
-            logger.info(f"✅ Instagram DM успішно надіслано до @{username}")
-            return True, None
-        except Exception as e:
-            err_str = str(e).lower()
-            if "private" in err_str or "restricted" in err_str or "can't send" in err_str or "reach" in err_str:
-                logger.warning(f"Закритий Direct у @{username}: {e}")
-                return False, "private_dm"
-            logger.error(f"Помилка відправки Instagram DM до @{username}: {e}")
-            return False, str(e)
+        if cl:
+            try:
+                target_pk = int(user_id) if str(user_id).isdigit() else cl.user_id_from_username(username)
+                cl.direct_send(text, user_ids=[target_pk])
+                logger.info(f"✅ Instagram DM успішно надіслано до @{username}")
+                return True, None
+            except Exception as e:
+                err_str = str(e).lower()
+                if "private" in err_str or "restricted" in err_str or "can't send" in err_str or "reach" in err_str:
+                    logger.warning(f"Закритий Direct у @{username}: {e}")
+                    return False, "private_dm"
+                logger.debug(f"Instagrapi DM не спрацював ({e}), спробуємо через Playwright...")
+
+        # Playwright browser fallback
+        state_file = DATA_DIR / "instagram_state.json"
+        if state_file.exists():
+            try:
+                from core.browser_lock import BROWSER_LOCK
+                from playwright.sync_api import sync_playwright
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
+                        page = ctx.new_page()
+                        page.goto("https://www.instagram.com/direct/new/", wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+                        search_inp = page.locator('input[placeholder*="Search" i], input[name*="query" i]').first
+                        if search_inp.is_visible():
+                            search_inp.fill(username)
+                            page.wait_for_timeout(1500)
+                            user_btn = page.locator('div[role="button"], span').filter(has_text=username).first
+                            if user_btn.is_visible():
+                                user_btn.click()
+                                page.wait_for_timeout(1000)
+                                chat_btn = page.locator('button, div[role="button"]').filter(has_text="Chat").first
+                                if chat_btn.is_visible():
+                                    chat_btn.click()
+                                    page.wait_for_timeout(2000)
+                                msg_box = page.locator('div[role="textbox"][aria-label*="Message" i], textarea').first
+                                if msg_box.is_visible():
+                                    msg_box.fill(text)
+                                    page.wait_for_timeout(500)
+                                    page.keyboard.press("Enter")
+                                    page.wait_for_timeout(1500)
+                                    browser.close()
+                                    logger.info(f"✅ Instagram Playwright DM надіслано до @{username}")
+                                    return True, None
+                        browser.close()
+            except Exception as b_err:
+                logger.warning(f"Instagram Playwright DM error: {b_err}")
+
+        return False, "dm_failed"
 
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Відповідає на коментар у публічній стрічці"""

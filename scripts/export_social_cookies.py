@@ -10,7 +10,10 @@ import json
 import base64
 import subprocess
 from pathlib import Path
-from Cryptodome.Cipher import AES
+try:
+    from Cryptodome.Cipher import AES
+except ImportError:
+    from Crypto.Cipher import AES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
