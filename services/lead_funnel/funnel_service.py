@@ -68,7 +68,24 @@ DEFAULT_REPLIES_NON_FOLLOWER = [
 ]
 
 # Відповідь якщо у користувача закритий Direct
-DEFAULT_REPLY_PRIVATE_DM = "Tried to DM you, but your inbox is private! 📩 Send me a quick DM first so I can drop the link! ⚡"
+DEFAULT_REPLY_PRIVATE_DM = "Tried to DM you, but your inbox is private! 📩 Check the link in my bio or message me first! ⚡"
+
+# Варіанти відповідей для TikTok (без зовнішніх посилань, щоб не зловити тіньовий бан / спам-фільтр)
+DEFAULT_REPLIES_TIKTOK_BRIDGE = [
+    "Grab the 100+ Prompt Vault via the link in my IG bio @bohdan.gpt! ⚡",
+    "Link to the full database is in my Instagram bio @bohdan.gpt (or drop me 'GPT' in DMs there)! 🚀",
+    "All prompts & codes are linked directly in my IG bio @bohdan.gpt! 🔥",
+    "Head over to my Instagram @bohdan.gpt — the vault link is right in my bio! ⚡",
+    "Instant access is linked in my IG bio @bohdan.gpt! Enjoy 🚀"
+]
+
+# Варіанти відповідей для YouTube (чисті коментарі без посилань, що направляють в IG bio)
+DEFAULT_REPLIES_YOUTUBE_BRIDGE = [
+    "Link to the full 100+ Prompt Vault is right in my Instagram bio @bohdan.gpt! ⚡",
+    "Grab the complete database via the link in my IG bio @bohdan.gpt (or DM me 'GPT' there)! 🚀",
+    "All visual codes and prompt synthesizer are linked in my Instagram bio @bohdan.gpt! 🔥",
+    "Check the link in my IG bio @bohdan.gpt for instant vault access! ⚡"
+]
 
 # Шаблон повідомлення в Direct (DM)
 DEFAULT_DM_TEMPLATE = (
@@ -148,13 +165,11 @@ class LeadFunnelService:
                 is_following = handler.is_user_following(comm.user_id, comm.username)
 
                 if platform_name in ("tiktok", "youtube"):
-                    # Для TikTok / YouTube: відповідаємо коментарем-мостом з реферальним посиланням
+                    # Для TikTok / YouTube: відповідаємо коментарем без посилань (направляємо в Instagram @bohdan.gpt bio)
                     if platform_name == "tiktok":
-                        lead_url = self.get_lead_link("tiktok")
-                        reply_txt = f"TikTok restricts direct DMs — grab the 100+ Prompt Vault here: {lead_url} or drop '{intent_res.matched_trigger or 'GPT'}' on my IG @bohdan.gpt! ⚡"
+                        reply_txt = random.choice(DEFAULT_REPLIES_TIKTOK_BRIDGE)
                     else:
-                        lead_url = self.get_lead_link("youtube")
-                        reply_txt = f"Full 100+ Prompt Vault is available here: {lead_url} (or message me '{intent_res.matched_trigger or 'GPT'}' on IG @bohdan.gpt)! ⚡"
+                        reply_txt = random.choice(DEFAULT_REPLIES_YOUTUBE_BRIDGE)
 
                     handler.reply_to_comment(comm.comment_id, reply_txt, post_id=comm.post_id)
                     save_lead_comment(
