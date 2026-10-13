@@ -135,6 +135,14 @@ class InstagramFunnel(BasePlatformFunnel):
                             except Exception:
                                 pass
 
+                            # Робимо скріншот поста з коментарями для звіту
+                            post_shortcode = href.strip("/").split("/")[-1]
+                            comment_ss_path = TEMP_DIR / f"comment_ss_{post_shortcode}.png"
+                            try:
+                                page.screenshot(path=str(comment_ss_path), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 800})
+                            except Exception:
+                                comment_ss_path = None
+
                             full_text = page.locator('article, [role="dialog"], main').first.inner_text()
                             lines = [l.strip() for l in full_text.split('\n') if l.strip()]
 
@@ -156,11 +164,11 @@ class InstagramFunnel(BasePlatformFunnel):
                                         if any(w in c_content.lower() for w in ['like', 'likes', 'view all']):
                                             c_content = lines[idx-2]
 
-                                        # 2. Перевірка: чи автор ВЖЕ відповів у цьому ланцюжку
+                                        # 2. Перевірка: чи автор ВЖЕ відповів у цьому ланцюжку (включно зі словами автора)
                                         has_replied = False
-                                        sub_window = lines[idx:min(len(lines), idx+5)]
+                                        sub_window = lines[idx:min(len(lines), idx+6)]
                                         for sub in sub_window:
-                                            if (INSTAGRAM_USERNAME or 'bohdan.gpt').lower() in sub.lower() and any(w in sub.lower() for w in ['dm', 'sent', 'check', 'message']):
+                                            if (INSTAGRAM_USERNAME or 'bohdan.gpt').lower() in sub.lower() or any(w in sub.lower() for w in ['dm', 'sent', 'check', 'message', 'author', 'автор']):
                                                 has_replied = True
                                                 break
 
@@ -173,7 +181,8 @@ class InstagramFunnel(BasePlatformFunnel):
                                             username=username,
                                             text=c_content,
                                             has_author_replied=has_replied,
-                                            created_time=time_ago
+                                            created_time=time_ago,
+                                            screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
                                         ))
                         except Exception as post_err:
                             logger.debug(f"Помилка парсингу поста {post_url}: {post_err}")
@@ -183,29 +192,68 @@ class InstagramFunnel(BasePlatformFunnel):
             logger.debug(f"Instagram Playwright fetch comments: {e}")
         return results
 
+    def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
+        """
+        Перевіряє, чи підписаний користувач на @bohdan.gpt з фото-доказом (скріншотом шапки профілю з кнопками).
+        """
+        state_file = DATA_DIR / "instagram_state.json"
+        proof_path = TEMP_DIR / f"follower_proof_{username}.png"
+
+        # 1. Браузерна перевірка через Playwright (найточніша)
+        if state_file.exists():
+            try:
+                from playwright.sync_api import sync_playwright
+                from core.browser_lock import BROWSER_LOCK
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(
+                            storage_state=str(state_file),
+                            locale="en-US",
+                            viewport={"width": 1280, "height": 800}
+                        )
+                        page = ctx.new_page()
+                        page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(2000)
+
+                        buttons = [b.inner_text().strip() for b in page.locator('header button, header a').all() if b.inner_text().strip()]
+                        
+                        # Якщо кнопка 'Follow Back' — користувач точно підписаний на нас!
+                        is_following = any("follow back" in b.lower() for b in buttons)
+
+                        # Якщо кнопки 'Follow Back' немає, але є 'Message'/'Following' — шукаємо в списку підписників
+                        if not is_following and any(b.lower() in ["following", "message"] for b in buttons):
+                            page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=15000)
+                            page.wait_for_timeout(2000)
+                            f_link = page.locator('a:has-text("followers")').first
+                            if f_link.is_visible():
+                                f_link.click()
+                                page.wait_for_timeout(1500)
+                                dialog = page.locator('[role="dialog"]').first
+                                search_input = dialog.locator('input[placeholder*="Search"]').first
+                                if search_input.is_visible():
+                                    search_input.fill(username)
+                                    page.wait_for_timeout(1200)
+                                    no_results = dialog.locator('text="No results found."').is_visible()
+                                    is_following = not no_results
+
+                        # Робимо скріншот профілю з кнопками дій
+                        try:
+                            page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
+                        except Exception:
+                            proof_path = None
+
+                        browser.close()
+                        return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
+            except Exception as e:
+                logger.debug(f"Playwright check_follower_status error for {username}: {e}")
+
+        return False, None
+
     def is_user_following(self, user_id: str, username: str) -> bool:
         """Перевіряє, чи підписаний юзер на @bohdan.gpt"""
-        cl = self._get_client()
-        try:
-            # 1. Спроба через user_info_by_username
-            info = cl.user_info_by_username(username)
-            # Якщо є поле follows_viewer або взаємні
-            if getattr(info, "follows_viewer", False):
-                return True
-        except Exception:
-            pass
-
-        try:
-            # 2. Перевірка через followers пошук
-            my_id = cl.user_id_from_username(INSTAGRAM_USERNAME or "bohdan.gpt")
-            followers = cl.search_followers(my_id, username)
-            for f in followers:
-                if f.username.lower() == username.lower():
-                    return True
-        except Exception as e:
-            logger.debug(f"Помилка перевірки підписки Instagram {username}: {e}")
-
-        return False
+        is_f, _ = self.check_follower_status(user_id, username)
+        return is_f
 
     def send_direct_message(self, user_id: str, username: str, text: str, comment_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Надсилає повідомлення в Direct"""

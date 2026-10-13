@@ -17,7 +17,8 @@ from core.database import (
     save_lead_comment,
     get_pending_follow_leads,
     update_lead_status,
-    get_lead_funnel_stats
+    get_lead_funnel_stats,
+    has_user_received_lead
 )
 from services.lead_funnel.intent_detector import detect_comment_intent
 from services.lead_funnel.platforms.instagram import instagram_funnel
@@ -30,25 +31,61 @@ from config import CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, ALLOWED_USE
 logger = logging.getLogger("funnel_service")
 
 
-def notify_telegram_lead(html_text: str):
-    """Надсилає миттєве Telegram сповіщення власнику бота про нових лідів"""
+import json
+from pathlib import Path
+
+
+def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None):
+    """Надсилає Telegram сповіщення власнику бота разом зі скріншотами коментаря та перевірки підписки"""
     token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
     if not token or not ALLOWED_USER_IDS:
         return
+
+    valid_photos = [p for p in (photo_paths or []) if p and Path(p).exists()]
+
     for uid in ALLOWED_USER_IDS:
         try:
-            requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={
-                    "chat_id": uid,
-                    "text": html_text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True
-                },
-                timeout=5
-            )
-        except Exception:
-            pass
+            if not valid_photos:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={
+                        "chat_id": uid,
+                        "text": html_text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True
+                    },
+                    timeout=8
+                )
+            elif len(valid_photos) == 1:
+                with open(valid_photos[0], "rb") as f:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendPhoto",
+                        data={"chat_id": uid, "caption": html_text, "parse_mode": "HTML"},
+                        files={"photo": f},
+                        timeout=12
+                    )
+            else:
+                files = {}
+                media = []
+                for idx, p_path in enumerate(valid_photos[:5]):
+                    files[f"photo{idx}"] = open(p_path, "rb")
+                    m_item = {"type": "photo", "media": f"attach://photo{idx}"}
+                    if idx == 0:
+                        m_item["caption"] = html_text
+                        m_item["parse_mode"] = "HTML"
+                    media.append(m_item)
+                try:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMediaGroup",
+                        data={"chat_id": uid, "media": json.dumps(media)},
+                        files=files,
+                        timeout=15
+                    )
+                finally:
+                    for f in files.values():
+                        f.close()
+        except Exception as e:
+            logger.debug(f"Telegram notification error: {e}")
 
 
 # Варіанти відповідей у коментарях для підписаних користувачів (Spintax / рандомізація проти спам-фільтрів)
@@ -167,6 +204,7 @@ class LeadFunnelService:
 
             # 3. Якщо автор ВЖЕ відповів (перевірено через DOM сторінки/відео)
             if comm.has_author_replied:
+                logger.info(f"[{platform_name}] ⏭️ Автор вже відповів на коментар @{comm.username}. Пропускаємо повторну обробку.")
                 save_lead_comment(
                     platform=platform_name,
                     comment_id=comm.comment_id,
@@ -183,15 +221,41 @@ class LeadFunnelService:
                 )
                 continue
 
+            # 4. Якщо користувачу ВЖЕ було надіслано лід-магніт (DM) раніше або автор вже відповів йому
+            if has_user_received_lead(platform_name, comm.username):
+                logger.info(f"[{platform_name}] ⏭️ Користувач @{comm.username} вже отримував лід-магніт раніше. Пропускаємо дублювання.")
+                save_lead_comment(
+                    platform=platform_name,
+                    comment_id=comm.comment_id,
+                    post_id=comm.post_id,
+                    post_url=comm.post_url,
+                    user_id=comm.user_id,
+                    username=comm.username,
+                    comment_text=comm.text,
+                    detected_intent="already_sent_earlier",
+                    matched_trigger=None,
+                    is_following=True,
+                    status="already_sent_earlier",
+                    dm_sent=False
+                )
+                continue
+
             stats["processed"] += 1
-            # 4. Розпізнавання наміру
+            # 5. Розпізнавання наміру
             intent_res = detect_comment_intent(comm.text, custom_triggers=triggers)
             logger.info(f"[{platform_name}] Comment from {comm.username}: '{comm.text[:40]}' -> Intent: {intent_res.intent}")
 
             if intent_res.is_lead_magnet():
                 stats["leads"] += 1
-                # 2. Перевірка підписки
-                is_following = handler.is_user_following(comm.user_id, comm.username)
+                # 6. Перевірка підписки з фото-доказом (скріншотом профілю)
+                is_following, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
+
+                # Збираємо скріншоти для звіту в Telegram:
+                lead_photos = []
+                if getattr(comm, "screenshot_path", None) and Path(comm.screenshot_path).exists():
+                    lead_photos.append(comm.screenshot_path)
+                if proof_photo and Path(proof_photo).exists():
+                    lead_photos.append(proof_photo)
 
                 if platform_name in ("tiktok", "youtube"):
                     # Для TikTok / YouTube: відповідаємо коментарем без посилань (направляємо в Instagram @bohdan.gpt bio)
@@ -214,6 +278,14 @@ class LeadFunnelService:
                         is_following=False,
                         status="replied_public_only",
                         dm_sent=False
+                    )
+                    notify_telegram_lead(
+                        f"🌉 <b>Bridge Lead ({platform_name.upper()}):</b>\n"
+                        f"• Користувач: <code>@{comm.username}</code>\n"
+                        f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                        f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
+                        f"⚡ Надіслано відповідь із посиланням на IG bio @bohdan.gpt!",
+                        photo_paths=lead_photos
                     )
                     continue
 
@@ -251,7 +323,9 @@ class LeadFunnelService:
                             f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
                             f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
                             f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                            f"🚀 Надіслано 100+ Prompt Vault у Direct!"
+                            f"📸 Доказ (скріншот коментаря та підписки) додано!\n"
+                            f"🚀 Надіслано 100+ Prompt Vault у Direct!",
+                            photo_paths=lead_photos
                         )
                     elif dm_err == "private_dm":
                         # Закритий direct
@@ -274,7 +348,8 @@ class LeadFunnelService:
                             f"⚠️ <b>Закритий Direct у користувача:</b>\n"
                             f"• Платформа: <b>{platform_name.upper()}</b>\n"
                             f"• Користувач: <code>@{comm.username}</code>\n"
-                            f"💬 Бот відповів у коментарі з проханням відкрити чат."
+                            f"💬 Бот відповів у коментарі з проханням відкрити чат.",
+                            photo_paths=lead_photos
                         )
                 else:
                     # Сценарій Б: Людина НЕ підписана -> просимо підписатися та додаємо в чергу
@@ -295,6 +370,17 @@ class LeadFunnelService:
                         dm_sent=False
                     )
                     stats["pending_follow"] += 1
+                    notify_telegram_lead(
+                        f"⏳ <b>Очікує підписки (Pending Follow):</b>\n"
+                        f"• Платформа: <b>{platform_name.upper()}</b>\n"
+                        f"• Користувач: <code>@{comm.username}</code> (Не підписаний ❌)\n"
+                        f"• Коментар: <i>\"{comm.text[:70]}\"</i>\n"
+                        f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
+                        f"📸 Доказ (скріншот коментаря та профілю) додано!\n"
+                        f"💬 Бот відповів у коментарях із проханням підписатися.\n"
+                        f"⚡ Як тільки підпишеться — бот автоматично скине Prompt Vault у Direct!",
+                        photo_paths=lead_photos
+                    )
 
                 # Анти-бан пауза між активними діями/відповідями (8-16 секунд)
                 time.sleep(random.uniform(8.0, 16.0))

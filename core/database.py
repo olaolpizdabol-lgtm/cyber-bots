@@ -1423,6 +1423,21 @@ def get_lead_comment(platform: str, comment_id: str) -> Optional[Dict[str, Any]]
         return dict(row) if row else None
 
 
+def has_user_received_lead(platform: str, username: str) -> bool:
+    """Перевіряє, чи вже відправляли цьому користувачу лід-магніт (DM) раніше або чи автор вже відповів йому"""
+    if not username:
+        return False
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM lead_funnel_comments 
+            WHERE platform = ? AND LOWER(username) = LOWER(?) 
+            AND (dm_sent_at IS NOT NULL OR status IN ('sent_dm', 'converted', 'already_replied_manual'))
+            LIMIT 1
+        """, (platform, username.strip()))
+        return cursor.fetchone() is not None
+
+
 def save_lead_comment(
     platform: str,
     comment_id: str,

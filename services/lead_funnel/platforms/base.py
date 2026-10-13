@@ -16,6 +16,7 @@ class PlatformComment:
     text: str
     has_author_replied: bool = False
     created_time: Optional[str] = None
+    screenshot_path: Optional[str] = None
 
 
 class BasePlatformFunnel(ABC):
@@ -33,6 +34,13 @@ class BasePlatformFunnel(ABC):
     def is_user_following(self, user_id: str, username: str) -> bool:
         """Перевіряє, чи підписаний користувач на наш акаунт/сторінку"""
         pass
+
+    def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
+        """
+        Перевіряє статус підписки та повертає (is_following, proof_screenshot_path).
+        За замовчуванням викликає is_user_following.
+        """
+        return self.is_user_following(user_id, username), None
 
     @abstractmethod
     def send_direct_message(self, user_id: str, username: str, text: str, comment_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
