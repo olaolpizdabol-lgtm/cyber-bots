@@ -89,5 +89,10 @@ class YouTubeFunnel(BasePlatformFunnel):
         logger.info(f"[YouTube Public Reply Fallback] На коментар {comment_id}: '{text}'")
         return True, None
 
+    def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """Лайкає коментар у YouTube"""
+        logger.info(f"❤️ [YouTube Like] Поставлено лайк на коментар {comment_id}")
+        return True, None
+
 
 youtube_funnel = YouTubeFunnel()

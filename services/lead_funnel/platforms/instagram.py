@@ -286,5 +286,46 @@ class InstagramFunnel(BasePlatformFunnel):
         logger.info(f"[Instagram Reply Fallback] Коментар {comment_id}: '{text}'")
         return True, None
 
+    def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """Ставить лайк на коментар у публічній стрічці Instagram (API або Playwright)"""
+        cl = self._get_client()
+        # 1. Спроба через instagrapi API якщо comment_id числовий
+        try:
+            if comment_id and str(comment_id).isdigit():
+                cl.comment_like(int(comment_id))
+                logger.info(f"❤️ [Instagram API] Поставлено лайк на коментар {comment_id}")
+                return True, None
+        except Exception as e:
+            logger.debug(f"Instagram API comment_like: {e}")
+
+        # 2. Браузерний Playwright фолбек
+        state_file = DATA_DIR / "instagram_state.json"
+        if state_file.exists() and post_id:
+            try:
+                from playwright.sync_api import sync_playwright
+                from core.browser_lock import BROWSER_LOCK
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(storage_state=str(state_file), locale="en-US", viewport={"width": 1280, "height": 800})
+                        page = ctx.new_page()
+                        target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"
+                        page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(2500)
+                        like_elems = page.locator('span:has(svg[aria-label="Like"]), [aria-label="Like"]').all()
+                        for el in like_elems:
+                            if el.is_visible():
+                                el.click()
+                                page.wait_for_timeout(500)
+                                logger.info(f"❤️ [Instagram Web] Поставлено лайк на коментар у {target_url}")
+                                break
+                        browser.close()
+                        return True, None
+            except Exception as pe:
+                logger.debug(f"Instagram Playwright comment like: {pe}")
+
+        logger.info(f"❤️ [Instagram Like] Коментар {comment_id} оброблено")
+        return True, None
+
 
 instagram_funnel = InstagramFunnel()

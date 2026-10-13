@@ -17,7 +17,7 @@ import requests
 from core.browser_lock import BROWSER_LOCK
 from services.proxy_manager import proxy_manager
 from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
-from config import BASE_DIR, DATA_DIR
+from config import BASE_DIR, DATA_DIR, TEMP_DIR
 
 logger = logging.getLogger("facebook_funnel")
 
@@ -136,21 +136,32 @@ class FacebookFunnel(BasePlatformFunnel):
 
                             # 1.1 Перемикаємо фільтр з 'Most relevant' на 'All comments' (розкриває приховані коментарі)
                             try:
-                                rel_btn = page.get_by_text("Most relevant").first
-                                if rel_btn.is_visible():
-                                    rel_btn.click()
-                                    page.wait_for_timeout(800)
-                                    all_opt = page.get_by_text("All comments").first
+                                dropdown = page.locator('div[role="button"]:has-text("Most relevant"), [aria-haspopup="menu"]:has-text("relevant")').first
+                                if dropdown.is_visible():
+                                    dropdown.click()
+                                    page.wait_for_timeout(1000)
+                                    all_opt = page.locator('[role="menuitem"]').filter(has_text="All comments").first
+                                    if not all_opt.is_visible():
+                                        all_opt = page.get_by_text("All comments").first
                                     if all_opt.is_visible():
                                         all_opt.click()
-                                        page.wait_for_timeout(1500)
-                            except Exception:
-                                pass
+                                        page.wait_for_timeout(2000)
+                            except Exception as drop_err:
+                                logger.debug(f"FB All comments dropdown: {drop_err}")
 
-                            # Прокручуємо коментарі вниз для підвантаження історії
-                            for _ in range(4):
-                                page.mouse.wheel(0, 1200)
-                                page.wait_for_timeout(600)
+                            # Прокручуємо коментарі у правому контейнері для підвантаження історії
+                            page.mouse.move(1000, 400)
+                            for _ in range(5):
+                                page.mouse.wheel(0, 1500)
+                                page.wait_for_timeout(700)
+
+                            # Зберігаємо скріншот коментарів для Telegram-звіту
+                            r_shortcode = r_href.strip("/").split("/")[-1]
+                            comment_ss_path = TEMP_DIR / f"fb_comment_ss_{r_shortcode}.png"
+                            try:
+                                page.screenshot(path=str(comment_ss_path), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 800})
+                            except Exception:
+                                comment_ss_path = None
 
                             # Вибираємо всі коментарі як окремі статті div[role="article"]
                             comment_articles = page.locator('div[role="article"]').all()
@@ -172,6 +183,20 @@ class FacebookFunnel(BasePlatformFunnel):
                                             if u_name not in ("Bohdan GPT", "Author", "Автор"):
                                                 has_rep = any("bohdan" in s.lower() for s in txt_lines)
                                                 c_id_gen = f"fb_{abs(hash(u_name + c_text + r_url))}"
+
+                                                # Авто-лайк на коментар (якщо не спам)
+                                                from services.lead_funnel.intent_detector import detect_comment_intent
+                                                intent_fb = detect_comment_intent(c_text)
+                                                if intent_fb.intent != "spam":
+                                                    try:
+                                                        like_btn = art.locator('[aria-label="Like"]').first
+                                                        if like_btn.is_visible():
+                                                            like_btn.click()
+                                                            page.wait_for_timeout(350)
+                                                            logger.info(f"❤️ [Facebook] Лайкнули коментар від {u_name}: '{c_text[:30]}'")
+                                                    except Exception as l_err:
+                                                        logger.debug(f"FB comment like error: {l_err}")
+
                                                 results.append(PlatformComment(
                                                     comment_id=c_id_gen,
                                                     post_id=r_url,
@@ -180,7 +205,8 @@ class FacebookFunnel(BasePlatformFunnel):
                                                     username=u_name,
                                                     text=c_text,
                                                     has_author_replied=has_rep,
-                                                    created_time=t_str
+                                                    created_time=t_str,
+                                                    screenshot_path=str(comment_ss_path) if comment_ss_path and comment_ss_path.exists() else None
                                                 ))
                                 except Exception:
                                     continue
@@ -286,6 +312,78 @@ class FacebookFunnel(BasePlatformFunnel):
 
         # 2. Браузерне підтвердження
         logger.info(f"[Facebook Public Comment Reply] Відповідаємо на {comment_id}: '{text}'")
+        return True, None
+
+    def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
+        """
+        Перевіряє статус підписки користувача на сторінку Bohdan GPT та повертає скріншот-доказ.
+        """
+        proof_path = TEMP_DIR / f"fb_follower_proof_{abs(hash(username))}.png"
+        if FACEBOOK_STATE_FILE.exists():
+            try:
+                from playwright.sync_api import sync_playwright
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US", viewport={"width": 1280, "height": 800})
+                        page = ctx.new_page()
+                        page.goto(f"https://www.facebook.com/{FACEBOOK_PAGE_ID}/followers", wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(2000)
+                        content = page.locator("body").inner_text()
+                        is_following = username.lower() in content.lower()
+                        try:
+                            page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 600})
+                        except Exception:
+                            proof_path = None
+                        browser.close()
+                        return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
+            except Exception as e:
+                logger.debug(f"FB check_follower_status: {e}")
+
+        return False, None
+
+    def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """
+        Ставить лайк на коментар у Facebook (Graph API або Playwright).
+        """
+        # 1. Graph API
+        if FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_") and not comment_id.startswith("fb_"):
+            try:
+                url = f"https://graph.facebook.com/v19.0/{comment_id}/likes"
+                r = requests.post(url, data={"access_token": FACEBOOK_PAGE_TOKEN}, timeout=10)
+                if r.status_code == 200:
+                    logger.info(f"❤️ [Facebook Graph API] Лайк надіслано на comment_id={comment_id}")
+                    return True, None
+            except Exception as e:
+                logger.debug(f"FB Graph API like error: {e}")
+
+        # 2. Playwright browser mode
+        if post_id and FACEBOOK_STATE_FILE.exists():
+            try:
+                from playwright.sync_api import sync_playwright
+                with BROWSER_LOCK:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        ctx = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US", viewport={"width": 1280, "height": 800})
+                        page = ctx.new_page()
+                        target_url = post_id if post_id.startswith("http") else f"https://www.facebook.com{post_id}"
+                        page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(2000)
+                        c_btn = page.locator('[aria-label*="Comment"], [aria-label*="comment"]').first
+                        if c_btn.is_visible():
+                            c_btn.click()
+                            page.wait_for_timeout(1500)
+                        like_btn = page.locator('[aria-label="Like"]').first
+                        if like_btn.is_visible():
+                            like_btn.click()
+                            page.wait_for_timeout(400)
+                            logger.info(f"❤️ [Facebook Playwright] Лайк поставлено у {target_url}")
+                        browser.close()
+                        return True, None
+            except Exception as pe:
+                logger.debug(f"FB Playwright like error: {pe}")
+
+        logger.info(f"❤️ [Facebook Like] Коментар {comment_id} оброблено")
         return True, None
 
 

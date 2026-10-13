@@ -202,7 +202,18 @@ class LeadFunnelService:
             if existing:
                 continue
 
-            # 3. Якщо автор ВЖЕ відповів (перевірено через DOM сторінки/відео)
+            # 3. Розпізнавання наміру (intent)
+            intent_res = detect_comment_intent(comm.text, custom_triggers=triggers)
+            logger.info(f"[{platform_name}] Comment from {comm.username}: '{comm.text[:40]}' -> Intent: {intent_res.intent}")
+
+            # 4. Автоматично лайкаємо кожен валідний коментар (крім спаму!)
+            if intent_res.intent != "spam":
+                try:
+                    handler.like_comment(comm.comment_id, post_id=comm.post_id)
+                except Exception as like_err:
+                    logger.debug(f"[{platform_name}] Помилка лайку коментаря {comm.comment_id}: {like_err}")
+
+            # 5. Якщо автор ВЖЕ відповів (перевірено через DOM сторінки/відео)
             if comm.has_author_replied:
                 logger.info(f"[{platform_name}] ⏭️ Автор вже відповів на коментар @{comm.username}. Пропускаємо повторну обробку.")
                 save_lead_comment(
@@ -221,7 +232,7 @@ class LeadFunnelService:
                 )
                 continue
 
-            # 4. Якщо користувачу ВЖЕ було надіслано лід-магніт (DM) раніше або автор вже відповів йому
+            # 6. Якщо користувачу ВЖЕ було надіслано лід-магніт (DM) раніше або автор вже відповів йому
             if has_user_received_lead(platform_name, comm.username):
                 logger.info(f"[{platform_name}] ⏭️ Користувач @{comm.username} вже отримував лід-магніт раніше. Пропускаємо дублювання.")
                 save_lead_comment(
@@ -241,9 +252,6 @@ class LeadFunnelService:
                 continue
 
             stats["processed"] += 1
-            # 5. Розпізнавання наміру
-            intent_res = detect_comment_intent(comm.text, custom_triggers=triggers)
-            logger.info(f"[{platform_name}] Comment from {comm.username}: '{comm.text[:40]}' -> Intent: {intent_res.intent}")
 
             if intent_res.is_lead_magnet():
                 stats["leads"] += 1

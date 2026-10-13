@@ -55,3 +55,7 @@ class BasePlatformFunnel(ABC):
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Публікує відповідь на коментар під відео/дописом"""
         pass
+
+    def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """Ставить лайк на коментар (якщо не спам)"""
+        return False, "Not implemented"

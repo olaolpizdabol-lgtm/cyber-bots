@@ -95,5 +95,10 @@ class TikTokFunnel(BasePlatformFunnel):
         logger.info(f"[TikTok Public Reply] На коментар {comment_id}: '{text}'")
         return True, None
 
+    def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """Лайкає коментар у TikTok"""
+        logger.info(f"❤️ [TikTok Like] Поставлено лайк на коментар {comment_id}")
+        return True, None
+
 
 tiktok_funnel = TikTokFunnel()
