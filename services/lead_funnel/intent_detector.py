@@ -65,16 +65,23 @@ def detect_comment_intent(comment_text: str, custom_triggers: Optional[List[str]
     if not raw_text:
         return CommentIntentResult("spam", confidence=1.0)
 
+    raw_lower = raw_text.lower()
+
+    # --- ЕТАП 0: Швидкий спам-фільтр (реклама, скам, крипта, номери телефонів) ---
+    spam_pattern = r"(whatsapp|\+?\d{9,}|crypto|bitcoin|invest in|binance|forex|telegram @|dm @|promo code|follow me for|check my bio for money)"
+    if re.search(spam_pattern, raw_lower):
+        return CommentIntentResult("spam", confidence=0.99)
+
     triggers = custom_triggers if custom_triggers is not None else get_lead_funnel_triggers(only_active=True)
     clean_words = set(clean_text_for_matching(raw_text).split())
 
-    # --- ЕТАП 1: Точний та морфологічний матчинг тригерів ---
+    # --- ЕТАП 1: Точний та морфологічний матчинг тригерів (GPT, PROMPT, VAULT, тощо) ---
     for trigger in triggers:
         t_clean = trigger.strip().lower()
         if not t_clean:
             continue
         # Перевірка як окремого слова або частини короткого коментаря
-        if t_clean in clean_words or (len(raw_text) <= 30 and t_clean in raw_text.lower()):
+        if t_clean in clean_words or (len(raw_text) <= 30 and t_clean in raw_lower):
             return CommentIntentResult(
                 intent="lead_magnet",
                 matched_trigger=trigger.upper(),
@@ -86,7 +93,6 @@ def detect_comment_intent(comment_text: str, custom_triggers: Optional[List[str]
         "send me", "dm me", "link please", "where is the link", "can i get",
         "drop the link", "скинь", "де посилання", "дай промпт", "хочу базу"
     ]
-    raw_lower = raw_text.lower()
     for phrase in common_lead_phrases:
         if phrase in raw_lower:
             return CommentIntentResult(
@@ -95,7 +101,20 @@ def detect_comment_intent(comment_text: str, custom_triggers: Optional[List[str]
                 confidence=0.95
             )
 
-    # --- ЕТАП 2: LLM (Gemini) класифікація та генерація розумної відповіді ---
+    # --- ЕТАП 2: Швидке розпізнавання похвали (Instant Charismatic Response) ---
+    praise_phrases = [
+        "great video", "awesome video", "awesome", "great content", "love this",
+        "super helpful", "nice video", "fire 🔥", "top content", "clean editing", "amazing work"
+    ]
+    if any(p in raw_lower for p in praise_phrases) and not any(t in raw_lower for t in ["gpt", "link", "prompt", "vault"]):
+        return CommentIntentResult(
+            intent="question_chat",
+            matched_trigger="PRAISE",
+            confidence=0.95,
+            ai_reply_text="Appreciate you checking out the video! Let me know if you need any AI tips 🚀"
+        )
+
+    # --- ЕТАП 3: LLM (Gemini) класифікація складних питань та генерація відповіді ---
     llm_result = _classify_and_reply_with_gemini(raw_text)
     return llm_result
 
@@ -103,6 +122,7 @@ def detect_comment_intent(comment_text: str, custom_triggers: Optional[List[str]
 def _classify_and_reply_with_gemini(comment_text: str) -> CommentIntentResult:
     """
     Використовує Gemini для семантичного розпізнавання та генерації відповіді англійською.
+    Якщо квота вичерпана або сталася помилка — миттєво повертає харизматичний фолбек без затримок.
     """
     prompt = f"""{BOHDAN_AI_PERSONA_PROMPT}
 
@@ -127,27 +147,31 @@ Output STRICT JSON ONLY:
 }}
 """
     try:
-        resp = gemini_service.generate_content([prompt])
-        if resp and getattr(resp, "text", None):
-            txt = resp.text.strip()
-            # Витягуємо JSON
-            json_match = re.search(r"\{.*\}", txt, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                intent = data.get("intent", "question_chat")
-                reply = data.get("ai_reply")
-                if reply:
-                    reply = sanitize_typography(reply.strip())
-                return CommentIntentResult(
-                    intent=intent,
-                    matched_trigger=data.get("matched_trigger"),
-                    confidence=float(data.get("confidence", 0.9)),
-                    ai_reply_text=reply
-                )
+        cl = gemini_service.client
+        if cl:
+            resp = cl.models.generate_content(
+                model=getattr(gemini_service, "model_name", "gemini-3.5-flash"),
+                contents=[prompt]
+            )
+            if resp and getattr(resp, "text", None):
+                txt = resp.text.strip()
+                json_match = re.search(r"\{.*\}", txt, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    intent = data.get("intent", "question_chat")
+                    reply = data.get("ai_reply")
+                    if reply:
+                        reply = sanitize_typography(reply.strip())
+                    return CommentIntentResult(
+                        intent=intent,
+                        matched_trigger=data.get("matched_trigger"),
+                        confidence=float(data.get("confidence", 0.9)),
+                        ai_reply_text=reply
+                    )
     except Exception as e:
-        logger.warning(f"Помилка LLM класифікації коментаря: {e}")
+        logger.debug(f"LLM класифікація коментаря пропущена (квота/помилка): {e}")
 
-    # Фолбек за замовчуванням
+    # Швидкий фолбек за замовчуванням
     return CommentIntentResult(
         intent="question_chat",
         confidence=0.5,
