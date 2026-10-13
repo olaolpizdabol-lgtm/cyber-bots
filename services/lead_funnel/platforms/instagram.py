@@ -325,17 +325,17 @@ class InstagramFunnel(BasePlatformFunnel):
                             # Якщо кнопки Message немає в шапці (наприклад, кнопка Follow Back), шукаємо "Send message" у 3 крапках (...)
                             dots_svg = page.locator('header svg[aria-label="Options"], header svg[aria-label="Параметри"], header [aria-label="Options"], header [aria-label="Параметри"]').first
                             if dots_svg.is_visible():
-                                parent_btn = dots_svg.locator('xpath=ancestor::button').first
-                                if parent_btn.is_visible():
-                                    parent_btn.click()
-                                else:
-                                    dots_svg.click(force=True)
-                                page.wait_for_timeout(1000)
-                                menu_msg = page.locator('button:has-text("Send message"), button:has-text("Надіслати повідомлення"), [role="button"]:has-text("Send message"), [role="button"]:has-text("Надіслати повідомлення")').first
-                                if menu_msg.is_visible():
-                                    menu_msg.click()
-                                    page.wait_for_timeout(2500)
-                                    msg_btn = None
+                                dots_svg.click(force=True)
+                                page.wait_for_timeout(1200)
+                                dialog = page.locator('[role="dialog"]').first
+                                if dialog.is_visible():
+                                    menu_msg = dialog.get_by_text("Send message", exact=True).first
+                                    if not menu_msg.is_visible():
+                                        menu_msg = dialog.get_by_text("Надіслати повідомлення", exact=True).first
+                                    if menu_msg.is_visible():
+                                        menu_msg.click(force=True)
+                                        page.wait_for_timeout(3500)
+                                        msg_btn = None
                         elif msg_btn.is_visible():
                             msg_btn.click()
                             page.wait_for_timeout(2500)
