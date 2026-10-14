@@ -3,25 +3,24 @@
 Cross-platform Comment-to-DM Engine with AI Detection & Follower Conversion
 """
 import os
+import re
+import html
+import threading
 import random
 import time
-import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 
 from core.database import (
     get_setting,
-    set_setting,
     get_lead_funnel_triggers,
     get_lead_comment,
     save_lead_comment,
     get_pending_follow_leads,
     update_lead_status,
-    get_lead_funnel_stats,
-    has_user_received_lead,
-    is_user_already_handled
+    has_user_received_lead
 )
-from services.lead_funnel.intent_detector import detect_comment_intent
+from services.lead_funnel.intent_detector import detect_comment_intent, CommentIntentResult
 from services.lead_funnel.platforms.instagram import instagram_funnel
 from services.lead_funnel.platforms.facebook import facebook_funnel
 from services.lead_funnel.platforms.tiktok import tiktok_funnel
@@ -74,10 +73,10 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
                             )
                             if r.status_code == 200:
                                 delivered = True
-                                logger.info(f"✅ [Telegram Lead Notify] Фото-звіт доставлено до {uid} через бот {token[:10]}...")
+                                logger.info(f"✅ [Telegram Lead Notify] Фото-звіт доставлено до {uid} через налаштований бот")
                                 break
                             else:
-                                logger.debug(f"sendPhoto status {r.status_code}: {r.text}")
+                                logger.debug("sendPhoto HTTP %s", r.status_code)
                     else:
                         files = {}
                         media = []
@@ -97,15 +96,15 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
                             )
                             if r.status_code == 200:
                                 delivered = True
-                                logger.info(f"✅ [Telegram Lead Notify] Медіагрупу доставлено до {uid} через бот {token[:10]}...")
+                                logger.info(f"✅ [Telegram Lead Notify] Медіагрупу доставлено до {uid} через налаштований бот")
                                 break
                             else:
-                                logger.debug(f"sendMediaGroup status {r.status_code}: {r.text}")
+                                logger.debug("sendMediaGroup HTTP %s", r.status_code)
                         finally:
                             for f in files.values():
                                 f.close()
                 except Exception as photo_err:
-                    logger.debug(f"Telegram notification photo error: {photo_err}")
+                    logger.debug("Telegram photo failed: %s", type(photo_err).__name__)
 
             # 2. Спроба текстового повідомлення (HTML)
             if not delivered:
@@ -122,10 +121,10 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
                     )
                     if r.status_code == 200:
                         delivered = True
-                        logger.info(f"✅ [Telegram Lead Notify] Повідомлення доставлено до {uid} через бот {token[:10]}...")
+                        logger.info(f"✅ [Telegram Lead Notify] Повідомлення доставлено до {uid} через налаштований бот")
                         break
                     else:
-                        logger.debug(f"sendMessage HTML error {r.status_code}: {r.text}")
+                        logger.debug("sendMessage HTTP %s", r.status_code)
                         # Фолбек на чистий текст (якщо в html_text був невалідний тег)
                         clean_plain = re.sub(r"<[^>]+>", "", html_text)
                         r2 = requests.post(
@@ -142,7 +141,7 @@ def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None
                             logger.info(f"✅ [Telegram Lead Notify] Plain-text повідомлення доставлено до {uid}")
                             break
                 except Exception as e:
-                    logger.debug(f"Telegram notification sendMessage error: {e}")
+                    logger.debug("Telegram message failed: %s", type(e).__name__)
 
         if not delivered:
             logger.warning(f"⚠️ [Telegram Lead Notify] Не вдалося доставити сповіщення користувачу {uid} через жоден бот.")
@@ -159,29 +158,9 @@ DEFAULT_REPLIES_FOLLOWER = [
 
 # Варіанти відповідей у коментарях для НЕ підписаних (дружнє, привабливе заохочення підписатися)
 DEFAULT_REPLIES_NON_FOLLOWER = [
-    "Almost yours! 🎁 Hit Follow on the page, and I'll send the 100+ prompt vault straight to your DMs! ⚡",
-    "One quick step! 🚀 Follow the profile and the full prompt database lands in your inbox right now ⚡",
-    "Vault is ready! ⚡ Hit Follow so I can open access and send it straight to your DMs!",
-    "Just follow the page and check your DMs in 2 seconds — sending it right over! 🚀"
+    "Please follow @bohdan.gpt first. I haven't sent the vault yet; I'll send it after your follow is verified."
 ]
-
-# Варіанти відповідей для Facebook (клікабельні прямі посилання на Vault)
-DEFAULT_REPLIES_FACEBOOK_DM_FALLBACK = [
-    "Here is your instant access to the 100+ Prompt Vault: {link} 🚀 Enjoy and bookmark it! ⚡",
-    "Grab the complete Prompt Vault right here: {link} 🔥 Let me know what you build with these! ⚡",
-    "Vault access unlocked! ⚡ Click here for the 100+ AI Prompts & codes: {link} 🚀",
-    "Here you go! 🎁 Instant access to the full prompt database: {link} ⚡"
-]
-
-DEFAULT_REPLIES_FACEBOOK_NON_FOLLOWER = [
-    "Almost yours! 🎁 Grab the full 100+ Prompt Vault right here: {link} ⚡ Follow the page for daily drops! 🔥",
-    "Here is your direct access: {link} 🚀 Make sure to Follow the page for daily new AI prompts! ⚡",
-    "Unlocked! ⚡ Access the complete Prompt Vault right here: {link} 🔥 Drop a follow for new daily updates! 🚀",
-    "Got you covered! 🎁 Direct vault link: {link} ⚡ Follow the page so you don't miss tomorrow's drop!"
-]
-
-# Відповідь якщо у користувача закритий Direct
-DEFAULT_REPLY_PRIVATE_DM = "Tried to DM you, but your inbox is private! 📩 Check the link in my bio or message me first! ⚡"
+DEFAULT_REPLY_UNVERIFIED = "I couldn't verify your follow yet. I haven't sent the vault. I'll check again and send it once confirmed."
 
 # Варіанти відповідей для TikTok (без зовнішніх посилань, щоб не зловити тіньовий бан / спам-фільтр)
 DEFAULT_REPLIES_TIKTOK_BRIDGE = [
@@ -212,6 +191,11 @@ DEFAULT_LEAD_LINK = "https://t.me/bohdan_gpt"
 
 class LeadFunnelService:
     def __init__(self):
+        self._platform_locks = {name: threading.Lock() for name in ("instagram", "facebook", "tiktok", "youtube")}
+        self.last_scan = {}
+        self.last_scan_at = {}
+        self.last_error = {}
+        self.active_scans = set()
         self.platforms = {
             "instagram": instagram_funnel,
             "facebook": facebook_funnel,
@@ -231,7 +215,7 @@ class LeadFunnelService:
         base_link = get_setting("lead_funnel_link")
         if not base_link or "t.me/" in base_link:
             env_url = os.getenv("VAULT_BASE_URL", "").strip()
-            base_link = env_url if env_url else "https://cyber-bots.up.railway.app/vault/"
+            base_link = env_url if env_url else "https://bohdan-gpt.vercel.app/vault/"
 
         clean_base = base_link.split("?")[0].rstrip("/")
         if not clean_base.endswith("/vault"):
@@ -242,319 +226,259 @@ class LeadFunnelService:
         platform_clean = (platform or "instagram").lower().strip()
         return f"{clean_base}?from={platform_clean}"
 
+    def get_facebook_reply(self):
+        return "Here is the full 100+ AI Prompt Vault: " + self.get_lead_link("facebook") + " — enjoy! ⚡"
+
     def get_formatted_dm_text(self, platform: str = "instagram") -> str:
         tpl = self.get_dm_template()
         link = self.get_lead_link(platform=platform)
-        return tpl.format(link=link)
+        return tpl.replace("{link}", link)
 
     def process_platform_comments(self, platform_name: str, limit_posts: Optional[int] = 5, max_replies_batch: int = 25) -> Dict[str, int]:
-        """
-        Перевіряє та обробляє всі свіжі або всі історичні коментарі для обраної платформи.
-        limit_posts=None означає глибокий скан УСІХ доступних відео.
-        max_replies_batch обмежує кількість активних відповідей за 1 раз для захисту від блокувань Meta.
-        """
+        stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0, "replies": 0, "errors": 0}
         handler = self.platforms.get(platform_name)
         if not handler:
-            return {"processed": 0, "leads": 0}
-
-        stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0}
-        comments = handler.fetch_recent_unanswered_comments(limit_posts=limit_posts)
-        logger.info(f"[{platform_name.upper()}] Отримано {len(comments)} коментарів для перевірки (limit_posts={limit_posts})")
-
-        triggers = get_lead_funnel_triggers(only_active=True)
-
-        for comm in comments:
-            # 1. Захист від перевищення годинного ліміту платформи (Meta anti-ban)
-            if stats["leads"] >= max_replies_batch:
-                logger.info(
-                    f"[{platform_name.upper()}] 🛡 Досягнуто безпечний ліміт пачки ({max_replies_batch} відповідей). "
-                    f"Залишок коментарів буде опрацьовано у наступних циклах для уникнення блокувань."
-                )
-                break
-
-            # 2. Перевіряємо, чи цей коментар уже є в базі або чи користувача вже оброблено
-            existing = get_lead_comment(platform_name, comm.comment_id)
-            if existing:
-                continue
-
-            if is_user_already_handled(platform_name, comm.username):
-                logger.info(f"[{platform_name}] ⏭️ Користувач @{comm.username} вже оброблений раніше. Пропускаємо повторну обробку.")
-                continue
-
-            # 3. Розпізнавання наміру (intent)
-            intent_res = detect_comment_intent(comm.text, custom_triggers=triggers)
-            logger.info(f"[{platform_name}] Comment from {comm.username}: '{comm.text[:40]}' -> Intent: {intent_res.intent}")
-
-            # 4. Автоматично лайкаємо кожен валідний коментар (крім спаму!)
-            if intent_res.intent != "spam":
+            return stats
+        lock = self._platform_locks[platform_name]
+        if not lock.acquire(blocking=False):
+            return dict(stats, busy=1)
+        self.last_error.pop(platform_name, None)
+        self.active_scans.add(platform_name)
+        try:
+            comments = handler.fetch_recent_unanswered_comments(limit_posts=limit_posts)
+            triggers = get_lead_funnel_triggers(only_active=True)
+            for comm in comments:
+                if stats["processed"] >= max_replies_batch:
+                    break
                 try:
-                    handler.like_comment(comm.comment_id, post_id=comm.post_id)
-                except Exception as like_err:
-                    logger.debug(f"[{platform_name}] Помилка лайку коментаря {comm.comment_id}: {like_err}")
+                    self._process_comment(platform_name, handler, comm, triggers, stats)
+                except Exception as exc:
+                    stats["errors"] += 1
+                    logger.warning("[%s] Comment processing failed: %s", platform_name, type(exc).__name__)
+            return stats
+        except Exception as exc:
+            stats["errors"] += 1
+            self.last_error[platform_name] = type(exc).__name__
+            logger.warning("[%s] Scan failed: %s", platform_name, type(exc).__name__)
+            return stats
+        finally:
+            self.last_scan[platform_name] = dict(stats)
+            self.last_scan_at[platform_name] = time.time()
+            self.active_scans.discard(platform_name)
+            lock.release()
 
-            # 5. Якщо автор ВЖЕ відповів (перевірено через DOM сторінки/відео)
-            if comm.has_author_replied:
-                logger.info(f"[{platform_name}] ⏭️ Автор вже відповів на коментар @{comm.username}. Пропускаємо повторну обробку.")
-                save_lead_comment(
-                    platform=platform_name,
-                    comment_id=comm.comment_id,
-                    post_id=comm.post_id,
-                    post_url=comm.post_url,
-                    user_id=comm.user_id,
-                    username=comm.username,
-                    comment_text=comm.text,
-                    detected_intent="already_replied",
-                    matched_trigger=None,
-                    is_following=False,
-                    status="already_replied_manual",
-                    dm_sent=False
-                )
-                continue
+    def _process_comment(self, platform, handler, comm, triggers, stats):
+        existing = get_lead_comment(platform, comm.comment_id)
+        retry_statuses = ("reply_failed", "sent_dm_reply_pending")
+        if platform == "facebook":
+            retry_statuses += ("pending_follow", "pending_verification", "dm_failed", "dm_failed_private")
+        if existing and existing["status"] not in retry_statuses:
+            return
+        if comm.has_author_replied:
+            return
+        intent = (CommentIntentResult("lead_magnet") if platform == "facebook"
+                  else detect_comment_intent(comm.text, custom_triggers=triggers))
+        if intent.intent == "spam":
+            return
+        stats["processed"] += 1
+        following = False
+        dm_sent = bool(existing and existing.get("dm_delivery_verified") and existing.get("dm_sent_at"))
+        proof = None
 
-            # 6. Якщо користувачу ВЖЕ було надіслано лід-магніт (DM) раніше або автор вже відповів йому
-            if has_user_received_lead(platform_name, comm.username):
-                logger.info(f"[{platform_name}] ⏭️ Користувач @{comm.username} вже отримував лід-магніт раніше. Пропускаємо дублювання.")
-                save_lead_comment(
-                    platform=platform_name,
-                    comment_id=comm.comment_id,
-                    post_id=comm.post_id,
-                    post_url=comm.post_url,
-                    user_id=comm.user_id,
-                    username=comm.username,
-                    comment_text=comm.text,
-                    detected_intent="already_sent_earlier",
-                    matched_trigger=None,
-                    is_following=True,
-                    status="already_sent_earlier",
-                    dm_sent=False
-                )
-                continue
+        def save(status):
+            save_lead_comment(
+                platform=platform, comment_id=comm.comment_id, post_id=comm.post_id,
+                post_url=comm.post_url, user_id=comm.user_id, username=comm.username,
+                comment_text=comm.text, detected_intent=intent.intent,
+                matched_trigger=intent.matched_trigger, is_following=following,
+                status=status, dm_sent=dm_sent,
+            )
 
-            stats["processed"] += 1
-
-            if intent_res.is_lead_magnet():
-                stats["leads"] += 1
-                # 6. Перевірка підписки та отримання фото-доказу профілю (proof_photo)
-                status_from_check, proof_photo = handler.check_follower_status(comm.user_id, comm.username)
-                is_following = comm.is_following if comm.is_following is not None else status_from_check
-
-                # Збираємо скріншоти для звіту в Telegram:
-                lead_photos = []
-                if getattr(comm, "screenshot_path", None) and Path(comm.screenshot_path).exists():
-                    lead_photos.append(comm.screenshot_path)
-                if proof_photo and Path(proof_photo).exists():
-                    lead_photos.append(proof_photo)
-
-                if platform_name in ("tiktok", "youtube"):
-                    # Для TikTok / YouTube: відповідаємо коментарем без посилань (направляємо в Instagram @bohdan.gpt bio)
-                    if platform_name == "tiktok":
-                        reply_txt = random.choice(DEFAULT_REPLIES_TIKTOK_BRIDGE)
-                    else:
-                        reply_txt = random.choice(DEFAULT_REPLIES_YOUTUBE_BRIDGE)
-
-                    handler.reply_to_comment(comm.comment_id, reply_txt, post_id=comm.post_id)
-                    save_lead_comment(
-                        platform=platform_name,
-                        comment_id=comm.comment_id,
-                        post_id=comm.post_id,
-                        post_url=comm.post_url,
-                        user_id=comm.user_id,
-                        username=comm.username,
-                        comment_text=comm.text,
-                        detected_intent="lead_magnet",
-                        matched_trigger=intent_res.matched_trigger,
-                        is_following=False,
-                        status="replied_public_only",
-                        dm_sent=False
-                    )
-                    notify_telegram_lead(
-                        f"🌉 <b>Bridge Lead ({platform_name.upper()}):</b>\n"
-                        f"• Користувач: <code>@{comm.username}</code>\n"
-                        f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                        f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                        f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_txt}\"</i>",
-                        photo_paths=lead_photos
-                    )
-                    continue
-
-                if is_following:
-                    # Сценарій А: Людина підписана -> відправляємо DM + коментар
-                    dm_text = self.get_formatted_dm_text(platform=platform_name)
-                    dm_ok, dm_err = handler.send_direct_message(
-                        user_id=comm.user_id,
-                        username=comm.username,
-                        text=dm_text,
-                        comment_id=comm.comment_id
-                    )
-
-                    if dm_ok:
-                        if platform_name == "facebook":
-                            reply_comment = f"Sent to your Messenger! 📩 You can also access the full vault directly here: {self.get_lead_link('facebook')} ⚡"
-                        else:
-                            reply_comment = random.choice(DEFAULT_REPLIES_FOLLOWER)
-                        handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
-                        save_lead_comment(
-                            platform=platform_name,
-                            comment_id=comm.comment_id,
-                            post_id=comm.post_id,
-                            post_url=comm.post_url,
-                            user_id=comm.user_id,
-                            username=comm.username,
-                            comment_text=comm.text,
-                            detected_intent="lead_magnet",
-                            matched_trigger=intent_res.matched_trigger,
-                            is_following=True,
-                            status="sent_dm",
-                            dm_sent=True
-                        )
-                        stats["dms_sent"] += 1
-                        notify_telegram_lead(
-                            f"⚡️ <b>Lead Magnet DM Delivered!</b>\n"
-                            f"• Платформа: <b>{platform_name.upper()}</b>\n"
-                            f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
-                            f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                            f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>\n"
-                            f"• 📩 <b>Надіслано в Direct:</b>\n<code>{dm_text}</code>",
-                            photo_paths=lead_photos
-                        )
-                    else:
-                        # Закритий direct або обмеження платформи -> публічно направляємо на bio або скидаємо прямий лінк (FB)
-                        if platform_name == "facebook":
-                            reply_comment = random.choice(DEFAULT_REPLIES_FACEBOOK_DM_FALLBACK).format(link=self.get_lead_link("facebook"))
-                        else:
-                            reply_comment = DEFAULT_REPLY_PRIVATE_DM
-                        handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
-                        save_lead_comment(
-                            platform=platform_name,
-                            comment_id=comm.comment_id,
-                            post_id=comm.post_id,
-                            post_url=comm.post_url,
-                            user_id=comm.user_id,
-                            username=comm.username,
-                            comment_text=comm.text,
-                            detected_intent="lead_magnet",
-                            matched_trigger=intent_res.matched_trigger,
-                            is_following=True,
-                            status="dm_failed_private" if dm_err == "private_dm" else "dm_failed",
-                            dm_sent=False
-                        )
-                        notify_telegram_lead(
-                            f"⚠️ <b>Закритий Direct у користувача:</b>\n"
-                            f"• Платформа: <b>{platform_name.upper()}</b>\n"
-                            f"• Користувач: <code>@{comm.username}</code> (Підписаний ✅)\n"
-                            f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                            f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>",
-                            photo_paths=lead_photos
-                        )
+        if platform == "facebook":
+            reply = self.get_facebook_reply()
+            status = "replied_public_only"
+        elif intent.is_lead_magnet():
+            stats["leads"] += 1
+            if platform in ("tiktok", "youtube"):
+                reply = random.choice(DEFAULT_REPLIES_TIKTOK_BRIDGE if platform == "tiktok" else DEFAULT_REPLIES_YOUTUBE_BRIDGE)
+                status = "replied_public_only"
+            elif dm_sent or has_user_received_lead(platform, comm.username):
+                following = True
+                reply = "The vault is already in our DM conversation. Check your inbox and message requests! ⚡"
+                status = "sent_dm" if dm_sent else "already_sent_earlier"
+            else:
+                if comm.is_following is None:
+                    following, proof = handler.check_follower_status(comm.user_id, comm.username)
                 else:
-                    # Сценарій Б: Людина НЕ підписана -> просимо підписатися та додаємо в чергу (на FB одразу даємо прямий лінк!)
-                    if platform_name == "facebook":
-                        reply_comment = random.choice(DEFAULT_REPLIES_FACEBOOK_NON_FOLLOWER).format(link=self.get_lead_link("facebook"))
+                    following = comm.is_following
+                if following is True:
+                    dm_sent, error = handler.send_direct_message(
+                        comm.user_id, comm.username, self.get_formatted_dm_text(platform), comment_id=comm.comment_id)
+                    if dm_sent:
+                        # Persist delivery before the separate public reply to avoid duplicate DMs.
+                        save("sent_dm_reply_pending")
+                        stats["dms_sent"] += 1
+                        reply = random.choice(DEFAULT_REPLIES_FOLLOWER)
+                        status = "sent_dm"
                     else:
-                        reply_comment = random.choice(DEFAULT_REPLIES_NON_FOLLOWER)
-                    handler.reply_to_comment(comm.comment_id, reply_comment, post_id=comm.post_id)
+                        reply = "I couldn't confirm the DM was sent. Please message me directly so I can help."
+                        status = "delivery_unknown" if error == "delivery_unknown" else "dm_failed"
+                else:
+                    reply = DEFAULT_REPLIES_NON_FOLLOWER[0] if following is False else DEFAULT_REPLY_UNVERIFIED
+                    status = "pending_follow" if following is False else "pending_verification"
+        elif intent.ai_reply_text:
+            reply = intent.ai_reply_text
+            status = "replied_public_only"
+        else:
+            return
+
+        try:
+            ok, error = handler.reply_to_comment(comm.comment_id, reply, post_id=comm.post_id)
+        except Exception:
+            save("sent_dm_reply_pending" if dm_sent else "reply_failed")
+            raise
+        if not ok:
+            save("reply_delivery_unknown" if error == "delivery_unknown" else "sent_dm_reply_pending" if dm_sent else "reply_failed")
+            stats["errors"] += 1
+            logger.warning("[%s] Reply was not confirmed; retained for retry", platform)
+            return
+        save(status)
+        stats["replies"] += 1
+        if status in ("pending_follow", "pending_verification"):
+            stats["pending_follow"] += 1
+        time.sleep(1.0 if platform == "facebook" else random.uniform(2.0, 4.0))
+
+    def process_instagram_messages(self):
+        return self.process_direct_messages("instagram")
+
+    def process_direct_messages(self, platform_name):
+        stats = {"processed": 0, "dms_sent": 0, "replies": 0, "pending_follow": 0, "errors": 0}
+        lock = self._platform_locks[platform_name]
+        if not lock.acquire(blocking=False):
+            return dict(stats, busy=1)
+        key = platform_name + "_dm"
+        self.last_error.pop(key, None)
+        self.active_scans.add(key)
+        try:
+            handler = self.platforms[platform_name]
+            for message in handler.fetch_direct_messages():
+                if stats["processed"] >= 25:
+                    break
+                message_key = "dm_" + message.comment_id
+                if get_lead_comment(platform_name, message_key):
+                    continue
+                try:
+                    intent = CommentIntentResult("lead_magnet") if platform_name == "facebook" else detect_comment_intent(message.text)
+                    if intent.intent == "spam":
+                        continue
+                    stats["processed"] += 1
+                    following = None
+                    if platform_name == "facebook":
+                        text = self.get_facebook_reply()
+                        status = "sent_dm"
+                    else:
+                        following, _ = handler.check_follower_status(message.user_id, message.username)
+                        if following is True:
+                            text = self.get_formatted_dm_text(platform_name)
+                            status = "sent_dm"
+                        else:
+                            text = DEFAULT_REPLIES_NON_FOLLOWER[0] if following is False else DEFAULT_REPLY_UNVERIFIED
+                            status = "pending_follow" if following is False else "pending_verification"
+                    ok, error = handler.reply_to_direct_message(message, text)
+                    if not ok:
+                        stats["errors"] += 1
+                        self.last_error[key] = error or "delivery_failed"
+                        if error != "delivery_unknown":
+                            continue
+                        status = "delivery_unknown"
+                    delivered = ok and (platform_name == "facebook" or following is True)
                     save_lead_comment(
-                        platform=platform_name,
-                        comment_id=comm.comment_id,
-                        post_id=comm.post_id,
-                        post_url=comm.post_url,
-                        user_id=comm.user_id,
-                        username=comm.username,
-                        comment_text=comm.text,
-                        detected_intent="lead_magnet",
-                        matched_trigger=intent_res.matched_trigger,
-                        is_following=False,
-                        status="pending_follow",
-                        dm_sent=False
-                    )
-                    stats["pending_follow"] += 1
-                    notify_telegram_lead(
-                        f"⏳ <b>Очікує підписки (Pending Follow):</b>\n"
-                        f"• Платформа: <b>{platform_name.upper()}</b>\n"
-                        f"• Користувач: <code>@{comm.username}</code> (Не підписаний ❌)\n"
-                        f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                        f"• Тригер: <code>{intent_res.matched_trigger}</code>\n"
-                        f"• 💬 <b>Відповідь бота у коментарях:</b>\n<i>\"{reply_comment}\"</i>\n"
-                        f"⚡ Як тільки підпишеться — бот автоматично скине Prompt Vault у Direct!",
-                        photo_paths=lead_photos
-                    )
+                        platform=platform_name, comment_id=message_key, post_id=message.post_id,
+                        user_id=message.user_id, username=message.username, comment_text=message.text,
+                        detected_intent=intent.intent, matched_trigger=intent.matched_trigger,
+                        is_following=following, status=status, dm_sent=delivered)
+                    stats["replies"] += int(ok)
+                    stats["dms_sent"] += int(delivered)
+                    stats["pending_follow"] += int(status in ("pending_follow", "pending_verification"))
+                    time.sleep(random.uniform(2.0, 5.0))
+                except Exception as exc:
+                    stats["errors"] += 1
+                    self.last_error[key] = type(exc).__name__
+            return stats
+        except Exception as exc:
+            stats["errors"] += 1
+            self.last_error[key] = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+            return stats
+        finally:
+            self.last_scan[key] = dict(stats)
+            self.last_scan_at[key] = time.time()
+            self.active_scans.discard(key)
+            lock.release()
 
-                # Анти-бан пауза між активними діями/відповідями (8-16 секунд)
-                time.sleep(random.uniform(8.0, 16.0))
+    def recheck_pending_leads(self, platform_name=None) -> int:
+        converted = 0
+        for platform in ([platform_name] if platform_name else list(self.platforms)):
+            lock = self._platform_locks[platform]
+            if not lock.acquire(blocking=False):
+                continue
+            try:
+                converted += self._recheck_pending_leads(platform)
+            finally:
+                lock.release()
+        return converted
 
-            elif intent_res.intent == "question_chat" and intent_res.ai_reply_text:
-                # Відповідаємо розумно згенерованим текстом
-                handler.reply_to_comment(comm.comment_id, intent_res.ai_reply_text, post_id=comm.post_id)
-                save_lead_comment(
-                    platform=platform_name,
-                    comment_id=comm.comment_id,
-                    post_id=comm.post_id,
-                    post_url=comm.post_url,
-                    user_id=comm.user_id,
-                    username=comm.username,
-                    comment_text=comm.text,
-                    detected_intent="question_chat",
-                    matched_trigger=None,
-                    is_following=False,
-                    status="replied_public_only",
-                    dm_sent=False
-                )
-                notify_telegram_lead(
-                    f"🤖 <b>AI Відповідь на коментар ({platform_name.upper()}):</b>\n"
-                    f"• Користувач: <code>@{comm.username}</code>\n"
-                    f"• Коментар користувача: <i>\"{comm.text}\"</i>\n"
-                    f"• 💬 <b>Згенерована відповідь бота:</b>\n<i>\"{intent_res.ai_reply_text}\"</i>",
-                    photo_paths=[comm.screenshot_path] if getattr(comm, "screenshot_path", None) and Path(comm.screenshot_path).exists() else None
-                )
-                time.sleep(random.uniform(8.0, 16.0))
-
-        return stats
-
-    def recheck_pending_leads(self) -> int:
-        """
-        Фонова перевірка: чи підписалися користувачі після нашого прохання.
-        Як тільки підписався — миттєво відправляємо лід-магніт у Direct!
-        """
-        pending = get_pending_follow_leads(limit=25)
+    def _recheck_pending_leads(self, platform_name) -> int:
+        if platform_name == "facebook":
+            return 0
+        pending = get_pending_follow_leads(platform=platform_name, limit=25)
         converted = 0
         logger.info(f"Перевірка підписок для {len(pending)} очікуючих лідів...")
 
         for lead in pending:
-            platform = lead["platform"]
-            handler = self.platforms.get(platform)
-            if not handler:
-                continue
+            try:
+                platform = lead["platform"]
+                handler = self.platforms.get(platform)
+                if not handler:
+                    continue
 
-            u_id = lead["user_id"]
-            u_name = lead["username"]
+                u_id = lead["user_id"]
+                u_name = lead["username"]
 
-            if has_user_received_lead(platform, u_name):
-                update_lead_status(lead["id"], status="already_converted", is_following=True, dm_sent=True)
-                continue
+                if has_user_received_lead(platform, u_name):
+                    update_lead_status(lead["id"], status="already_converted")
+                    continue
 
-            if handler.is_user_following(u_id, u_name):
-                # Користувач підписався! 🎉
-                logger.info(f"🎉 Користувач @{u_name} ({platform}) щойно підписався! Надсилаємо DM...")
-                dm_text = self.get_formatted_dm_text(platform=platform)
-                ok, err = handler.send_direct_message(u_id, u_name, dm_text, comment_id=lead["comment_id"])
-                if ok:
-                    update_lead_status(lead["id"], status="converted", is_following=True, dm_sent=True)
-                    converted += 1
-                    notify_telegram_lead(
-                        f"🎉 <b>New Follower Converted!</b>\n"
-                        f"• Платформа: <b>{platform.upper()}</b>\n"
-                        f"• Користувач: <code>@{u_name}</code>\n"
-                        f"• Щойно підписався на профіль після нагадування! 🚀\n"
-                        f"• 📩 <b>Надіслано в Direct:</b>\n<code>{dm_text}</code>"
-                    )
-                elif err == "private_dm":
-                    update_lead_status(lead["id"], status="dm_failed_private", is_following=True)
-            else:
-                # Ще не підписався, оновлюємо лічильник перевірок
-                update_lead_status(lead["id"], status="pending_follow", is_following=False)
+                following = handler.is_user_following(u_id, u_name)
+                if following is True:
+                    # Користувач підписався! 🎉
+                    logger.info(f"🎉 Користувач @{u_name} ({platform}) щойно підписався! Надсилаємо DM...")
+                    dm_text = self.get_formatted_dm_text(platform=platform)
+                    if lead["comment_id"].startswith("dm_"):
+                        from services.lead_funnel.platforms.base import PlatformComment
+                        message = PlatformComment(lead["comment_id"][3:], lead["post_id"], None, u_id, u_name, lead["comment_text"])
+                        ok, err = handler.reply_to_direct_message(message, dm_text)
+                    else:
+                        ok, err = handler.send_direct_message(u_id, u_name, dm_text, comment_id=lead["comment_id"])
+                    if ok:
+                        update_lead_status(lead["id"], status="converted", is_following=True, dm_sent=True)
+                        converted += 1
+                        notify_telegram_lead(
+                            f"🎉 <b>New Follower Converted!</b>\n"
+                            f"• Платформа: <b>{platform.upper()}</b>\n"
+                            f"• Користувач: <code>@{html.escape(u_name)}</code>\n"
+                            f"• Щойно підписався на профіль після нагадування! 🚀\n"
+                            f"• 📩 <b>Надіслано в Direct:</b>\n<code>{html.escape(dm_text)}</code>"
+                        )
+                    else:
+                        update_lead_status(lead["id"], status="delivery_unknown" if err == "delivery_unknown" else "dm_failed", is_following=True)
+                else:
+                    # Ще не підписався, оновлюємо лічильник перевірок
+                    update_lead_status(lead["id"], status="pending_follow" if following is False else "pending_verification", is_following=following)
 
-            time.sleep(random.uniform(2.0, 5.0))
+                time.sleep(random.uniform(2.0, 5.0))
+            except Exception as exc:
+                logger.warning("Pending lead check failed: %s", type(exc).__name__)
+                update_lead_status(lead["id"], status=lead["status"])
 
         return converted
 

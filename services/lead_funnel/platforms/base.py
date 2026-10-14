@@ -18,6 +18,7 @@ class PlatformComment:
     created_time: Optional[str] = None
     screenshot_path: Optional[str] = None
     is_following: Optional[bool] = None
+    pending_request: bool = False
 
 
 class BasePlatformFunnel(ABC):
@@ -36,8 +37,9 @@ class BasePlatformFunnel(ABC):
         """Перевіряє, чи підписаний користувач на наш акаунт/сторінку"""
         pass
 
-    def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
+    def check_follower_status(self, user_id: str, username: str) -> Tuple[Optional[bool], Optional[str]]:
         """
+        None means verification is unavailable; it must never grant access.
         Перевіряє статус підписки та повертає (is_following, proof_screenshot_path).
         За замовчуванням викликає is_user_following.
         """
@@ -56,6 +58,12 @@ class BasePlatformFunnel(ABC):
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Публікує відповідь на коментар під відео/дописом"""
         pass
+
+    def fetch_direct_messages(self) -> List[PlatformComment]:
+        raise RuntimeError("Inbox adapter unavailable")
+
+    def reply_to_direct_message(self, message: PlatformComment, text: str) -> Tuple[bool, Optional[str]]:
+        raise NotImplementedError("Inbox adapter unavailable")
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Ставить лайк на коментар (якщо не спам)"""

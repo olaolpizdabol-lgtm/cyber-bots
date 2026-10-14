@@ -317,6 +317,10 @@ def init_db():
             )
         """)
 
+        columns = {row[1] for row in cursor.execute("PRAGMA table_info(lead_funnel_comments)")}
+        if "dm_delivery_verified" not in columns:
+            cursor.execute("ALTER TABLE lead_funnel_comments ADD COLUMN dm_delivery_verified INTEGER NOT NULL DEFAULT 0")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS lead_funnel_triggers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1424,7 +1428,7 @@ def get_lead_comment(platform: str, comment_id: str) -> Optional[Dict[str, Any]]
 
 
 def has_user_received_lead(platform: str, username: str) -> bool:
-    """Перевіряє, чи вже відправляли цьому користувачу лід-магніт (DM) раніше або чи автор вже відповів йому"""
+    """Перевіряє підтверджену доставку лід-магніту користувачу в DM"""
     if not username:
         return False
     with get_connection() as conn:
@@ -1432,7 +1436,7 @@ def has_user_received_lead(platform: str, username: str) -> bool:
         cursor.execute("""
             SELECT id FROM lead_funnel_comments 
             WHERE platform = ? AND LOWER(username) = LOWER(?) 
-            AND (dm_sent_at IS NOT NULL OR status IN ('sent_dm', 'converted', 'already_replied_manual', 'already_sent_earlier'))
+            AND dm_delivery_verified = 1 AND dm_sent_at IS NOT NULL
             LIMIT 1
         """, (platform, username.strip()))
         return cursor.fetchone() is not None
@@ -1447,6 +1451,7 @@ def is_user_already_handled(platform: str, username: str) -> bool:
         cursor.execute("""
             SELECT id FROM lead_funnel_comments 
             WHERE platform = ? AND LOWER(username) = LOWER(?)
+            AND status NOT IN ('reply_failed', 'dm_failed')
             LIMIT 1
         """, (platform, username.strip()))
         return cursor.fetchone() is not None
@@ -1472,15 +1477,21 @@ def save_lead_comment(
         cursor = conn.cursor()
         dm_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if dm_sent else None
         cursor.execute("""
-            INSERT OR REPLACE INTO lead_funnel_comments (
+            INSERT INTO lead_funnel_comments (
                 platform, comment_id, post_id, post_url, user_id, username,
                 comment_text, detected_intent, matched_trigger, is_following,
-                status, dm_sent_at, reply_comment_id, check_count, last_checked_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                status, dm_sent_at, reply_comment_id, dm_delivery_verified, check_count, last_checked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(platform, comment_id) DO UPDATE SET
+                status = excluded.status, is_following = excluded.is_following,
+                dm_sent_at = COALESCE(lead_funnel_comments.dm_sent_at, excluded.dm_sent_at),
+                dm_delivery_verified = MAX(lead_funnel_comments.dm_delivery_verified, excluded.dm_delivery_verified),
+                check_count = lead_funnel_comments.check_count + 1,
+                last_checked_at = CURRENT_TIMESTAMP
         """, (
             platform, str(comment_id), str(post_id or ""), str(post_url or ""),
             str(user_id or ""), str(username or ""), comment_text, detected_intent,
-            matched_trigger, 1 if is_following else 0, status, dm_time, str(reply_comment_id or "")
+            matched_trigger, 1 if is_following else 0, status, dm_time, str(reply_comment_id or ""), int(dm_sent)
         ))
         conn.commit()
         return cursor.lastrowid
@@ -1493,14 +1504,14 @@ def get_pending_follow_leads(platform: Optional[str] = None, limit: int = 50) ->
         if platform:
             cursor.execute("""
                 SELECT * FROM lead_funnel_comments 
-                WHERE status = 'pending_follow' AND platform = ? AND check_count < 15
-                ORDER BY created_at DESC LIMIT ?
+                WHERE status IN ('pending_follow', 'pending_verification', 'dm_failed') AND platform = ?
+                ORDER BY last_checked_at ASC, id ASC LIMIT ?
             """, (platform, limit))
         else:
             cursor.execute("""
                 SELECT * FROM lead_funnel_comments 
-                WHERE status = 'pending_follow' AND check_count < 15
-                ORDER BY created_at DESC LIMIT ?
+                WHERE status IN ('pending_follow', 'pending_verification', 'dm_failed')
+                ORDER BY last_checked_at ASC, id ASC LIMIT ?
             """, (limit,))
         return [dict(r) for r in cursor.fetchall()]
 
@@ -1524,6 +1535,7 @@ def update_lead_status(
 
         if dm_sent:
             updates.append("dm_sent_at = CURRENT_TIMESTAMP")
+            updates.append("dm_delivery_verified = 1")
 
         if reply_comment_id:
             updates.append("reply_comment_id = ?")
@@ -1541,10 +1553,11 @@ def get_lead_funnel_stats() -> Dict[str, Any]:
         cursor.execute("""
             SELECT 
                 COUNT(*) as total_comments,
+                SUM(CASE WHEN status IN ('delivery_unknown', 'reply_delivery_unknown') THEN 1 ELSE 0 END) as unconfirmed_delivery,
                 SUM(CASE WHEN detected_intent = 'lead_magnet' THEN 1 ELSE 0 END) as total_leads,
-                SUM(CASE WHEN status IN ('sent_dm', 'converted') THEN 1 ELSE 0 END) as dms_delivered,
+                SUM(CASE WHEN dm_delivery_verified = 1 THEN 1 ELSE 0 END) as dms_delivered,
                 SUM(CASE WHEN status = 'converted' THEN 1 ELSE 0 END) as converted_after_follow,
-                SUM(CASE WHEN status = 'pending_follow' THEN 1 ELSE 0 END) as pending_follow,
+                SUM(CASE WHEN status IN ('pending_follow', 'pending_verification') THEN 1 ELSE 0 END) as pending_follow,
                 SUM(CASE WHEN status = 'dm_failed_private' THEN 1 ELSE 0 END) as failed_private_dms,
                 SUM(CASE WHEN status = 'replied_public_only' THEN 1 ELSE 0 END) as replied_public,
                 SUM(CASE WHEN status LIKE 'already_%' THEN 1 ELSE 0 END) as already_handled,
@@ -1556,6 +1569,7 @@ def get_lead_funnel_stats() -> Dict[str, Any]:
         row = cursor.fetchone()
         stats = {
             "total_comments": row["total_comments"] or 0,
+            "unconfirmed_delivery": row["unconfirmed_delivery"] or 0,
             "total_leads": row["total_leads"] or 0,
             "dms_delivered": row["dms_delivered"] or 0,
             "converted_after_follow": row["converted_after_follow"] or 0,
@@ -1574,8 +1588,8 @@ def get_lead_funnel_stats() -> Dict[str, Any]:
                 platform,
                 COUNT(*) as total,
                 SUM(CASE WHEN detected_intent = 'lead_magnet' THEN 1 ELSE 0 END) as leads,
-                SUM(CASE WHEN status IN ('sent_dm', 'converted') THEN 1 ELSE 0 END) as dms,
-                SUM(CASE WHEN status = 'pending_follow' THEN 1 ELSE 0 END) as pending
+                SUM(CASE WHEN dm_delivery_verified = 1 THEN 1 ELSE 0 END) as dms,
+                SUM(CASE WHEN status IN ('pending_follow', 'pending_verification') THEN 1 ELSE 0 END) as pending
             FROM lead_funnel_comments
             GROUP BY platform
         """)

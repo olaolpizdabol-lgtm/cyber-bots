@@ -30,31 +30,47 @@ class YouTubeFunnel(BasePlatformFunnel):
             from services.publishers.youtube import youtube_publisher
             service = youtube_publisher._get_authenticated_service()
             if service:
-                # Отримуємо останні коментарі каналу
-                req = service.commentThreads().list(
-                    part="snippet",
-                    allThreadsRelatedToChannelId=None,
-                    maxResults=20
-                )
-                resp = req.execute()
-                for item in resp.get("items", []):
-                    top = item["snippet"]["topLevelComment"]["snippet"]
-                    author_name = top["authorDisplayName"]
-                    text = top["textDisplay"]
-                    cid = item["id"]
-                    vid_id = item["snippet"].get("videoId", "")
-                    if "bohdan" not in author_name.lower():
+                channels = service.channels().list(part="id", mine=True).execute().get("items", [])
+                if not channels:
+                    raise RuntimeError("YouTube channel unavailable")
+                channel_id = channels[0]["id"]
+                page_token = None
+                while True:
+                    resp = service.commentThreads().list(
+                        part="snippet,replies", allThreadsRelatedToChannelId=channel_id,
+                        maxResults=100, order="time", textFormat="plainText", pageToken=page_token,
+                    ).execute()
+                    for item in resp.get("items", []):
+                        top_comment = item["snippet"]["topLevelComment"]
+                        top = top_comment["snippet"]
+                        author_id = top.get("authorChannelId", {}).get("value", "")
+                        if author_id == channel_id:
+                            continue
+                        cid = top_comment["id"]
+                        replies = item.get("replies", {}).get("comments", [])
+                        if item["snippet"].get("totalReplyCount", 0) > len(replies):
+                            reply_page = None
+                            replies = []
+                            while True:
+                                reply_resp = service.comments().list(part="snippet", parentId=cid,
+                                    maxResults=100, pageToken=reply_page).execute()
+                                replies.extend(reply_resp.get("items", []))
+                                reply_page = reply_resp.get("nextPageToken")
+                                if not reply_page:
+                                    break
+                        vid = item["snippet"].get("videoId", "")
                         results.append(PlatformComment(
-                            comment_id=cid,
-                            post_id=vid_id,
-                            post_url=f"https://www.youtube.com/watch?v={vid_id}" if vid_id else None,
-                            user_id=top.get("authorChannelId", {}).get("value", cid),
-                            username=author_name,
-                            text=text,
-                            has_author_replied=False
-                        ))
+                            comment_id=cid, post_id=vid, post_url=f"https://www.youtube.com/watch?v={vid}",
+                            user_id=author_id, username=top["authorDisplayName"], text=top.get("textOriginal", top["textDisplay"]),
+                            has_author_replied=any(r["snippet"].get("authorChannelId", {}).get("value") == channel_id for r in replies)))
+                    page_token = resp.get("nextPageToken")
+                    if limit_posts is not None or not page_token:
+                        break
+            else:
+                raise RuntimeError("YouTube authorization required")
         except Exception as e:
-            logger.debug(f"YouTube comment fetch: {e}")
+            logger.warning("YouTube comment fetch failed: %s", type(e).__name__)
+            raise
 
         return results
 
@@ -72,7 +88,7 @@ class YouTubeFunnel(BasePlatformFunnel):
             from services.publishers.youtube import youtube_publisher
             service = youtube_publisher._get_authenticated_service()
             if service:
-                service.comments().insert(
+                response = service.comments().insert(
                     part="snippet",
                     body={
                         "snippet": {
@@ -81,18 +97,19 @@ class YouTubeFunnel(BasePlatformFunnel):
                         }
                     }
                 ).execute()
+                if not response.get("id"):
+                    return False, "delivery_unknown"
                 logger.info(f"✅ YouTube відповідь надіслана на {comment_id}: '{text}'")
                 return True, None
         except Exception as e:
             logger.debug(f"YouTube reply err: {e}")
 
-        logger.info(f"[YouTube Public Reply Fallback] На коментар {comment_id}: '{text}'")
-        return True, None
+        logger.warning("YouTube reply failed; check OAuth youtube.force-ssl permission")
+        return False, "youtube_reply_failed"
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Лайкає коментар у YouTube"""
-        logger.info(f"❤️ [YouTube Like] Поставлено лайк на коментар {comment_id}")
-        return True, None
+        return False, "unsupported_by_youtube_api"
 
 
 youtube_funnel = YouTubeFunnel()

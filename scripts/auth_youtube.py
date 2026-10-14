@@ -15,7 +15,8 @@ from config import YOUTUBE_CLIENT_SECRETS_FILE, YOUTUBE_TOKEN_FILE
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube.readonly"
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
 

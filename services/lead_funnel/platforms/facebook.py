@@ -12,6 +12,7 @@ import time
 import json
 import logging
 import hashlib
+from urllib.parse import urlsplit, parse_qs
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 
@@ -22,9 +23,12 @@ from config import BASE_DIR, DATA_DIR, TEMP_DIR
 
 logger = logging.getLogger("facebook_funnel")
 
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "61594989335713").strip()
-if FACEBOOK_PAGE_ID == "1383757231485870":
-    FACEBOOK_PAGE_ID = "61594989335713"
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "1383757231485870").strip()
+# Facebook's public profile ID differs from its Business Suite / Graph asset ID.
+if FACEBOOK_PAGE_ID == "61594989335713":
+    FACEBOOK_PAGE_ID = "1383757231485870"
+FACEBOOK_PROFILE_ID = os.getenv("FACEBOOK_PROFILE_ID", "61594989335713").strip()
+GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", "v22.0")
 FACEBOOK_PAGE_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip()
 FACEBOOK_STATE_FILE = DATA_DIR / "facebook_state.json"
 
@@ -44,7 +48,7 @@ class FacebookFunnel(BasePlatformFunnel):
         # 1. Спроба через Graph API
         if FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_"):
             try:
-                url = f"https://graph.facebook.com/v19.0/{FACEBOOK_PAGE_ID}/feed?fields=id,permalink_url,comments{{id,from,message,created_time,comment_count,comments{{from}}}}&limit={limit_posts}&access_token={FACEBOOK_PAGE_TOKEN}"
+                url = f"https://graph.facebook.com/{GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/feed?fields=id,permalink_url,comments{{id,from,message,created_time,comment_count,comments{{from}}}}&limit={limit_posts or 50}&access_token={FACEBOOK_PAGE_TOKEN}"
                 res = requests.get(url, timeout=10)
                 if res.status_code == 200:
                     data = res.json().get("data", [])
@@ -83,314 +87,109 @@ class FacebookFunnel(BasePlatformFunnel):
         comments.extend(self._fetch_comments_via_browser(limit_posts=limit_posts))
         return comments
 
-    def _dismiss_fb_dialog(self, page):
-        """Закриває спливаюче вікно входу Meta/Facebook, якщо воно з'явилося"""
+    @staticmethod
+    def _check_restrictions(page):
+        if page.get_by_text("Confirm your identity to send messages", exact=True).count():
+            raise RuntimeError("Facebook requires identity confirmation before sending messages")
+        if "login" in page.url or page.locator('input[name="email"]').count():
+            raise RuntimeError("Facebook browser session expired")
+
+    def _fetch_comments_via_browser(self, limit_posts=5):
+        if not FACEBOOK_STATE_FILE.exists():
+            raise RuntimeError("Facebook browser session missing")
+        from playwright.sync_api import sync_playwright
+        results = {}
+        with BROWSER_LOCK, sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
+            try:
+                page = browser.new_page(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US")
+                page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("media", "font") else route.continue_())
+                page.goto(f"https://business.facebook.com/latest/inbox/facebook?asset_id={FACEBOOK_PAGE_ID}", wait_until="domcontentloaded", timeout=30000)
+                self._check_restrictions(page)
+                page.get_by_role("link", name="Facebook comments", exact=True).wait_for(timeout=15000)
+                # Business Suite lists both posts and reels in this one inbox.
+                previews = page.locator('div._at42 > div._4ik4._4ik5').all_text_contents()
+                previews = list(dict.fromkeys(t.strip() for t in previews if t.strip()))
+                if not previews:
+                    raise RuntimeError("Facebook comment inbox layout unavailable")
+                for index, preview in enumerate(previews[:limit_posts or 50]):
+                    old_link = page.locator('[role="article"] a[href*="comment_id="]').first
+                    previous_href = old_link.get_attribute("href") if old_link.count() else None
+                    page.get_by_text(preview, exact=True).first.click(timeout=5000)
+                    if index and previous_href:
+                        page.wait_for_function("old => document.querySelector('[role=article] a[href*=comment_id]')?.getAttribute('href') !== old", arg=previous_href, timeout=10000)
+                    page.locator('[role="article"][aria-label^="Comment by"]').first.wait_for(timeout=10000)
+                    for _ in range(5):
+                        more = page.get_by_role("button", name=re.compile(r"^View \d+ more comments$"))
+                        if not more.count():
+                            break
+                        more.first.click()
+                        page.wait_for_timeout(500)
+                    for record in self._read_comment_rows(page):
+                        results[record['id']] = PlatformComment(record['id'], page.url, record['url'],
+                            record['user_id'], record['username'], record['text'], has_author_replied=record['replied'])
+                return list(results.values())
+            finally:
+                browser.close()
+
+    @staticmethod
+    def _read_comment_rows(page):
+        return page.locator('[role="article"][aria-label^="Comment by"]').evaluate_all(r"""rows => rows.flatMap(row => {
+            const link = row.querySelector('a[href*="comment_id="]');
+            if (!link) return [];
+            const url = new URL(link.href);
+            const id = url.searchParams.get('comment_id');
+            if (!id) return [];
+            const buttons = [...row.querySelectorAll('[role="button"]')];
+            const author = buttons.find(el => el.textContent.trim() && !el.getAttribute('aria-label'));
+            const username = author?.textContent.trim();
+            if (!username || username === 'Bohdan GPT') return [];
+            const clone = row.cloneNode(true);
+            clone.querySelectorAll('[role="button"], a, [role="article"], [role="textbox"]').forEach(el => el.remove());
+            const text = clone.textContent.replace(/^[\s·]+/, '').trim();
+            if (!text) return [];
+            const replied = [...row.parentElement.querySelectorAll('[role="article"]')].some(el => (el.getAttribute('aria-label') || '').startsWith('Comment by Bohdan GPT '));
+            return [{id, url:url.origin + url.pathname + '?comment_id=' + id, user_id:username, username, text, replied}];
+        })""")
+
+    def is_user_following(self, user_id, username):
+        return None
+
+    def check_follower_status(self, user_id, username):
+        return None, None
+
+    def fetch_direct_messages(self):
+        if not FACEBOOK_PAGE_TOKEN or FACEBOOK_PAGE_TOKEN.startswith("your_"):
+            raise RuntimeError("Messenger requires a Page token with pages_messaging; check Business Suite identity restriction")
+        from datetime import datetime, timezone
+        response = requests.get(f"https://graph.facebook.com/{GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/conversations",
+            params={"access_token": FACEBOOK_PAGE_TOKEN, "platform": "messenger", "fields": "id,messages.limit(1){id,message,from,created_time}", "limit": 25}, timeout=20)
+        if response.status_code != 200:
+            raise RuntimeError(f"Messenger inbox unavailable (HTTP {response.status_code})")
+        for thread in response.json().get("data", []):
+            for message in thread.get("messages", {}).get("data", []):
+                sender = message.get("from", {})
+                if not sender.get("id") or sender["id"] == FACEBOOK_PAGE_ID or not message.get("message"):
+                    continue
+                timestamp = datetime.fromisoformat(message["created_time"].replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - timestamp).total_seconds() >= 86400:
+                    continue
+                yield PlatformComment(message["id"], thread["id"], None, sender["id"], sender.get("name", sender["id"]), message["message"])
+
+    def reply_to_direct_message(self, message, text):
+        if not FACEBOOK_PAGE_TOKEN:
+            return False, "page_token_missing"
         try:
-            page.evaluate('''() => {
-                document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => {
-                    const txt = el.innerText || "";
-                    if (txt.includes('Log In') || txt.includes('Увійти') || txt.includes('Перегляньте більше') || 
-                        txt.includes('See more') || txt.includes('Cookies') || txt.includes('файли cookie') ||
-                        txt.includes('See more on Facebook') || txt.includes('See more from')) {
-                        el.remove();
-                    }
-                });
-                document.body.style.overflow = "auto";
-            }''')
-            for _ in range(2):
-                close_btn = page.locator('[aria-label="Close"], [aria-label="Закрити"], [aria-label="Close dialog"]').first
-                if close_btn.is_visible():
-                    close_btn.click(force=True)
-                    page.wait_for_timeout(600)
-                dialog = page.locator('[role="dialog"]').first
-                if dialog.is_visible():
-                    cont_btn = dialog.locator('button:has-text("Продовжити"), button:has-text("Continue"), [role="button"]:has-text("Продовжити"), [role="button"]:has-text("Continue")').first
-                    if cont_btn.is_visible():
-                        cont_btn.click(force=True)
-                        page.wait_for_timeout(800)
-                        continue
-                    page.keyboard.press("Escape")
-                    page.wait_for_timeout(400)
-        except Exception:
-            pass
-
-    def _fetch_comments_via_browser(self, limit_posts: int = 5) -> List[PlatformComment]:
-        """Зчитує коментарі безпосередньо зі сторінки Bohdan GPT через браузер Playwright"""
-        results: List[PlatformComment] = []
-        try:
-            from playwright.sync_api import sync_playwright
-            with BROWSER_LOCK:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                    context_kwargs = {
-                        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "locale": "en-US",
-                        "viewport": {"width": 1280, "height": 800}
-                    }
-                    if FACEBOOK_STATE_FILE.exists():
-                        try:
-                            context = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), **context_kwargs)
-                        except Exception:
-                            context = browser.new_context(**context_kwargs)
-                    else:
-                        context = browser.new_context(**context_kwargs)
-
-                    page = context.new_page()
-                    try:
-                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
-                    except Exception:
-                        pass
-
-                    # 1. Спершу скануємо головну стіну сторінки (де Facebook відкрито відображає всі останні коментарі)
-                    wall_url = f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/"
-                    try:
-                        try:
-                            page.goto(wall_url, wait_until="domcontentloaded", timeout=25000)
-                        except Exception as goto_err:
-                            logger.debug(f"FB wall goto timeout (proceeding anyway): {goto_err}")
-
-                        try:
-                            page.locator('div[role="main"], [role="feed"], [aria-label="Facebook"]').first.wait_for(timeout=10000)
-                        except Exception:
-                            page.wait_for_timeout(2500)
-                        self._dismiss_fb_dialog(page)
-
-                        # Прокручуємо стіну для підвантаження постів та коментарів
-                        for _ in range(5):
-                            page.mouse.wheel(0, 1500)
-                            page.wait_for_timeout(800)
-
-                        wall_articles = page.locator('div[role="article"]').all()
-                        for art in wall_articles:
-                            try:
-                                txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
-                                if len(txt_lines) >= 2:
-                                    u_name = txt_lines[0]
-                                    if u_name in ("Bohdan GPT", "Автор", "Author", "Explore the things you love"):
-                                        continue
-
-                                    c_candidates = []
-                                    t_str = None
-                                    for l in txt_lines[1:]:
-                                        if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Головний шанувальник", "Like", "Reply", "Send message", "Hide", "Подобається", "Коментувати", "Відповісти", "Надіслати повідомлення", "Сховати", "Поділитися", "Share"):
-                                            continue
-                                        if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's', 'хв', 'год', 'дн', 'днів']) and len(l) <= 6) or l.isdigit():
-                                            if not t_str:
-                                                t_str = l
-                                            continue
-                                        c_candidates.append(l)
-
-                                    c_text = " ".join(c_candidates).strip()
-                                    if not c_text or c_text in ("·", "Like", "Reply", "Send message", "Подобається", "Відповісти"):
-                                        continue
-
-                                    # Шукаємо справжній comment_id та посилання на профіль користувача
-                                    real_c_id = None
-                                    comm_post_url = wall_url
-                                    profile_url = None
-                                    for lnk in art.locator('a').all():
-                                        h = lnk.get_attribute('href') or ''
-                                        m = re.search(r'comment_id=([0-9a-zA-Z_]+)', h)
-                                        if m and not real_c_id:
-                                            real_c_id = m.group(1)
-                                            if "/reel/" in h or "/posts/" in h:
-                                                comm_post_url = h.split("?")[0]
-                                        base_h = h.split("?")[0]
-                                        if base_h.startswith("https://www.facebook.com/") and not any(x in base_h for x in ['/reel/', '/posts/', '/watch/', '/photo/', '/help/']) and not profile_url:
-                                            profile_url = base_h
-
-                                    if not real_c_id:
-                                        real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
-
-                                    # Перевірка: чи автор ВЖЕ відповів (у тексті або згорнута відповідь)
-                                    has_rep = (
-                                        any("bohdan" in s.lower() for s in txt_lines) or
-                                        any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
-                                        any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
-                                        any("переглянути" in s.lower() and "відповід" in s.lower() for s in txt_lines) or
-                                        any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines) or
-                                        any("відповід" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
-                                    )
-
-                                    # Індивідуальний скріншот коментаря
-                                    ss_hash = hashlib.sha256(f"{u_name}_{real_c_id}".encode()).hexdigest()[:16]
-                                    comment_ss = TEMP_DIR / f"fb_comment_{ss_hash}.png"
-                                    try:
-                                        page.evaluate('''() => {
-                                            document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => el.remove());
-                                        }''')
-                                        art.scroll_into_view_if_needed()
-                                        page.wait_for_timeout(350)
-                                        art.screenshot(path=str(comment_ss))
-                                    except Exception:
-                                        comment_ss = None
-
-                                    # Детекція підписки у рядку коментаря
-                                    is_following_fb = any("follow back" in l.lower() or "стежити" in l.lower() or "відстежувати" in l.lower() for l in txt_lines)
-
-                                    results.append(PlatformComment(
-                                        comment_id=real_c_id,
-                                        post_id=comm_post_url,
-                                        post_url=comm_post_url,
-                                        user_id=profile_url or u_name,
-                                        username=u_name,
-                                        text=c_text,
-                                        has_author_replied=has_rep,
-                                        created_time=t_str,
-                                        screenshot_path=str(comment_ss) if comment_ss and comment_ss.exists() else None,
-                                        is_following=is_following_fb
-                                    ))
-                            except Exception:
-                                continue
-                    except Exception as wall_err:
-                        logger.debug(f"FB wall scan error: {wall_err}")
-
-                    # 2. Скануємо вкладку Reels сторінки
-                    reels_tab_url = f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/?sk=reels_tab"
-                    try:
-                        try:
-                            page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=25000)
-                        except Exception as r_goto_err:
-                            logger.debug(f"FB reels goto timeout (proceeding anyway): {r_goto_err}")
-
-                        try:
-                            page.locator('div[role="main"], [role="feed"], a[href*="/reel/"]').first.wait_for(timeout=10000)
-                        except Exception:
-                            page.wait_for_timeout(2500)
-                        self._dismiss_fb_dialog(page)
-
-                        raw_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
-                        unique_reels = []
-                        for l in raw_reels:
-                            if l and "/reel/" in l and "notif" not in l:
-                                clean_l = l.split("?")[0]
-                                if clean_l not in unique_reels:
-                                    unique_reels.append(clean_l)
-
-                        target_reels = unique_reels if limit_posts is None else unique_reels[:limit_posts]
-
-                        for r_href in target_reels:
-                            if not r_href:
-                                continue
-                            r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
-                            try:
-                                page.goto(r_url, wait_until="domcontentloaded", timeout=20000)
-                                try:
-                                    page.locator('div[role="main"], div[role="article"], [aria-label*="Comment" i]').first.wait_for(timeout=10000)
-                                except Exception:
-                                    page.wait_for_timeout(2000)
-                                self._dismiss_fb_dialog(page)
-
-                                c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
-                                if c_btn.is_visible():
-                                    c_btn.click(force=True)
-                                    page.wait_for_timeout(1500)
-                                    self._dismiss_fb_dialog(page)
-
-                                page.mouse.move(1000, 400)
-                                for _ in range(4):
-                                    page.mouse.wheel(0, 1500)
-                                    page.wait_for_timeout(600)
-
-                                comment_articles = page.locator('div[role="article"]').all()
-                                for art in comment_articles:
-                                    try:
-                                        txt_lines = [l.strip() for l in art.inner_text().split('\n') if l.strip()]
-                                        if len(txt_lines) >= 2:
-                                            u_name = txt_lines[0]
-                                            if u_name in ("Bohdan GPT", "Author", "Автор", "Explore the things you love"):
-                                                continue
-
-                                            c_candidates = []
-                                            t_str = None
-                                            for l in txt_lines[1:]:
-                                                if l in ("·", "Follow back", "Author", "Автор", "Top fan", "Головний шанувальник", "Like", "Reply", "Send message", "Hide", "Подобається", "Коментувати", "Відповісти", "Надіслати повідомлення", "Сховати", "Поділитися", "Share"):
-                                                    continue
-                                                if (any(l.endswith(u) for u in ['m', 'h', 'd', 'w', 's', 'хв', 'год', 'дн', 'днів']) and len(l) <= 6) or l.isdigit():
-                                                    if not t_str:
-                                                        t_str = l
-                                                    continue
-                                                c_candidates.append(l)
-
-                                            c_text = " ".join(c_candidates).strip()
-                                            if not c_text or c_text in ("·", "Like", "Reply", "Send message", "Подобається", "Відповісти"):
-                                                continue
-
-                                            real_c_id = None
-                                            for lnk in art.locator('a').all():
-                                                h = lnk.get_attribute('href') or ''
-                                                m = re.search(r'comment_id=([0-9a-zA-Z_]+)', h)
-                                                if m:
-                                                    real_c_id = m.group(1)
-                                                    break
-
-                                            if not real_c_id:
-                                                real_c_id = f"fb_{hashlib.sha256((u_name + '_' + c_text).encode()).hexdigest()[:16]}"
-
-                                            # Уникаємо дублювання, якщо цей коментар уже знайдено на стіні
-                                            if any(r.comment_id == real_c_id for r in results):
-                                                continue
-
-                                            has_rep = (
-                                                any("bohdan" in s.lower() for s in txt_lines) or
-                                                any("author" in s.lower() or "автор" in s.lower() for s in txt_lines) or
-                                                any("view" in s.lower() and "repl" in s.lower() for s in txt_lines) or
-                                                any("переглянути" in s.lower() and "відповід" in s.lower() for s in txt_lines) or
-                                                any("repl" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines) or
-                                                any("відповід" in s.lower() and any(c.isdigit() for c in s) for s in txt_lines)
-                                            )
-
-                                            ss_hash = hashlib.sha256(f"{u_name}_{real_c_id}".encode()).hexdigest()[:16]
-                                            comment_ss = TEMP_DIR / f"fb_comment_{ss_hash}.png"
-                                            try:
-                                                art.screenshot(path=str(comment_ss))
-                                            except Exception:
-                                                comment_ss = None
-
-                                            is_following_fb = any("follow back" in l.lower() or "стежити" in l.lower() or "відстежувати" in l.lower() for l in txt_lines)
-
-                                            results.append(PlatformComment(
-                                                comment_id=real_c_id,
-                                                post_id=r_url,
-                                                post_url=r_url,
-                                                user_id=u_name,
-                                                username=u_name,
-                                                text=c_text,
-                                                has_author_replied=has_rep,
-                                                created_time=t_str,
-                                                screenshot_path=str(comment_ss) if comment_ss and comment_ss.exists() else None,
-                                                is_following=is_following_fb
-                                            ))
-                                    except Exception:
-                                        continue
-                            except Exception:
-                                continue
-                    except Exception as reels_err:
-                        logger.debug(f"FB reels scan error: {reels_err}")
-
-                    browser.close()
-        except Exception as e:
-            logger.warning(f"Facebook браузерний парсинг коментарів: {e}")
-
-        return results
-
-    def is_user_following(self, user_id: str, username: str) -> bool:
-        """
-        Перевіряє, чи підписаний користувач на сторінку Bohdan GPT.
-        1. Перевіряє список фоловерів або бейдж 'Follower / Стежить' у Facebook.
-        """
-        # За замовчуванням у браузерному середовищі:
-        # Якщо знайдено в списку фоловерів або в кеші
-        try:
-            from core.database import get_lead_comment
-            existing = get_lead_comment("facebook", user_id)
-            if existing and existing.get("is_following"):
-                return True
-        except Exception:
-            pass
-
-        # Для швидкої та безпечної валідації в соцмережах:
-        return False
+            response = requests.post(f"https://graph.facebook.com/{GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/messages",
+                json={"recipient": {"id": message.user_id}, "messaging_type": "RESPONSE", "message": {"text": text},
+                      "access_token": FACEBOOK_PAGE_TOKEN}, timeout=20)
+            if response.status_code == 200 and response.json().get("message_id"):
+                return True, None
+            if response.status_code == 200 or response.status_code >= 500:
+                return False, "delivery_unknown"
+            return False, f"messenger_http_{response.status_code}"
+        except requests.RequestException:
+            return False, "delivery_unknown"
 
     def send_direct_message(self, user_id: str, username: str, text: str, comment_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """
@@ -399,14 +198,14 @@ class FacebookFunnel(BasePlatformFunnel):
         # 1. Офіційний Private Reply API (за comment_id)
         if comment_id and FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_"):
             try:
-                url = f"https://graph.facebook.com/v19.0/{FACEBOOK_PAGE_ID}/messages"
+                url = f"https://graph.facebook.com/{GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/messages"
                 payload = {
                     "recipient": {"comment_id": comment_id},
                     "message": {"text": text},
                     "access_token": FACEBOOK_PAGE_TOKEN
                 }
                 r = requests.post(url, json=payload, timeout=10)
-                if r.status_code == 200:
+                if r.status_code == 200 and r.json().get("message_id"):
                     logger.info(f"✅ Facebook Private Reply успішно надіслано на comment_id={comment_id}")
                     return True, None
                 else:
@@ -430,15 +229,18 @@ class FacebookFunnel(BasePlatformFunnel):
         # 1. Graph API
         if FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_") and not comment_id.startswith("fb_"):
             try:
-                url = f"https://graph.facebook.com/v19.0/{comment_id}/comments"
+                url = f"https://graph.facebook.com/{GRAPH_VERSION}/{comment_id}/comments"
                 r = requests.post(url, data={"message": text, "access_token": FACEBOOK_PAGE_TOKEN}, timeout=10)
-                if r.status_code == 200:
+                if r.status_code == 200 and r.json().get("id"):
                     logger.info(f"✅ Facebook public comment reply sent to {comment_id}")
                     return True, None
-            except Exception as e:
-                logger.debug(f"Помилка FB Graph API публічної відповіді: {e}")
+                if r.status_code >= 500 or r.status_code == 200:
+                    return False, "delivery_unknown"
+            except requests.RequestException:
+                return False, "delivery_unknown"
 
         # 2. Браузерна публікація через Playwright
+        submitted = False
         if FACEBOOK_STATE_FILE.exists():
             try:
                 from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
@@ -456,45 +258,29 @@ class FacebookFunnel(BasePlatformFunnel):
                             page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
                         except Exception:
                             pass
-                        target_url = post_id if post_id and str(post_id).startswith("http") else (
-                            f"https://www.facebook.com{post_id}" if post_id else f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/"
-                        )
-                        if f"facebook.com/{FACEBOOK_PAGE_ID}" in target_url and "people/" not in target_url:
-                            target_url = target_url.replace(f"facebook.com/{FACEBOOK_PAGE_ID}", f"facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}")
-                        try:
-                            page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
-                        except Exception as r_err:
-                            logger.debug(f"FB reply goto timeout (proceeding anyway): {r_err}")
-                        try:
-                            page.locator('div[role="main"], [role="feed"], [aria-label="Facebook"]').first.wait_for(timeout=10000)
-                        except Exception:
-                            page.wait_for_timeout(2500)
-                        self._dismiss_fb_dialog(page)
+                        target_url = post_id if post_id and str(post_id).startswith("https://") else f"https://www.facebook.com/{FACEBOOK_PROFILE_ID}?comment_id={comment_id}"
+                        page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                        self._check_restrictions(page)
+                        page.locator(f'a[href*="comment_id={comment_id}"]').first.wait_for(timeout=15000)
 
-                        # 1. Перевіряємо чи є конкретна кнопка Відповісти (Reply) під цією статтею/коментарем
-                        reply_clicked = False
-                        articles = page.locator('div[role="article"]').all()
-                        for art in articles:
-                            txt = art.inner_text()
-                            if comment_id in txt or (len(txt) > 6 and any(w in txt for w in comment_id.split("_"))):
-                                rep_btn = art.locator('span:has-text("Reply"), span:has-text("Відповісти"), [role="button"]:has-text("Reply"), [role="button"]:has-text("Відповісти")').first
-                                if rep_btn.is_visible():
-                                    rep_btn.click(force=True)
-                                    page.wait_for_timeout(800)
-                                    reply_clicked = True
-                                    break
-
-                        # 2. Якщо не знайдено вкладеної гілки — тиснемо головну кнопку Коментувати
-                        if not reply_clicked:
-                            c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
-                            if c_btn.is_visible():
-                                c_btn.dispatch_event("click")
-                                page.wait_for_timeout(1000)
-
-                        self._dismiss_fb_dialog(page)
+                        if comment_id.startswith("fb_"):
+                            browser.close()
+                            return False, "comment_target_missing"
+                        links = [link for link in page.locator('a[href*="comment_id="]').all()
+                                 if parse_qs(urlsplit(link.get_attribute("href") or "").query).get("comment_id") == [comment_id]]
+                        if not links:
+                            browser.close()
+                            return False, "comment_target_missing"
+                        row = links[0].locator('xpath=ancestor::div[@role="article"][1]')
+                        thread = row.locator('xpath=..')
+                        receipt = thread.locator('[role="article"][aria-label^="Comment by Bohdan GPT "]').get_by_text(text, exact=True)
+                        if receipt.count():
+                            browser.close()
+                            return True, None
+                        row.get_by_text(re.compile(r"^(Reply|Відповісти)$")).first.click(timeout=5000)
 
                         # 3. Знаходимо активне поле вводу Lexical / Draft.js / textarea
-                        textbox = page.locator('div[role="textbox"], div[contenteditable="true"], textarea').first
+                        textbox = thread.get_by_role("textbox", name=re.compile(r"^Reply as|^Відповісти як")).first
                         if textbox.is_visible():
                             textbox.scroll_into_view_if_needed()
                             textbox.click(force=True)
@@ -504,58 +290,21 @@ class FacebookFunnel(BasePlatformFunnel):
                             except Exception:
                                 page.keyboard.type(text, delay=20)
                             page.wait_for_timeout(500)
-                            page.keyboard.press("Enter")
-                            page.wait_for_timeout(2500)
+                            submitted = True
+                            textbox.press("Enter")
+                            receipt.last.wait_for(timeout=10000)
+                            page.reload(wait_until="domcontentloaded", timeout=20000)
+                            receipt.last.wait_for(timeout=10000)
                             browser.close()
                             logger.info(f"✅ [Facebook Playwright] Опубліковано відповідь на {comment_id}: '{text}'")
                             return True, None
                         browser.close()
             except Exception as pe:
-                logger.warning(f"Facebook Playwright reply_to_comment error: {pe}")
+                logger.warning("Facebook reply failed: %s", type(pe).__name__)
+                return False, "delivery_unknown" if submitted else "reply_failed"
 
-        logger.info(f"[Facebook Public Comment Reply] Відповідаємо на {comment_id}: '{text}'")
-        return True, None
-
-    def check_follower_status(self, user_id: str, username: str) -> Tuple[bool, Optional[str]]:
-        """
-        Перевіряє статус підписки користувача у Facebook та робить скріншот шапки профілю користувача для Telegram-звіту.
-        """
-        import hashlib
-        u_hash = hashlib.sha256((username or user_id).encode()).hexdigest()[:16]
-        proof_path = TEMP_DIR / f"fb_proof_{u_hash}.png"
-
-        if proof_path.exists():
-            return False, str(proof_path)
-
-        try:
-            from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
-            from playwright.sync_api import sync_playwright
-            with BROWSER_LOCK:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                    ctx = browser.new_context(
-                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        locale="en-US",
-                        viewport={"width": 1280, "height": 800}
-                    )
-                    page = ctx.new_page()
-                    target_url = user_id if str(user_id).startswith("http") else (
-                        f"https://www.facebook.com/{username}" if username and " " not in username else f"https://www.facebook.com/{user_id}"
-                    )
-                    page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_timeout(2000)
-                    self._dismiss_fb_dialog(page)
-                    page.evaluate('''() => {
-                        document.querySelectorAll('[role="dialog"], [role="banner"]').forEach(el => el.remove());
-                    }''')
-                    page.wait_for_timeout(300)
-                    page.screenshot(path=str(proof_path), clip={"x": 0, "y": 0, "width": 1280, "height": 450})
-                    browser.close()
-                    return False, str(proof_path)
-        except Exception as p_err:
-            logger.debug(f"FB check_follower_status screenshot error: {p_err}")
-
-        return False, None
+        logger.warning("Facebook reply delivery failed")
+        return False, "reply_failed"
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """
@@ -564,7 +313,7 @@ class FacebookFunnel(BasePlatformFunnel):
         # 1. Graph API
         if FACEBOOK_PAGE_TOKEN and not FACEBOOK_PAGE_TOKEN.startswith("your_") and not comment_id.startswith("fb_"):
             try:
-                url = f"https://graph.facebook.com/v19.0/{comment_id}/likes"
+                url = f"https://graph.facebook.com/{GRAPH_VERSION}/{comment_id}/likes"
                 r = requests.post(url, data={"access_token": FACEBOOK_PAGE_TOKEN}, timeout=10)
                 if r.status_code == 200:
                     logger.info(f"❤️ [Facebook Graph API] Лайк надіслано на comment_id={comment_id}")
@@ -595,12 +344,10 @@ class FacebookFunnel(BasePlatformFunnel):
                             page.wait_for_timeout(400)
                             logger.info(f"❤️ [Facebook Playwright] Лайк поставлено у {target_url}")
                         browser.close()
-                        return True, None
+                        return False, "like_not_verified"
             except Exception as pe:
-                logger.debug(f"FB Playwright like error: {pe}")
-
-        logger.info(f"❤️ [Facebook Like] Коментар {comment_id} оброблено")
-        return True, None
+                logger.debug("Facebook like failed: %s", type(pe).__name__)
+        return False, "like_not_verified"
 
 
 facebook_funnel = FacebookFunnel()

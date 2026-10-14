@@ -25,7 +25,7 @@ class YouTubeShortsPublisher(BasePublisher):
         creds = None
         if token_path.exists():
             try:
-                creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+                creds = Credentials.from_authorized_user_file(str(token_path))
             except Exception as e:
                 logger.warning(f"Помилка читання токена YouTube: {e}")
 

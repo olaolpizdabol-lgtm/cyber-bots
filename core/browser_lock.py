@@ -1,10 +1,10 @@
 """
 Глобальний лок для браузерних операцій Chromium (Playwright).
-Запобігає запуску декількох інстансів Chromium одночасно в низькопам'ятному середовищі (Docker / Railway 512MB RAM).
-Включає автоматичний захист від deadlocks та зависань (auto-timeout 180s).
+Обмежує одночасні браузери; для контейнера з 512 MB встановіть BROWSER_MAX_CONCURRENCY=1.
+Очікування обмежене тайм-аутом; зайнятий лок не забирається у власника.
 """
+import os
 import threading
-import time
 import logging
 
 logger = logging.getLogger("browser_lock")
@@ -28,51 +28,45 @@ CHROME_DOCKER_ARGS = [
 
 
 class TimeoutLock:
-    def __init__(self, default_timeout: float = 60.0, max_hold_time: float = 180.0):
-        self._lock = threading.Lock()
-        self._locked_at = 0.0
+    def __init__(self, default_timeout: float = 60.0, capacity: int = 1):
+        self._lock = threading.BoundedSemaphore(capacity)
+        self._capacity = capacity
+        self._owners = set()
+        self._guard = threading.Lock()
         self._default_timeout = default_timeout
-        self._max_hold_time = max_hold_time
 
     def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
-        now = time.time()
-        # Якщо лок утримується довше ніж max_hold_time — це завислий потік, примусово звільняємо
-        if self._lock.locked() and (now - self._locked_at > self._max_hold_time):
-            logger.warning(
-                f"⚠️ [BROWSER_LOCK] Виявлено завислий лок ({now - self._locked_at:.1f}с > {self._max_hold_time}с)! "
-                f"Примусове розблокування для відновлення роботи системи."
-            )
-            self.release()
-
+        with self._guard:
+            if threading.get_ident() in self._owners:
+                return False
         if not blocking:
-            ok = self._lock.acquire(blocking=False)
+            acquired = self._lock.acquire(blocking=False)
         else:
-            to = timeout if timeout >= 0 else self._default_timeout
-            ok = self._lock.acquire(blocking=True, timeout=to)
-
-        if ok:
-            self._locked_at = time.time()
-        return ok
+            acquired = self._lock.acquire(timeout=timeout if timeout >= 0 else self._default_timeout)
+        if acquired:
+            with self._guard:
+                self._owners.add(threading.get_ident())
+        return acquired
 
     def release(self):
-        self._locked_at = 0.0
-        try:
+        # A timed-out caller must never release another worker's browser.
+        with self._guard:
+            if threading.get_ident() not in self._owners:
+                raise RuntimeError("Browser lock can only be released by its owner")
+            self._owners.remove(threading.get_ident())
             self._lock.release()
-        except RuntimeError:
-            pass
 
     def locked(self) -> bool:
-        if self._lock.locked() and (time.time() - self._locked_at > self._max_hold_time):
-            self.release()
-            return False
-        return self._lock.locked()
+        with self._guard:
+            return len(self._owners) >= self._capacity
 
     def __enter__(self):
-        self.acquire(blocking=True, timeout=self._default_timeout)
+        if not self.acquire():
+            raise TimeoutError("Browser is busy; retry on the next scan")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
 
 
-BROWSER_LOCK = TimeoutLock()
+BROWSER_LOCK = TimeoutLock(capacity=max(1, min(4, int(os.getenv("BROWSER_MAX_CONCURRENCY", "2")))))

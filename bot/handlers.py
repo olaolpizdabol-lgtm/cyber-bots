@@ -2591,13 +2591,17 @@ async def callback_funnel_run_scan(call: CallbackQuery):
     loop = asyncio.get_event_loop()
     # 1. Обробка коментарів
     total_stats = {"processed": 0, "leads": 0, "dms_sent": 0, "pending_follow": 0}
-    for platform in ["instagram", "facebook", "tiktok", "youtube"]:
-        try:
-            p_stats = await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit)
-            for k, v in p_stats.items():
-                total_stats[k] = total_stats.get(k, 0) + v
-        except Exception as e:
-            logger.warning(f"Помилка сканування {platform}: {e}")
+    platforms = ("facebook", "instagram", "tiktok", "youtube")
+    scans = await asyncio.gather(*(
+        asyncio.to_thread(lead_funnel_service.process_platform_comments, platform, limit)
+        for platform in platforms), return_exceptions=True)
+    for platform, result in zip(platforms, scans):
+        if isinstance(result, Exception):
+            total_stats["errors"] = total_stats.get("errors", 0) + 1
+            logger.warning("Сканування %s: %s", platform, type(result).__name__)
+            continue
+        for key, value in result.items():
+            total_stats[key] = total_stats.get(key, 0) + value
 
     # 2. Дотискання тих, хто підписався після нагадування
     converted = await loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads)
@@ -2609,6 +2613,9 @@ async def callback_funnel_run_scan(call: CallbackQuery):
         f"• Знайдено запитів лід-магніту: <b>{total_stats['leads']}</b>\n"
         f"• Надіслано Direct повідомлень (підписаним): <b>{total_stats['dms_sent']}</b>\n"
         f"• Попросили підписатися (непідписані): <b>{total_stats['pending_follow']}</b>\n"
+        f"• Підтверджених відповідей у коментарях: <b>{total_stats.get('replies', 0)}</b>\n"
+        f"• Помилок: <b>{total_stats.get('errors', 0)}</b>\n"
+        f"• Пропущено через активне сканування: <b>{total_stats.get('busy', 0)}</b>\n"
         f"• 🎉 Щойно підписались і отримали DM: <b>{converted}</b>"
     )
     await status_msg.edit_text(summary_text, reply_markup=get_lead_funnel_menu_keyboard(), parse_mode="HTML")

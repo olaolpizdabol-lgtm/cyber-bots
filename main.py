@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import html
 import asyncio
 import logging
 from pathlib import Path
@@ -214,7 +215,7 @@ async def main():
                     last_ig_check_minute = now_kyiv.minute
                     try:
                         from services.instagram_dm_monitor import instagram_dm_monitor
-                        instagram_dm_monitor.check_new_messages()
+                        await asyncio.to_thread(instagram_dm_monitor.check_new_messages)
                     except Exception as ig_err:
                         logger.error(f"Помилка фонової перевірки Instagram Direct від Валерії: {ig_err}")
             except asyncio.CancelledError:
@@ -308,55 +309,64 @@ async def main():
                 logger.error(f"Помилка фонового планувальника публікацій: {e}")
 
     async def lead_funnel_background_task():
-        logger.info("🎯 Фоновий моніторинг Lead Magnet Funnel (коментарі & конверсія підписок) активовано.")
         from services.lead_funnel import lead_funnel_service
-        await asyncio.sleep(60)
-        cycle_count = 0
-        while True:
-            try:
-                cycle_count += 1
-                loop = asyncio.get_event_loop()
-                # Раз на 12 циклів (~кожні 2 години) запускається Глибокий скан УСІХ 59+ відео (limit_posts=None)
-                # Кожні 10 хвилин — швидкий скан найсвіжіших/активних постів (limit_posts=12)
-                is_deep_sweep = (cycle_count % 12 == 0)
-                limit = None if is_deep_sweep else 12
-                mode_label = "🌐 Глибокий скан (УСІ відео)" if is_deep_sweep else "⚡ Швидкий скан (активні відео)"
-                logger.info(f"Запуск циклу #{cycle_count} воронки: {mode_label}...")
-
-                for platform in ["facebook", "instagram", "tiktok", "youtube"]:
-                    try:
-                        await asyncio.wait_for(
-                            loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit),
-                            timeout=180
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(f"⚠️ [Lead Funnel] {platform} тайм-аут (180с)! Захист від зависання активовано. Переходимо до наступної платформи.")
-                        from core.browser_lock import BROWSER_LOCK
-                        if BROWSER_LOCK.locked():
-                            BROWSER_LOCK.release()
-                    except Exception as pe:
-                        logger.debug(f"Lead funnel {platform} poll: {pe}")
-
+        async def platform_worker(platform):
+            await asyncio.sleep(10)
+            cycle = 0
+            while True:
+                cycle += 1
                 try:
-                    converted = await asyncio.wait_for(
-                        loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads),
-                        timeout=120
-                    )
-                    if converted > 0:
-                        logger.info(f"🎉 Lead Funnel: успішно конвертовано {converted} нових підписників!")
-                except Exception as ce:
-                    logger.debug(f"Lead funnel recheck_pending_leads: {ce}")
+                    if platform != "youtube":
+                        await asyncio.to_thread(lead_funnel_service.process_direct_messages, platform)
+                    await asyncio.to_thread(lead_funnel_service.process_platform_comments,
+                                            platform, None if cycle % 12 == 0 else 6)
+                    await asyncio.to_thread(lead_funnel_service.recheck_pending_leads, platform)
+                except Exception as exc:
+                    logger.warning("Lead worker %s failed: %s", platform, type(exc).__name__)
+                await asyncio.sleep(30)
+        workers = [asyncio.create_task(platform_worker(platform))
+                   for platform in ("instagram", "facebook", "tiktok", "youtube")]
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            for worker in workers:
+                worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
 
-                await asyncio.sleep(600)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Помилка фонового lead_funnel: {e}")
-                await asyncio.sleep(120)
+    async def lead_report_background_task():
+        from services.lead_funnel import lead_funnel_service
+        while True:
+            await asyncio.sleep(600)
+            import time
+            rows = ["📊 <b>Звіт бота за останнім скануванням</b>"]
+            for platform in ("instagram", "instagram_dm", "facebook", "facebook_dm", "tiktok", "tiktok_dm", "youtube"):
+                stats = lead_funnel_service.last_scan.get(platform)
+                if stats is None:
+                    rows.append(f"• {platform}: сканування ще не завершене")
+                else:
+                    rows.append(
+                        f"• {platform}: перевірено {stats.get('processed', 0)}, "
+                        f"відповідей {stats.get('replies', 0)}, DM {stats.get('dms_sent', 0)}, "
+                        f"помилок {stats.get('errors', 0)} "
+                        f"(оновлено {int((time.time() - lead_funnel_service.last_scan_at.get(platform, time.time())) / 60)} хв тому)")
+                if platform in lead_funnel_service.last_error:
+                    rows.append(f"  Причина: {html.escape(lead_funnel_service.last_error[platform])}")
+            if lead_funnel_service.active_scans:
+                rows.append("Зараз виконується: " + ", ".join(sorted(lead_funnel_service.active_scans.copy())))
+            from core.database import get_lead_funnel_stats
+            delivery_stats = await asyncio.to_thread(get_lead_funnel_stats)
+            rows.append(f"Непідтверджені надсилання, потрібна перевірка: {delivery_stats['unconfirmed_delivery']}")
+            rows.append("Наступний звіт через 10 хвилин. Непідтверджені надсилання не повторюються автоматично.")
+            for uid in ALLOWED_USER_IDS:
+                try:
+                    await bot.send_message(uid, "\n".join(rows), parse_mode="HTML")
+                except Exception as exc:
+                    logger.warning("Lead report delivery failed: %s", type(exc).__name__)
 
     post_scheduler_task = asyncio.create_task(post_scheduler_background_task())
     scheduler_task = asyncio.create_task(streak_scheduler_background_task())
     funnel_task = asyncio.create_task(lead_funnel_background_task())
+    report_task = asyncio.create_task(lead_report_background_task())
 
     try:
         await bot.delete_webhook(drop_pending_updates=False)
@@ -365,6 +375,10 @@ async def main():
         scheduler_task.cancel()
         post_scheduler_task.cancel()
         funnel_task.cancel()
+        report_task.cancel()
+        await asyncio.gather(scheduler_task, post_scheduler_task, funnel_task, report_task, return_exceptions=True)
+        if "runner" in locals():
+            await runner.cleanup()
         await bot.session.close()
 
 

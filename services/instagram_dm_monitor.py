@@ -42,6 +42,7 @@ class InstagramDMMonitor:
             logger.debug("Instagram DM monitor: проксі не активний, пропускаємо direct_threads.")
             return None
 
+        cl = Client()
         if proxy_url:
             cl.set_proxy(proxy_url)
 
