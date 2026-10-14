@@ -95,47 +95,27 @@ class FacebookFunnel(BasePlatformFunnel):
             raise PlatformAccessError("Facebook browser session expired")
 
     def _fetch_comments_via_browser(self, limit_posts=5):
-        if not FACEBOOK_STATE_FILE.exists():
-            raise PlatformAccessError("Facebook browser session missing")
-        from playwright.sync_api import sync_playwright
+        from .facebook_web import facebook_web, own_reply
         results = {}
-        with BROWSER_LOCK, sync_playwright() as p:
-            browser = p.chromium.launch(channel="chromium", headless=True, args=CHROME_DOCKER_ARGS)
-            try:
-                page = browser.new_page(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US")
-                page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("image", "media", "font") else route.continue_())
-                page.goto(f"https://business.facebook.com/latest/inbox/facebook?asset_id={FACEBOOK_PAGE_ID}", wait_until="domcontentloaded", timeout=30000)
-                self._check_restrictions(page)
-                page.get_by_role("link", name="Facebook comments", exact=True).wait_for(timeout=15000)
-                # Business Suite lists both posts and reels in this one inbox.
-                previews = self._read_post_previews(page)
-                for index, preview in enumerate(previews[:limit_posts or 50]):
-                    old_link = page.locator('[role="article"] a[href*="comment_id="]').first
-                    previous_href = old_link.get_attribute("href") if old_link.count() else None
-                    page.get_by_text(preview, exact=True).first.click(timeout=5000)
-                    if index and previous_href:
-                        page.wait_for_function("old => document.querySelector('[role=article] a[href*=comment_id]')?.getAttribute('href') !== old", arg=previous_href, timeout=10000)
-                    page.locator('[role="article"][aria-label^="Comment by"]').first.wait_for(timeout=10000)
-                    for _ in range(5):
-                        more = page.get_by_role("button", name=re.compile(r"^View \d+ more comments$"))
-                        if not more.count():
-                            break
-                        more.first.click()
-                        page.wait_for_timeout(500)
-                    for record in self._read_comment_rows(page):
-                        results[record['id']] = PlatformComment(record['id'], page.url, record['url'],
-                            record['user_id'], record['username'], record['text'], has_author_replied=record['replied'])
-                return list(results.values())
-            except Exception as exc:
-                if 'Page crashed' in str(exc):
-                    from core.mem_guard import get_free_memory_mb, get_oom_kill_count
-                    raise PlatformAccessError(f"Facebook page crashed; container OOM kills={get_oom_kill_count()}, free memory={get_free_memory_mb()} MB") from None
-                raise
-            finally:
-                try:
-                    browser.close()
-                except Exception:
-                    pass  # Preserve the original scan failure if Chromium has already exited.
+        owner_ids = {FACEBOOK_PAGE_ID, FACEBOOK_PROFILE_ID}
+        with facebook_web(FACEBOOK_STATE_FILE, FACEBOOK_PAGE_ID) as web:
+            for post_id in web.posts(limit_posts or 50):
+                comments = web.comments(post_id)
+                for comment in comments.values():
+                    author = comment.get("author") or {}
+                    text = (comment.get("body") or {}).get("text")
+                    cid = comment.get("legacy_fbid")
+                    if not cid or not text or not author.get("id") or author["id"] in owner_ids:
+                        continue
+                    if comment.get("depth") != 0:
+                        continue
+                    url = (comment.get("feedback") or {}).get("url")
+                    results[cid] = PlatformComment(cid, post_id, url, author["id"], author.get("name", author["id"]),
+                        text, has_author_replied=bool(own_reply(comment, comments, owner_ids)),
+                        created_time=str(comment.get("created_time", "")))
+        logger.info("Facebook lightweight scan: %s comments, %s already answered", len(results),
+                    sum(c.has_author_replied for c in results.values()))
+        return list(results.values())
 
     @staticmethod
     def _read_post_previews(page):
@@ -254,72 +234,42 @@ class FacebookFunnel(BasePlatformFunnel):
             except requests.RequestException:
                 return False, "delivery_unknown"
 
-        # 2. Браузерна публікація через Playwright
+        # Business Suite's SPA exceeds the Railway trial's 1 GB memory limit.
+        from .facebook_web import facebook_web, own_reply, comment_nodes
         submitted = False
-        if FACEBOOK_STATE_FILE.exists():
-            try:
-                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
-                from playwright.sync_api import sync_playwright
-                with BROWSER_LOCK:
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(channel="chromium", headless=True, args=CHROME_DOCKER_ARGS)
-                        ctx = browser.new_context(
-                            storage_state=str(FACEBOOK_STATE_FILE),
-                            locale="en-US",
-                            viewport={"width": 1280, "height": 800}
-                        )
-                        page = ctx.new_page()
-                        try:
-                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("image", "media", "font") else route.continue_())
-                        except Exception:
-                            pass
-                        target_url = post_id if post_id and str(post_id).startswith("https://") else f"https://www.facebook.com/{FACEBOOK_PROFILE_ID}?comment_id={comment_id}"
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
-                        self._check_restrictions(page)
-                        page.locator(f'a[href*="comment_id={comment_id}"]').first.wait_for(timeout=15000)
-
-                        if comment_id.startswith("fb_"):
-                            browser.close()
-                            return False, "comment_target_missing"
-                        links = [link for link in page.locator('a[href*="comment_id="]').all()
-                                 if parse_qs(urlsplit(link.get_attribute("href") or "").query).get("comment_id") == [comment_id]]
-                        if not links:
-                            browser.close()
-                            return False, "comment_target_missing"
-                        row = links[0].locator('xpath=ancestor::div[@role="article"][1]')
-                        thread = row.locator('xpath=..')
-                        receipt = thread.locator('[role="article"][aria-label^="Comment by Bohdan GPT "]').get_by_text(text, exact=True)
-                        if receipt.count():
-                            browser.close()
-                            return True, None
-                        row.get_by_text(re.compile(r"^(Reply|Відповісти)$")).first.click(timeout=5000)
-
-                        # 3. Знаходимо активне поле вводу Lexical / Draft.js / textarea
-                        textbox = thread.get_by_role("textbox", name=re.compile(r"^Reply as|^Відповісти як")).first
-                        if textbox.is_visible():
-                            textbox.scroll_into_view_if_needed()
-                            textbox.click(force=True)
-                            page.wait_for_timeout(300)
-                            try:
-                                textbox.fill(text)
-                            except Exception:
-                                page.keyboard.type(text, delay=20)
-                            page.wait_for_timeout(500)
-                            submitted = True
-                            textbox.press("Enter")
-                            receipt.last.wait_for(timeout=10000)
-                            page.reload(wait_until="domcontentloaded", timeout=20000)
-                            receipt.last.wait_for(timeout=10000)
-                            browser.close()
-                            logger.info(f"✅ [Facebook Playwright] Опубліковано відповідь на {comment_id}: '{text}'")
-                            return True, None
-                        browser.close()
-            except Exception as pe:
-                logger.warning("Facebook reply failed: %s", type(pe).__name__)
-                return False, "delivery_unknown" if submitted else "reply_failed"
-
-        logger.warning("Facebook reply delivery failed")
-        return False, "reply_failed"
+        try:
+            if not str(comment_id).isdigit() or not post_id or not str(post_id).isdigit():
+                return False, "comment_target_missing"
+            with facebook_web(FACEBOOK_STATE_FILE, FACEBOOK_PAGE_ID) as web:
+                comments = web.comments(str(post_id), str(comment_id))
+                parent = next((c for c in comments.values() if c.get("legacy_fbid") == str(comment_id)), None)
+                owner_ids = {FACEBOOK_PAGE_ID, FACEBOOK_PROFILE_ID}
+                if not parent or (parent.get("author") or {}).get("id") in owner_ids:
+                    return False, "comment_target_missing"
+                if own_reply(parent, comments, owner_ids, text):
+                    return True, None
+                if own_reply(parent, comments, owner_ids):
+                    return False, "already_replied_manual"
+                actor = (parent.get("feedback", {}).get("viewer_actor") or {}).get("id")
+                if actor not in owner_ids or not parent.get("feedback", {}).get("id"):
+                    return False, "page_actor_mismatch"
+                submitted = True
+                response = web.create_reply(parent, text)
+                replies = comment_nodes(response)
+                receipt = next((c.get("legacy_fbid") for c in replies.values()
+                    if (c.get("author") or {}).get("id") in owner_ids
+                    and (c.get("body") or {}).get("text") == text
+                    and (c.get("comment_direct_parent") or {}).get("id") == parent["id"]), None)
+                if not receipt:
+                    return False, "delivery_unknown"
+                verified = web.comments(str(post_id), receipt)
+                if not own_reply(parent, verified, owner_ids, text):
+                    return False, "delivery_unknown"
+                logger.info("Facebook reply verified: parent=%s reply=%s", comment_id, receipt)
+                return True, None
+        except Exception as exc:
+            logger.warning("Facebook web reply failed: %s", type(exc).__name__)
+            return False, "delivery_unknown" if submitted else "reply_failed"
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """
