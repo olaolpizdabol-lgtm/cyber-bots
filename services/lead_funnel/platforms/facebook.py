@@ -103,7 +103,7 @@ class FacebookFunnel(BasePlatformFunnel):
             browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
             try:
                 page = browser.new_page(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US")
-                page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("media", "font") else route.continue_())
+                page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("image", "media", "font") else route.continue_())
                 page.goto(f"https://business.facebook.com/latest/inbox/facebook?asset_id={FACEBOOK_PAGE_ID}", wait_until="domcontentloaded", timeout=30000)
                 self._check_restrictions(page)
                 page.get_by_role("link", name="Facebook comments", exact=True).wait_for(timeout=15000)
@@ -262,7 +262,7 @@ class FacebookFunnel(BasePlatformFunnel):
                         )
                         page = ctx.new_page()
                         try:
-                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
+                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("image", "media", "font") else route.continue_())
                         except Exception:
                             pass
                         target_url = post_id if post_id and str(post_id).startswith("https://") else f"https://www.facebook.com/{FACEBOOK_PROFILE_ID}?comment_id={comment_id}"
