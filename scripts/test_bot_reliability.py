@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import core.database as db
 from core.browser_lock import TimeoutLock
 from services.lead_funnel import funnel_service as fs
-from services.lead_funnel.platforms.base import PlatformComment
+from services.lead_funnel.platforms.base import PlatformComment, PlatformAccessError
 from services.lead_funnel.intent_detector import CommentIntentResult
 from services.lead_funnel.platforms.youtube import YouTubeFunnel
 
@@ -99,6 +99,14 @@ class FunnelTests(unittest.TestCase):
         self.handler.fetch_recent_unanswered_comments.side_effect = RuntimeError('session expired')
         self.assertEqual(self.scan()['errors'], 1)
         self.assertEqual(self.service.last_scan['instagram']['errors'], 1)
+
+    def test_scan_reports_known_access_failure_without_leaking_arbitrary_errors(self):
+        self.handler.fetch_recent_unanswered_comments.side_effect = PlatformAccessError('Facebook browser session expired')
+        self.scan('facebook')
+        self.assertEqual(self.service.last_error['facebook'], 'Facebook browser session expired')
+        self.handler.fetch_recent_unanswered_comments.side_effect = RuntimeError('private response body')
+        self.scan('facebook')
+        self.assertEqual(self.service.last_error['facebook'], 'RuntimeError')
 
     def test_manual_reply_is_not_proof_of_dm_delivery(self):
         db.save_lead_comment('instagram', 'old', 'p', 'u', 'visitor', 'Hi', 'question_chat', None, False, 'already_replied_manual')
@@ -348,13 +356,14 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(FacebookFunnel().reply_to_comment('123', 'link'), (False, 'delivery_unknown'))
             self.assertFalse(FacebookFunnel().reply_to_direct_message(PlatformComment('m','t',None,'u','v','hi'), 'link')[0])
 
-    def test_report_runs_every_600_seconds_independent_of_scan(self):
+    def test_report_runs_immediately_then_every_600_seconds_independent_of_scan(self):
         source = ast.parse(Path('main.py').read_text())
         main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
         reporter = next(n for n in main.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'lead_report_background_task')
         bot = SimpleNamespace(send_message=AsyncMock())
         sleeps = []
         async def sleep(seconds):
+            self.assertEqual(bot.send_message.await_count, len(sleeps) + 1)
             sleeps.append(seconds)
             if len(sleeps) > 1:
                 raise asyncio.CancelledError
@@ -365,7 +374,31 @@ class PlatformTests(unittest.TestCase):
                 await namespace['lead_report_background_task']()
         asyncio.run(run())
         self.assertEqual(sleeps, [600, 600])
-        bot.send_message.assert_awaited_once()
+        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertIn('Бот запущений', bot.send_message.await_args_list[0].args[1])
+        self.assertIn('Звіт бота', bot.send_message.await_args_list[1].args[1])
+
+    def test_report_recovers_from_database_and_recipient_failures(self):
+        source = ast.parse(Path('main.py').read_text())
+        main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
+        reporter = next(n for n in main.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'lead_report_background_task')
+        bot = SimpleNamespace(send_message=AsyncMock(side_effect=[RuntimeError('unavailable'), SimpleNamespace(message_id=10), SimpleNamespace(message_id=11), SimpleNamespace(message_id=12)]))
+        sleeps = []
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 2:
+                raise asyncio.CancelledError
+        logger = Mock()
+        namespace = {'html': __import__('html'), 'asyncio': SimpleNamespace(sleep=sleep, to_thread=AsyncMock(side_effect=[RuntimeError('database unavailable'), {'unconfirmed_delivery': 0}])), 'ALLOWED_USER_IDS': [123, 456], 'bot': bot, 'logger': logger}
+        exec(compile(ast.Module(body=[reporter], type_ignores=[]), '<report>', 'exec'), namespace)
+        async def run():
+            with self.assertRaises(asyncio.CancelledError):
+                await namespace['lead_report_background_task']()
+        asyncio.run(run())
+        self.assertEqual(bot.send_message.await_count, 4)
+        self.assertIn('статистику зібрати не вдалося', bot.send_message.await_args_list[1].args[1])
+        self.assertIn('Звіт бота', bot.send_message.await_args_list[2].args[1])
+        self.assertEqual(logger.warning.call_count, 2)
 
 
 if __name__ == '__main__':

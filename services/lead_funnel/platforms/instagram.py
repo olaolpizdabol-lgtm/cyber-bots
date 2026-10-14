@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
-from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
+from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment, PlatformAccessError
 from config import INSTAGRAM_USERNAME, INSTAGRAM_SESSION_FILE, DATA_DIR, TEMP_DIR
 from services.proxy_manager import proxy_manager
 
@@ -115,7 +115,7 @@ class InstagramFunnel(BasePlatformFunnel):
         results: List[PlatformComment] = []
         state_file = DATA_DIR / "instagram_state.json"
         if not state_file.exists():
-            raise RuntimeError("Instagram browser session missing")
+            raise PlatformAccessError("Instagram browser session missing")
 
         try:
             from playwright.sync_api import sync_playwright
@@ -149,7 +149,7 @@ class InstagramFunnel(BasePlatformFunnel):
                     raw_links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
                     unique_links = list(dict.fromkeys([l for l in raw_links if l and ('/p/' in l or '/reel/' in l)]))
                     if not unique_links:
-                        raise RuntimeError("Instagram posts unavailable; check session and page layout")
+                        raise PlatformAccessError("Instagram posts unavailable; check session and page layout")
                     max_posts = limit_posts if limit_posts is not None else len(unique_links)
                     target_links = unique_links[:max_posts]
 
@@ -275,7 +275,7 @@ class InstagramFunnel(BasePlatformFunnel):
     def fetch_direct_messages(self):
         client = self._get_client()
         if client is None:
-            raise RuntimeError("Instagram inbox: session unavailable")
+            raise PlatformAccessError("Instagram inbox: session unavailable")
         threads = [(t, False) for t in client.direct_threads(amount=20, thread_message_limit=10)]
         threads += [(t, True) for t in client.direct_pending_inbox(amount=20)]
         seen = set()

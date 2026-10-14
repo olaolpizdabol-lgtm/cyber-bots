@@ -14,7 +14,7 @@ import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
+from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment, PlatformAccessError
 from core.browser_lock import BROWSER_LOCK
 from config import BASE_DIR, DATA_DIR
 
@@ -34,7 +34,7 @@ class TikTokFunnel(BasePlatformFunnel):
         results: List[PlatformComment] = []
         state_file = DATA_DIR / "tiktok_channel_state.json"
         if not state_file.exists():
-            raise RuntimeError("TikTok channel session missing; run scripts/login_tiktok_channel.py")
+            raise PlatformAccessError("TikTok channel session missing; run scripts/login_tiktok_channel.py")
         try:
             from playwright.sync_api import sync_playwright
             from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
@@ -100,7 +100,7 @@ class TikTokFunnel(BasePlatformFunnel):
         from core.browser_lock import CHROME_DOCKER_ARGS
         state_file = DATA_DIR / "tiktok_channel_state.json"
         if not state_file.exists():
-            raise RuntimeError("TikTok channel session missing")
+            raise PlatformAccessError("TikTok channel session missing")
         with BROWSER_LOCK, sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
             try:

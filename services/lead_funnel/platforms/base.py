@@ -6,6 +6,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
 
+class PlatformAccessError(RuntimeError):
+    """Safe, locally authored reason suitable for owner reports."""
+
+
 @dataclass
 class PlatformComment:
     comment_id: str
@@ -60,7 +64,7 @@ class BasePlatformFunnel(ABC):
         pass
 
     def fetch_direct_messages(self) -> List[PlatformComment]:
-        raise RuntimeError("Inbox adapter unavailable")
+        raise PlatformAccessError("Inbox adapter unavailable")
 
     def reply_to_direct_message(self, message: PlatformComment, text: str) -> Tuple[bool, Optional[str]]:
         raise NotImplementedError("Inbox adapter unavailable")

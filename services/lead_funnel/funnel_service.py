@@ -21,6 +21,7 @@ from core.database import (
     has_user_received_lead
 )
 from services.lead_funnel.intent_detector import detect_comment_intent, CommentIntentResult
+from services.lead_funnel.platforms.base import PlatformAccessError
 from services.lead_funnel.platforms.instagram import instagram_funnel
 from services.lead_funnel.platforms.facebook import facebook_funnel
 from services.lead_funnel.platforms.tiktok import tiktok_funnel
@@ -258,8 +259,8 @@ class LeadFunnelService:
             return stats
         except Exception as exc:
             stats["errors"] += 1
-            self.last_error[platform_name] = type(exc).__name__
-            logger.warning("[%s] Scan failed: %s", platform_name, type(exc).__name__)
+            self.last_error[platform_name] = str(exc) if isinstance(exc, PlatformAccessError) else type(exc).__name__
+            logger.warning("[%s] Scan failed: %s", platform_name, self.last_error[platform_name])
             return stats
         finally:
             self.last_scan[platform_name] = dict(stats)
@@ -407,7 +408,7 @@ class LeadFunnelService:
             return stats
         except Exception as exc:
             stats["errors"] += 1
-            self.last_error[key] = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+            self.last_error[key] = str(exc) if isinstance(exc, PlatformAccessError) else type(exc).__name__
             return stats
         finally:
             self.last_scan[key] = dict(stats)

@@ -335,33 +335,41 @@ async def main():
 
     async def lead_report_background_task():
         from services.lead_funnel import lead_funnel_service
+        first_report = True
+        logger.info("Lead reporter started: interval=600s recipients=%d", len(ALLOWED_USER_IDS))
         while True:
-            await asyncio.sleep(600)
-            import time
-            rows = ["📊 <b>Звіт бота за останнім скануванням</b>"]
-            for platform in ("instagram", "instagram_dm", "facebook", "facebook_dm", "tiktok", "tiktok_dm", "youtube"):
-                stats = lead_funnel_service.last_scan.get(platform)
-                if stats is None:
-                    rows.append(f"• {platform}: сканування ще не завершене")
-                else:
-                    rows.append(
-                        f"• {platform}: перевірено {stats.get('processed', 0)}, "
-                        f"відповідей {stats.get('replies', 0)}, DM {stats.get('dms_sent', 0)}, "
-                        f"помилок {stats.get('errors', 0)} "
-                        f"(оновлено {int((time.time() - lead_funnel_service.last_scan_at.get(platform, time.time())) / 60)} хв тому)")
-                if platform in lead_funnel_service.last_error:
-                    rows.append(f"  Причина: {html.escape(lead_funnel_service.last_error[platform])}")
-            if lead_funnel_service.active_scans:
-                rows.append("Зараз виконується: " + ", ".join(sorted(lead_funnel_service.active_scans.copy())))
-            from core.database import get_lead_funnel_stats
-            delivery_stats = await asyncio.to_thread(get_lead_funnel_stats)
-            rows.append(f"Непідтверджені надсилання, потрібна перевірка: {delivery_stats['unconfirmed_delivery']}")
-            rows.append("Наступний звіт через 10 хвилин. Непідтверджені надсилання не повторюються автоматично.")
-            for uid in ALLOWED_USER_IDS:
+            try:
+                import time
+                rows = ["✅ <b>Бот запущений. Моніторинг активний.</b>" if first_report else "📊 <b>Звіт бота за останнім скануванням</b>"]
+                for platform in ("instagram", "instagram_dm", "facebook", "facebook_dm", "tiktok", "tiktok_dm", "youtube"):
+                    stats = lead_funnel_service.last_scan.get(platform)
+                    if stats is None:
+                        rows.append(f"• {platform}: сканування ще не завершене")
+                    else:
+                        rows.append(
+                            f"• {platform}: перевірено {stats.get('processed', 0)}, "
+                            f"відповідей {stats.get('replies', 0)}, DM {stats.get('dms_sent', 0)}, "
+                            f"помилок {stats.get('errors', 0)} "
+                            f"(оновлено {int((time.time() - lead_funnel_service.last_scan_at.get(platform, time.time())) / 60)} хв тому)")
+                    if platform in lead_funnel_service.last_error:
+                        rows.append(f"  Причина: {html.escape(lead_funnel_service.last_error[platform])}")
+                if lead_funnel_service.active_scans:
+                    rows.append("Зараз виконується: " + ", ".join(sorted(lead_funnel_service.active_scans.copy())))
+                from core.database import get_lead_funnel_stats
+                delivery_stats = await asyncio.to_thread(get_lead_funnel_stats)
+                rows.append(f"Непідтверджені надсилання, потрібна перевірка: {delivery_stats['unconfirmed_delivery']}")
+                rows.append("Наступний звіт через 10 хвилин. Непідтверджені надсилання не повторюються автоматично.")
+            except Exception as exc:
+                logger.warning("Lead report build failed: %s", type(exc).__name__)
+                rows = ["⚠️ Бот працює, але статистику зібрати не вдалося. Наступна спроба через 10 хвилин."]
+            for recipient_index, uid in enumerate(ALLOWED_USER_IDS):
                 try:
-                    await bot.send_message(uid, "\n".join(rows), parse_mode="HTML")
+                    sent = await bot.send_message(uid, "\n".join(rows), parse_mode="HTML")
+                    logger.info("Lead report sent: recipient_index=%d message_id=%s", recipient_index, sent.message_id)
                 except Exception as exc:
-                    logger.warning("Lead report delivery failed: %s", type(exc).__name__)
+                    logger.warning("Lead report delivery failed: recipient_index=%d error=%s", recipient_index, type(exc).__name__)
+            first_report = False
+            await asyncio.sleep(600)
 
     post_scheduler_task = asyncio.create_task(post_scheduler_background_task())
     scheduler_task = asyncio.create_task(streak_scheduler_background_task())

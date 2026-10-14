@@ -11,7 +11,7 @@ import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
+from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment, PlatformAccessError
 from config import BASE_DIR, DATA_DIR, YOUTUBE_TOKEN_FILE
 
 logger = logging.getLogger("youtube_funnel")
@@ -32,7 +32,7 @@ class YouTubeFunnel(BasePlatformFunnel):
             if service:
                 channels = service.channels().list(part="id", mine=True).execute().get("items", [])
                 if not channels:
-                    raise RuntimeError("YouTube channel unavailable")
+                    raise PlatformAccessError("YouTube channel unavailable")
                 channel_id = channels[0]["id"]
                 page_token = None
                 while True:
@@ -67,7 +67,7 @@ class YouTubeFunnel(BasePlatformFunnel):
                     if limit_posts is not None or not page_token:
                         break
             else:
-                raise RuntimeError("YouTube authorization required")
+                raise PlatformAccessError("YouTube authorization required")
         except Exception as e:
             logger.warning("YouTube comment fetch failed: %s", type(e).__name__)
             raise

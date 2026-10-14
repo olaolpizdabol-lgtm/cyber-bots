@@ -18,7 +18,7 @@ import requests
 
 from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
 from services.proxy_manager import proxy_manager
-from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
+from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment, PlatformAccessError
 from config import BASE_DIR, DATA_DIR, TEMP_DIR
 
 logger = logging.getLogger("facebook_funnel")
@@ -90,13 +90,13 @@ class FacebookFunnel(BasePlatformFunnel):
     @staticmethod
     def _check_restrictions(page):
         if page.get_by_text("Confirm your identity to send messages", exact=True).count():
-            raise RuntimeError("Facebook requires identity confirmation before sending messages")
+            raise PlatformAccessError("Facebook requires identity confirmation before sending messages")
         if "login" in page.url or page.locator('input[name="email"]').count():
-            raise RuntimeError("Facebook browser session expired")
+            raise PlatformAccessError("Facebook browser session expired")
 
     def _fetch_comments_via_browser(self, limit_posts=5):
         if not FACEBOOK_STATE_FILE.exists():
-            raise RuntimeError("Facebook browser session missing")
+            raise PlatformAccessError("Facebook browser session missing")
         from playwright.sync_api import sync_playwright
         results = {}
         with BROWSER_LOCK, sync_playwright() as p:
@@ -111,7 +111,7 @@ class FacebookFunnel(BasePlatformFunnel):
                 previews = page.locator('div._at42 > div._4ik4._4ik5').all_text_contents()
                 previews = list(dict.fromkeys(t.strip() for t in previews if t.strip()))
                 if not previews:
-                    raise RuntimeError("Facebook comment inbox layout unavailable")
+                    raise PlatformAccessError("Facebook comment inbox layout unavailable")
                 for index, preview in enumerate(previews[:limit_posts or 50]):
                     old_link = page.locator('[role="article"] a[href*="comment_id="]').first
                     previous_href = old_link.get_attribute("href") if old_link.count() else None
@@ -160,12 +160,12 @@ class FacebookFunnel(BasePlatformFunnel):
 
     def fetch_direct_messages(self):
         if not FACEBOOK_PAGE_TOKEN or FACEBOOK_PAGE_TOKEN.startswith("your_"):
-            raise RuntimeError("Messenger requires a Page token with pages_messaging; check Business Suite identity restriction")
+            raise PlatformAccessError("Messenger requires a Page token with pages_messaging; check Business Suite identity restriction")
         from datetime import datetime, timezone
         response = requests.get(f"https://graph.facebook.com/{GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/conversations",
             params={"access_token": FACEBOOK_PAGE_TOKEN, "platform": "messenger", "fields": "id,messages.limit(1){id,message,from,created_time}", "limit": 25}, timeout=20)
         if response.status_code != 200:
-            raise RuntimeError(f"Messenger inbox unavailable (HTTP {response.status_code})")
+            raise PlatformAccessError(f"Messenger inbox unavailable (HTTP {response.status_code})")
         for thread in response.json().get("data", []):
             for message in thread.get("messages", {}).get("data", []):
                 sender = message.get("from", {})
