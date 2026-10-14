@@ -142,10 +142,17 @@ class FacebookFunnel(BasePlatformFunnel):
                         pass
 
                     # 1. Спершу скануємо головну стіну сторінки (де Facebook відкрито відображає всі останні коментарі)
-                    wall_url = f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
+                    wall_url = f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/"
                     try:
-                        page.goto(wall_url, wait_until="domcontentloaded", timeout=25000)
-                        page.wait_for_timeout(2500)
+                        try:
+                            page.goto(wall_url, wait_until="domcontentloaded", timeout=25000)
+                        except Exception as goto_err:
+                            logger.debug(f"FB wall goto timeout (proceeding anyway): {goto_err}")
+
+                        try:
+                            page.locator('div[role="main"], [role="feed"], [aria-label="Facebook"]').first.wait_for(timeout=10000)
+                        except Exception:
+                            page.wait_for_timeout(2500)
                         self._dismiss_fb_dialog(page)
 
                         # Прокручуємо стіну для підвантаження постів та коментарів
@@ -239,14 +246,20 @@ class FacebookFunnel(BasePlatformFunnel):
                         logger.debug(f"FB wall scan error: {wall_err}")
 
                     # 2. Скануємо вкладку Reels сторінки
-                    reels_tab_url = f"https://www.facebook.com/profile.php?id={FACEBOOK_PAGE_ID}&sk=reels_tab"
+                    reels_tab_url = f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/?sk=reels_tab"
                     try:
-                        page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=20000)
-                        page.wait_for_timeout(2000)
+                        try:
+                            page.goto(reels_tab_url, wait_until="domcontentloaded", timeout=25000)
+                        except Exception as r_goto_err:
+                            logger.debug(f"FB reels goto timeout (proceeding anyway): {r_goto_err}")
+
+                        try:
+                            page.locator('div[role="main"], [role="feed"], a[href*="/reel/"]').first.wait_for(timeout=10000)
+                        except Exception:
+                            page.wait_for_timeout(2500)
                         self._dismiss_fb_dialog(page)
 
-                        main_loc = page.locator('[role="main"], main').first
-                        raw_reels = [a.get_attribute("href") for a in main_loc.locator('a[href*="/reel/"]').all()]
+                        raw_reels = [a.get_attribute("href") for a in page.locator('a[href*="/reel/"]').all()]
                         unique_reels = []
                         for l in raw_reels:
                             if l and "/reel/" in l and "notif" not in l:
@@ -262,7 +275,10 @@ class FacebookFunnel(BasePlatformFunnel):
                             r_url = "https://www.facebook.com" + r_href if r_href.startswith("/") else r_href
                             try:
                                 page.goto(r_url, wait_until="domcontentloaded", timeout=20000)
-                                page.wait_for_timeout(2000)
+                                try:
+                                    page.locator('div[role="main"], div[role="article"], [aria-label*="Comment" i]').first.wait_for(timeout=10000)
+                                except Exception:
+                                    page.wait_for_timeout(2000)
                                 self._dismiss_fb_dialog(page)
 
                                 c_btn = page.locator('[aria-label*="Comment" i], [aria-label*="коментар" i]').first
@@ -436,11 +452,23 @@ class FacebookFunnel(BasePlatformFunnel):
                             viewport={"width": 1280, "height": 800}
                         )
                         page = ctx.new_page()
+                        try:
+                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
+                        except Exception:
+                            pass
                         target_url = post_id if post_id and str(post_id).startswith("http") else (
-                            f"https://www.facebook.com{post_id}" if post_id else f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
+                            f"https://www.facebook.com{post_id}" if post_id else f"https://www.facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}/"
                         )
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
-                        page.wait_for_timeout(2500)
+                        if f"facebook.com/{FACEBOOK_PAGE_ID}" in target_url and "people/" not in target_url:
+                            target_url = target_url.replace(f"facebook.com/{FACEBOOK_PAGE_ID}", f"facebook.com/people/Bohdan-GPT/{FACEBOOK_PAGE_ID}")
+                        try:
+                            page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                        except Exception as r_err:
+                            logger.debug(f"FB reply goto timeout (proceeding anyway): {r_err}")
+                        try:
+                            page.locator('div[role="main"], [role="feed"], [aria-label="Facebook"]').first.wait_for(timeout=10000)
+                        except Exception:
+                            page.wait_for_timeout(2500)
                         self._dismiss_fb_dialog(page)
 
                         # 1. Перевіряємо чи є конкретна кнопка Відповісти (Reply) під цією статтею/коментарем

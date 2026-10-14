@@ -102,14 +102,22 @@ class InstagramFunnel(BasePlatformFunnel):
             with BROWSER_LOCK:
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                    context = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
+                    context = browser.new_context(
+                        storage_state=str(state_file),
+                        viewport={"width": 1280, "height": 800},
+                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                        locale="en-US"
+                    )
                     page = context.new_page()
                     try:
                         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
                     except Exception:
                         pass
                     page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(2500)
+                    try:
+                        page.locator('a[href*="/p/"], a[href*="/reel/"]').first.wait_for(timeout=12000)
+                    except Exception:
+                        page.wait_for_timeout(3000)
 
                     # Якщо потрібно просканувати всі пости — скролимо профіль
                     if limit_posts is None or limit_posts > 12:
@@ -118,7 +126,7 @@ class InstagramFunnel(BasePlatformFunnel):
                             page.wait_for_timeout(700)
 
                     raw_links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
-                    unique_links = list(dict.fromkeys([l for l in raw_links if l]))
+                    unique_links = list(dict.fromkeys([l for l in raw_links if l and ('/p/' in l or '/reel/' in l)]))
                     max_posts = 4 if limit_posts is not None else 12
                     target_links = unique_links[:max_posts]
 
@@ -128,7 +136,10 @@ class InstagramFunnel(BasePlatformFunnel):
                         post_url = f"https://www.instagram.com{href}"
                         try:
                             page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
-                            page.wait_for_timeout(2000)
+                            try:
+                                page.locator('main, article, ul, [role="main"]').first.wait_for(timeout=10000)
+                            except Exception:
+                                page.wait_for_timeout(2000)
 
                             # 1. Розгортаємо приховані коментарі та пагінацію (lazy-load)
                             try:
@@ -278,9 +289,6 @@ class InstagramFunnel(BasePlatformFunnel):
                                     page.wait_for_timeout(1200)
                                     no_results = dialog.locator('text="No results found."').is_visible()
                                     is_following = not no_results
-
-                        browser.close()
-                        return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
 
                         browser.close()
                         return is_following, (str(proof_path) if proof_path and proof_path.exists() else None)
