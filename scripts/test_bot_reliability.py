@@ -409,6 +409,24 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(FacebookFunnel().reply_to_comment('123', 'link'), (False, 'delivery_unknown'))
             self.assertFalse(FacebookFunnel().reply_to_direct_message(PlatformComment('m','t',None,'u','v','hi'), 'link')[0])
 
+    def test_facebook_worker_scans_comments_without_messenger(self):
+        source = ast.parse(Path('main.py').read_text())
+        main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
+        background = next(n for n in main.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'lead_funnel_background_task')
+        worker = next(n for n in background.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'platform_worker')
+        async def sleep(seconds):
+            if seconds == 30:
+                raise asyncio.CancelledError
+        service = Mock(); calls = AsyncMock()
+        namespace = {'asyncio': SimpleNamespace(sleep=sleep, to_thread=calls), 'lead_funnel_service': service, 'logger': Mock()}
+        exec(compile(ast.Module(body=[worker], type_ignores=[]), '<worker>', 'exec'), namespace)
+        async def run():
+            with self.assertRaises(asyncio.CancelledError):
+                await namespace['platform_worker']('facebook')
+        asyncio.run(run())
+        calls.assert_any_await(service.process_platform_comments, 'facebook', 6)
+        self.assertNotIn(service.process_direct_messages, [call.args[0] for call in calls.await_args_list])
+
     def test_report_runs_immediately_then_every_600_seconds_independent_of_scan(self):
         source = ast.parse(Path('main.py').read_text())
         main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
@@ -430,6 +448,7 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(bot.send_message.await_count, 2)
         self.assertIn('Бот запущений', bot.send_message.await_args_list[0].args[1])
         self.assertIn('Звіт бота', bot.send_message.await_args_list[1].args[1])
+        self.assertNotIn('facebook_dm', bot.send_message.await_args_list[1].args[1])
 
     def test_report_recovers_from_database_and_recipient_failures(self):
         source = ast.parse(Path('main.py').read_text())

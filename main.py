@@ -316,7 +316,7 @@ async def main():
             while True:
                 cycle += 1
                 try:
-                    if platform != "youtube":
+                    if platform in ("instagram", "tiktok"):
                         await asyncio.to_thread(lead_funnel_service.process_direct_messages, platform)
                     await asyncio.to_thread(lead_funnel_service.process_platform_comments,
                                             platform, None if cycle % 12 == 0 else 6)
@@ -341,7 +341,7 @@ async def main():
             try:
                 import time
                 rows = ["✅ <b>Бот запущений. Моніторинг активний.</b>" if first_report else "📊 <b>Звіт бота за останнім скануванням</b>"]
-                for platform in ("instagram", "instagram_dm", "facebook", "facebook_dm", "tiktok", "tiktok_dm", "youtube"):
+                for platform in ("instagram", "instagram_dm", "facebook", "tiktok", "tiktok_dm", "youtube"):
                     stats = lead_funnel_service.last_scan.get(platform)
                     if stats is None:
                         rows.append(f"• {platform}: сканування ще не завершене")
