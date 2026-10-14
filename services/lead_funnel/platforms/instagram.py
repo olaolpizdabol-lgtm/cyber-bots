@@ -110,10 +110,10 @@ class InstagramFunnel(BasePlatformFunnel):
                     )
                     page = context.new_page()
                     try:
-                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
-                    except Exception:
-                        pass
-                    page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
+                        page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=18000)
+                    except Exception as p_goto_err:
+                        logger.debug(f"IG profile goto timeout (proceeding to DOM check): {p_goto_err}")
+
                     try:
                         page.locator('a[href*="/p/"], a[href*="/reel/"]').first.wait_for(timeout=12000)
                     except Exception:
@@ -135,7 +135,11 @@ class InstagramFunnel(BasePlatformFunnel):
                             continue
                         post_url = f"https://www.instagram.com{href}"
                         try:
-                            page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
+                            try:
+                                page.goto(post_url, wait_until="domcontentloaded", timeout=18000)
+                            except Exception as post_goto_err:
+                                logger.debug(f"IG post goto timeout (proceeding to DOM check): {post_goto_err}")
+
                             try:
                                 page.locator('main, article, ul, [role="main"]').first.wait_for(timeout=10000)
                             except Exception:
@@ -331,7 +335,10 @@ class InstagramFunnel(BasePlatformFunnel):
                         page = ctx.new_page()
 
                         # Спроба 1: Прямий перехід на профіль користувача та клік "Message"
-                        page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=20000)
+                        try:
+                            page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=18000)
+                        except Exception as dm_goto_err:
+                            logger.debug(f"IG DM profile goto timeout (proceeding): {dm_goto_err}")
                         page.wait_for_timeout(2000)
                         msg_btn = page.locator('header [role="button"]:has-text("Message"), header button:has-text("Message"), header div:has-text("Message")').first
                         if not msg_btn.is_visible():
@@ -371,7 +378,10 @@ class InstagramFunnel(BasePlatformFunnel):
                             return True, None
 
                         # Спроба 2: Через direct/new
-                        page.goto("https://www.instagram.com/direct/new/", wait_until="domcontentloaded", timeout=20000)
+                        try:
+                            page.goto("https://www.instagram.com/direct/new/", wait_until="domcontentloaded", timeout=18000)
+                        except Exception as dnew_err:
+                            logger.debug(f"IG direct/new goto timeout (proceeding): {dnew_err}")
                         page.wait_for_timeout(2000)
                         search_inp = page.locator('input[placeholder*="Search" i], input[name*="query" i]').first
                         if search_inp.is_visible():
@@ -428,20 +438,37 @@ class InstagramFunnel(BasePlatformFunnel):
                         )
                         page = ctx.new_page()
                         target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+                        try:
+                            page.goto(target_url, wait_until="domcontentloaded", timeout=18000)
+                        except Exception as rep_goto_err:
+                            logger.debug(f"IG reply goto timeout (proceeding): {rep_goto_err}")
                         page.wait_for_timeout(2000)
+
+                        # 1. Спроба клікнути "Reply" під конкретним коментарем для прямої відповіді у гілку
+                        try:
+                            reply_btn = page.locator('button, div[role="button"], span').filter(has_text=re.compile(r"^(Reply|Відповісти)$", re.I)).first
+                            if reply_btn.is_visible():
+                                reply_btn.click()
+                                page.wait_for_timeout(800)
+                        except Exception:
+                            pass
 
                         textarea = page.locator('textarea[aria-label*="comment" i], textarea[placeholder*="comment" i], textarea').first
                         if textarea.is_visible():
                             textarea.click()
-                            textarea.fill(text)
-                            page.wait_for_timeout(400)
-                            post_btn = page.locator('div[role="button"]:has-text("Post"), button:has-text("Post"), button:has-text("Опублікувати")').first
+                            current_val = textarea.input_value()
+                            if current_val and not text.startswith("@"):
+                                textarea.fill(f"{current_val}{text}")
+                            else:
+                                textarea.fill(text)
+                            page.wait_for_timeout(500)
+
+                            post_btn = page.locator('div[role="button"], button').filter(has_text=re.compile(r"^(Post|Опублікувати)$", re.I)).first
                             if post_btn.is_visible():
                                 post_btn.click()
                             else:
                                 page.keyboard.press("Enter")
-                            page.wait_for_timeout(2000)
+                            page.wait_for_timeout(2500)
                             browser.close()
                             logger.info(f"✅ [Instagram Playwright Web] Опубліковано відповідь на коментар: '{text}'")
                             return True, None
@@ -476,7 +503,10 @@ class InstagramFunnel(BasePlatformFunnel):
                         ctx = browser.new_context(storage_state=str(state_file), locale="en-US", viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
                         target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+                        try:
+                            page.goto(target_url, wait_until="domcontentloaded", timeout=18000)
+                        except Exception as lk_goto_err:
+                            logger.debug(f"IG like goto timeout (proceeding): {lk_goto_err}")
                         page.wait_for_timeout(2500)
                         like_elems = page.locator('span:has(svg[aria-label="Like"]), [aria-label="Like"]').all()
                         for el in like_elems:
