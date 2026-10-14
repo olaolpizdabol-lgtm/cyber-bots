@@ -37,12 +37,10 @@ class InstagramDMMonitor:
             logger.warning(f"Файл сесії Instagram {session_path} не знайдено.")
             return None
 
-        cl = Client()
-        # Проксі налаштування
-        from config import STRICT_PROXY_CHECK
         proxy_url = proxy_manager.proxy_url
-        if proxy_url and not STRICT_PROXY_CHECK and not proxy_manager.is_proxy_alive():
-            proxy_url = None
+        if proxy_url and not proxy_manager.is_proxy_alive():
+            logger.debug("Instagram DM monitor: проксі не активний, пропускаємо direct_threads.")
+            return None
 
         if proxy_url:
             cl.set_proxy(proxy_url)
@@ -52,14 +50,6 @@ class InstagramDMMonitor:
             return cl
         except Exception as e:
             logger.warning(f"Помилка завантаження сесії Instagram: {e}")
-            # Спробуємо без проксі
-            if proxy_url:
-                try:
-                    cl = Client()
-                    cl.load_settings(str(session_path))
-                    return cl
-                except Exception as e2:
-                    logger.error(f"Помилка завантаження сесії Instagram без проксі: {e2}")
             return None
 
     def _notify_telegram(self, html_text: str):
@@ -114,7 +104,7 @@ class InstagramDMMonitor:
         try:
             threads = cl.direct_threads(amount=10)
         except Exception as e:
-            logger.warning(f"Не вдалося отримати direct_threads в Instagram: {e}")
+            logger.info(f"Instagram Direct API тимчасово недоступний ({e}). Спробуємо пізніше.")
             return []
 
         target_thread = None

@@ -24,19 +24,26 @@ logger = logging.getLogger("instagram_funnel")
 class InstagramFunnel(BasePlatformFunnel):
     def __init__(self):
         self._client = None
+        self._instagrapi_disabled = False
 
     @property
     def platform_name(self) -> str:
         return "instagram"
 
     def _get_client(self):
+        if self._instagrapi_disabled:
+            return None
         if self._client:
             return self._client
+
+        proxy_url = proxy_manager.proxy_url
+        if proxy_url and not proxy_manager.is_proxy_alive():
+            logger.debug("Instagram: проксі не активний, пропускаємо instagrapi на користь браузера.")
+            return None
 
         try:
             from instagrapi import Client
             cl = Client()
-            proxy_url = proxy_manager.proxy_url
             if proxy_url and proxy_manager.is_proxy_alive():
                 cl.set_proxy(proxy_url)
 
@@ -48,11 +55,13 @@ class InstagramFunnel(BasePlatformFunnel):
                     return cl
                 except Exception as e:
                     logger.warning(f"Не вдалося завантажити instagrapi сесію: {e}")
+                    self._instagrapi_disabled = True
+                    return None
 
-            self._client = cl
-            return cl
+            return None
         except Exception as e:
             logger.debug(f"instagrapi unavailable: {e}")
+            self._instagrapi_disabled = True
             return None
 
     def fetch_recent_unanswered_comments(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
@@ -82,6 +91,7 @@ class InstagramFunnel(BasePlatformFunnel):
                             ))
             except Exception as e:
                 logger.debug(f"Instagram instagrapi fetch comments: {e}")
+                self._instagrapi_disabled = True
 
         # Фолбек на браузерну сесію Playwright якщо через instagrapi повернуто 0
         if not comments:
@@ -323,6 +333,7 @@ class InstagramFunnel(BasePlatformFunnel):
                 return True, None
             except Exception as e:
                 logger.debug(f"Instagrapi DM не спрацював ({e}), перемикаємо на надійний Playwright...")
+                self._instagrapi_disabled = True
 
         # Playwright browser fallback
         state_file = DATA_DIR / "instagram_state.json"
@@ -423,6 +434,7 @@ class InstagramFunnel(BasePlatformFunnel):
                     return True, None
             except Exception as e:
                 logger.debug(f"Instagrapi media_comment не спрацював ({e}), перемикаємо на Playwright...")
+                self._instagrapi_disabled = True
 
         # 2. Playwright браузерний фолбек
         state_file = DATA_DIR / "instagram_state.json"
@@ -485,13 +497,15 @@ class InstagramFunnel(BasePlatformFunnel):
         """Ставить лайк на коментар у публічній стрічці Instagram (API або Playwright)"""
         cl = self._get_client()
         # 1. Спроба через instagrapi API якщо comment_id числовий
-        try:
-            if comment_id and str(comment_id).isdigit():
-                cl.comment_like(int(comment_id))
-                logger.info(f"❤️ [Instagram API] Поставлено лайк на коментар {comment_id}")
-                return True, None
-        except Exception as e:
-            logger.debug(f"Instagram API comment_like: {e}")
+        if cl:
+            try:
+                if comment_id and str(comment_id).isdigit():
+                    cl.comment_like(int(comment_id))
+                    logger.info(f"❤️ [Instagram API] Поставлено лайк на коментар {comment_id}")
+                    return True, None
+            except Exception as e:
+                logger.debug(f"Instagram API comment_like: {e}")
+                self._instagrapi_disabled = True
 
         # 2. Браузерний Playwright фолбек
         state_file = DATA_DIR / "instagram_state.json"
