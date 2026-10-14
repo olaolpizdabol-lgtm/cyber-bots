@@ -260,7 +260,10 @@ class InstagramFunnel(BasePlatformFunnel):
                             viewport={"width": 1280, "height": 800}
                         )
                         page = ctx.new_page()
-                        page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
+                        try:
+                            page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
+                        except Exception as u_goto_err:
+                            logger.debug(f"IG user goto timeout (proceeding): {u_goto_err}")
                         page.wait_for_timeout(2000)
 
                         buttons = [b.inner_text().strip() for b in page.locator('header button, header a').all() if b.inner_text().strip()]
@@ -280,7 +283,10 @@ class InstagramFunnel(BasePlatformFunnel):
 
                         # Якщо кнопки 'Follow Back' немає, але є 'Message'/'Following' — шукаємо в списку підписників
                         if not is_following and any(b.lower() in ["following", "message"] for b in buttons):
-                            page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=15000)
+                            try:
+                                page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=15000)
+                            except Exception as p_goto_err:
+                                logger.debug(f"IG profile goto timeout (proceeding): {p_goto_err}")
                             page.wait_for_timeout(2000)
                             f_link = page.locator('a:has-text("followers")').first
                             if f_link.is_visible():
@@ -316,11 +322,7 @@ class InstagramFunnel(BasePlatformFunnel):
                 logger.info(f"✅ Instagram DM успішно надіслано до @{username}")
                 return True, None
             except Exception as e:
-                err_str = str(e).lower()
-                if "private" in err_str or "restricted" in err_str or "can't send" in err_str or "reach" in err_str:
-                    logger.warning(f"Закритий Direct у @{username}: {e}")
-                    return False, "private_dm"
-                logger.debug(f"Instagrapi DM не спрацював ({e}), спробуємо через Playwright...")
+                logger.debug(f"Instagrapi DM не спрацював ({e}), перемикаємо на надійний Playwright...")
 
         # Playwright browser fallback
         state_file = DATA_DIR / "instagram_state.json"

@@ -480,6 +480,10 @@ class LeadFunnelService:
             u_id = lead["user_id"]
             u_name = lead["username"]
 
+            if has_user_received_lead(platform, u_name):
+                update_lead_status(lead["id"], status="already_converted", is_following=True, dm_sent=True)
+                continue
+
             if handler.is_user_following(u_id, u_name):
                 # Користувач підписався! 🎉
                 logger.info(f"🎉 Користувач @{u_name} ({platform}) щойно підписався! Надсилаємо DM...")
