@@ -32,6 +32,14 @@ class InstagramFunnel(BasePlatformFunnel):
     def platform_name(self) -> str:
         return "instagram"
 
+    def _pause_rejected_session(self, exc):
+        status = getattr(exc, "code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403):
+            self._client = None
+            self._retry_after = time.monotonic() + 300
+            return f"Instagram API authorization rejected (HTTP {status}); paused for 5 minutes"
+        return None
+
     def _get_client(self):
         if time.monotonic() < self._retry_after:
             return None
@@ -234,6 +242,7 @@ class InstagramFunnel(BasePlatformFunnel):
                 if isinstance(followed_by, bool):
                     return followed_by, None
             except Exception as exc:
+                self._pause_rejected_session(exc)
                 logger.warning("Instagram friendship check unavailable: %s", type(exc).__name__)
         state_file = DATA_DIR / "instagram_state.json"
         if state_file.exists() and re.fullmatch(r"[A-Za-z0-9_.]+", username):
@@ -276,8 +285,14 @@ class InstagramFunnel(BasePlatformFunnel):
         client = self._get_client()
         if client is None:
             raise PlatformAccessError("Instagram inbox: session unavailable")
-        threads = [(t, False) for t in client.direct_threads(amount=20, thread_message_limit=10)]
-        threads += [(t, True) for t in client.direct_pending_inbox(amount=20)]
+        try:
+            threads = [(t, False) for t in client.direct_threads(amount=20, thread_message_limit=10)]
+            threads += [(t, True) for t in client.direct_pending_inbox(amount=20)]
+        except Exception as exc:
+            reason = self._pause_rejected_session(exc)
+            if reason:
+                raise PlatformAccessError(reason) from None
+            raise
         seen = set()
         for thread, pending in threads:
             if str(thread.id) in seen or len(thread.users) != 1:
@@ -307,7 +322,10 @@ class InstagramFunnel(BasePlatformFunnel):
         try:
             response = client.direct_send(text, thread_ids=[message.post_id])
             return (True, None) if getattr(response, "id", None) else (False, "delivery_unknown")
-        except Exception:
+        except Exception as exc:
+            reason = self._pause_rejected_session(exc)
+            if reason:
+                return False, reason
             # A timeout may happen after submission; never fall back and send it twice.
             return False, "delivery_unknown"
 
@@ -322,7 +340,10 @@ class InstagramFunnel(BasePlatformFunnel):
         try:
             response = client.direct_send(text, user_ids=[target])
             return (True, None) if getattr(response, "id", None) else (False, "delivery_unknown")
-        except Exception:
+        except Exception as exc:
+            reason = self._pause_rejected_session(exc)
+            if reason:
+                return False, reason
             return False, "delivery_unknown"
 
     def reply_to_comment(self, comment_id: str, text: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:

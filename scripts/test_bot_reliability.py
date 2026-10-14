@@ -348,6 +348,19 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertTrue(messages[0].pending_request)
 
+    def test_instagram_403_stops_requests_and_is_not_unknown_delivery(self):
+        from services.lead_funnel.platforms.instagram import InstagramFunnel
+        from instagrapi.exceptions import ClientForbiddenError
+        handler = InstagramFunnel(); client = Mock()
+        handler._client = client
+        client.direct_send.side_effect = ClientForbiddenError('synthetic rejection', code=403)
+        result = handler.send_direct_message('123', 'visitor', 'vault link')
+        self.assertFalse(result[0])
+        self.assertIn('HTTP 403', result[1])
+        self.assertIsNone(handler._get_client())
+        self.assertFalse(handler.send_direct_message('123', 'visitor', 'vault link')[0])
+        client.direct_send.assert_called_once()
+
     def test_facebook_post_200_without_receipt_is_not_success(self):
         from services.lead_funnel.platforms.facebook import FacebookFunnel
         with patch('services.lead_funnel.platforms.facebook.requests.post') as post, patch('services.lead_funnel.platforms.facebook.FACEBOOK_PAGE_TOKEN', 'test-placeholder'):
