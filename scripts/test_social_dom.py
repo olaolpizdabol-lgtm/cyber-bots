@@ -12,7 +12,7 @@ class FacebookDOMTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
+        cls.browser = cls.playwright.chromium.launch(channel="chromium", headless=True)
 
     @classmethod
     def tearDownClass(cls):

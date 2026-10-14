@@ -100,7 +100,7 @@ class FacebookFunnel(BasePlatformFunnel):
         from playwright.sync_api import sync_playwright
         results = {}
         with BROWSER_LOCK, sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
+            browser = p.chromium.launch(channel="chromium", headless=True, args=CHROME_DOCKER_ARGS)
             try:
                 page = browser.new_page(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US")
                 page.route("**/*", lambda route: route.abort() if route.request.resource_type in ("image", "media", "font") else route.continue_())
@@ -262,7 +262,7 @@ class FacebookFunnel(BasePlatformFunnel):
                 from playwright.sync_api import sync_playwright
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
+                        browser = p.chromium.launch(channel="chromium", headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(
                             storage_state=str(FACEBOOK_STATE_FILE),
                             locale="en-US",
@@ -343,7 +343,7 @@ class FacebookFunnel(BasePlatformFunnel):
                 from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
+                        browser = p.chromium.launch(channel="chromium", headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US", viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
                         target_url = post_id if post_id.startswith("http") else f"https://www.facebook.com{post_id}"
