@@ -62,8 +62,8 @@ class InstagramFunnel(BasePlatformFunnel):
         if cl:
             try:
                 amt = limit_posts if limit_posts is not None else 50
-                user_id = cl.user_id_from_username(INSTAGRAM_USERNAME or "bohdan.gpt")
-                medias = cl.user_medias(user_id, amount=amt)
+                user_id = os.getenv("INSTAGRAM_USER_ID", "36442665203").strip()
+                medias = cl.user_medias(int(user_id) if user_id.isdigit() else user_id, amount=amt)
                 for m in medias:
                     media_id = m.id
                     raw_comms = cl.media_comments(media_id)
@@ -90,7 +90,7 @@ class InstagramFunnel(BasePlatformFunnel):
         return comments
 
     def _fetch_comments_via_browser(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
-        """Парсинг коментарів через Playwright браузерну сесію для ВСІХ публікацій"""
+        """Парсинг коментарів через Playwright браузерну сесію для публікацій"""
         results: List[PlatformComment] = []
         state_file = DATA_DIR / "instagram_state.json"
         if not state_file.exists():
@@ -98,12 +98,16 @@ class InstagramFunnel(BasePlatformFunnel):
 
         try:
             from playwright.sync_api import sync_playwright
-            from core.browser_lock import BROWSER_LOCK
+            from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
             with BROWSER_LOCK:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
+                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                     context = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
                     page = context.new_page()
+                    try:
+                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
+                    except Exception:
+                        pass
                     page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
                     page.wait_for_timeout(2500)
 
@@ -115,7 +119,8 @@ class InstagramFunnel(BasePlatformFunnel):
 
                     raw_links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
                     unique_links = list(dict.fromkeys([l for l in raw_links if l]))
-                    target_links = unique_links if limit_posts is None else unique_links[:limit_posts]
+                    max_posts = 4 if limit_posts is not None else 12
+                    target_links = unique_links[:max_posts]
 
                     for href in target_links:
                         if not href:
@@ -230,10 +235,10 @@ class InstagramFunnel(BasePlatformFunnel):
         if state_file.exists():
             try:
                 from playwright.sync_api import sync_playwright
-                from core.browser_lock import BROWSER_LOCK
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(
                             storage_state=str(state_file),
                             locale="en-US",
@@ -309,11 +314,11 @@ class InstagramFunnel(BasePlatformFunnel):
         state_file = DATA_DIR / "instagram_state.json"
         if state_file.exists():
             try:
-                from core.browser_lock import BROWSER_LOCK
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 from playwright.sync_api import sync_playwright
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(storage_state=str(state_file), viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
 
@@ -403,11 +408,11 @@ class InstagramFunnel(BasePlatformFunnel):
         state_file = DATA_DIR / "instagram_state.json"
         if state_file.exists() and post_id:
             try:
-                from core.browser_lock import BROWSER_LOCK
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 from playwright.sync_api import sync_playwright
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(
                             storage_state=str(state_file),
                             locale="en-US",
@@ -456,10 +461,10 @@ class InstagramFunnel(BasePlatformFunnel):
         if state_file.exists() and post_id:
             try:
                 from playwright.sync_api import sync_playwright
-                from core.browser_lock import BROWSER_LOCK
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(storage_state=str(state_file), locale="en-US", viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
                         target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"

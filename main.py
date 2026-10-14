@@ -320,15 +320,29 @@ async def main():
                 mode_label = "🌐 Глибокий скан (УСІ відео)" if is_deep_sweep else "⚡ Швидкий скан (активні відео)"
                 logger.info(f"Запуск циклу #{cycle_count} воронки: {mode_label}...")
 
-                for platform in ["instagram", "facebook", "tiktok", "youtube"]:
+                for platform in ["facebook", "instagram", "tiktok", "youtube"]:
                     try:
-                        await loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit)
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, lead_funnel_service.process_platform_comments, platform, limit),
+                            timeout=180
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"⚠️ [Lead Funnel] {platform} тайм-аут (180с)! Захист від зависання активовано. Переходимо до наступної платформи.")
+                        from core.browser_lock import BROWSER_LOCK
+                        if BROWSER_LOCK.locked():
+                            BROWSER_LOCK.release()
                     except Exception as pe:
                         logger.debug(f"Lead funnel {platform} poll: {pe}")
 
-                converted = await loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads)
-                if converted > 0:
-                    logger.info(f"🎉 Lead Funnel: успішно конвертовано {converted} нових підписників!")
+                try:
+                    converted = await asyncio.wait_for(
+                        loop.run_in_executor(None, lead_funnel_service.recheck_pending_leads),
+                        timeout=120
+                    )
+                    if converted > 0:
+                        logger.info(f"🎉 Lead Funnel: успішно конвертовано {converted} нових підписників!")
+                except Exception as ce:
+                    logger.debug(f"Lead funnel recheck_pending_leads: {ce}")
 
                 await asyncio.sleep(600)
             except asyncio.CancelledError:

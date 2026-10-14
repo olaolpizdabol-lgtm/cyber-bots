@@ -52,6 +52,8 @@ def main():
         ("credentials/youtube_token.json", "YOUTUBE_TOKEN_B64", False),
         ("credentials/youtube_client_secrets.json", "YOUTUBE_SECRETS_B64", False),
         ("credentials/instagram_session.json", "INSTAGRAM_SESSION_B64", False),
+        ("data/instagram_state.json", "INSTAGRAM_STATE_B64", False),
+        ("data/facebook_state.json", "FACEBOOK_STATE_B64", False),
         ("data/tiktok_channel_state.json", "TIKTOK_CHANNEL_STATE_B64", True),
         ("data/tiktok_state.json", "TIKTOK_STATE_B64", True),
         ("data/snapchat_state.json", "SNAPCHAT_STATE_B64", False),

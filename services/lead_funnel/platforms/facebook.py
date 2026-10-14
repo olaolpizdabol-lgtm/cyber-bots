@@ -15,7 +15,7 @@ import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 
-from core.browser_lock import BROWSER_LOCK
+from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
 from services.proxy_manager import proxy_manager
 from services.lead_funnel.platforms.base import BasePlatformFunnel, PlatformComment
 from config import BASE_DIR, DATA_DIR, TEMP_DIR
@@ -121,7 +121,7 @@ class FacebookFunnel(BasePlatformFunnel):
             from playwright.sync_api import sync_playwright
             with BROWSER_LOCK:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
+                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                     context_kwargs = {
                         "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "locale": "en-US",
@@ -136,6 +136,10 @@ class FacebookFunnel(BasePlatformFunnel):
                         context = browser.new_context(**context_kwargs)
 
                     page = context.new_page()
+                    try:
+                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["media", "font"] else route.continue_())
+                    except Exception:
+                        pass
 
                     # 1. Спершу скануємо головну стіну сторінки (де Facebook відкрито відображає всі останні коментарі)
                     wall_url = f"https://www.facebook.com/{FACEBOOK_PAGE_ID}"
@@ -421,11 +425,11 @@ class FacebookFunnel(BasePlatformFunnel):
         # 2. Браузерна публікація через Playwright
         if FACEBOOK_STATE_FILE.exists():
             try:
-                from core.browser_lock import BROWSER_LOCK
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 from playwright.sync_api import sync_playwright
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(
                             storage_state=str(FACEBOOK_STATE_FILE),
                             locale="en-US",
@@ -496,11 +500,11 @@ class FacebookFunnel(BasePlatformFunnel):
             return False, str(proof_path)
 
         try:
-            from core.browser_lock import BROWSER_LOCK
+            from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
             from playwright.sync_api import sync_playwright
             with BROWSER_LOCK:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
+                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                     ctx = browser.new_context(
                         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         locale="en-US",
@@ -544,9 +548,10 @@ class FacebookFunnel(BasePlatformFunnel):
         if post_id and FACEBOOK_STATE_FILE.exists():
             try:
                 from playwright.sync_api import sync_playwright
+                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
                 with BROWSER_LOCK:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
+                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
                         ctx = browser.new_context(storage_state=str(FACEBOOK_STATE_FILE), locale="en-US", viewport={"width": 1280, "height": 800})
                         page = ctx.new_page()
                         target_url = post_id if post_id.startswith("http") else f"https://www.facebook.com{post_id}"
