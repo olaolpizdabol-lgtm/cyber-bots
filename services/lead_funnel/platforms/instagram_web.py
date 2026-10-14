@@ -16,6 +16,8 @@ from .facebook_web import graphql_chunks, walk_nodes
 # shortcut: Web query documents observed on 2026-10-14; refresh them when Instagram changes its client.
 QUERIES = json.loads(Path(__file__).with_name("instagram_queries.json").read_text())
 SEND_TEXT = "26911679871773184"
+_auth_retry_after = 0.0
+AUTH_RESTRICTION = "Instagram requires account verification or a new login in Chrome Bohdan; checks paused for 5 minutes"
 
 
 class InstagramWeb:
@@ -173,6 +175,9 @@ class InstagramWeb:
 
 @contextmanager
 def instagram_web():
+    global _auth_retry_after
+    if time.monotonic() < _auth_retry_after:
+        raise PlatformAccessError(AUTH_RESTRICTION)
     state = DATA_DIR / "instagram_state.json"
     if not state.exists():
         raise PlatformAccessError("Instagram browser session missing")
@@ -187,8 +192,9 @@ def instagram_web():
                 const response = await fetch('/direct/inbox/', {signal: AbortSignal.timeout(25000)});
                 return {status: response.status, url: response.url, text: await response.text()};
             }""")
-            if response["status"] != 200 or "login" in response["url"]:
-                raise PlatformAccessError("Instagram session needs a new login in Chrome Bohdan")
+            if response["status"] != 200 or "login" in response["url"] or "suspended" in response["url"]:
+                _auth_retry_after = time.monotonic() + 300
+                raise PlatformAccessError(AUTH_RESTRICTION)
             modules = {}
             for name in ("DTSGInitialData", "LSD", "PolarisViewer"):
                 match = re.search(r'\["' + name + r'",\[\],(\{.*?\}),\d+\]', response["text"])
@@ -197,9 +203,10 @@ def instagram_web():
             cookies = {c["name"]: c["value"] for c in context.cookies()
                 if c["domain"].lstrip(".") in ("instagram.com", "www.instagram.com")}
             viewer = modules.get("PolarisViewer", {}).get("data") or {}
-            if (not viewer.get("id") or viewer["id"] != cookies.get("ds_user_id")
+            if (not viewer.get("id") or str(viewer["id"]) != cookies.get("ds_user_id")
                     or viewer.get("username") != (INSTAGRAM_USERNAME or "bohdan.gpt")):
-                raise PlatformAccessError("Instagram session needs a new login in Chrome Bohdan")
+                _auth_retry_after = time.monotonic() + 300
+                raise PlatformAccessError(AUTH_RESTRICTION)
             fields = {"fb_dtsg": modules.get("DTSGInitialData", {}).get("token"),
                 "lsd": modules.get("LSD", {}).get("token")}
             if not all(fields.values()) or not cookies.get("csrftoken"):

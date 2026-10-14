@@ -68,6 +68,16 @@ class InstagramWebTests(unittest.TestCase):
         self.assertEqual(result, (False, 'delivery_unknown'))
         self.web.send_text.assert_called_once_with('vault', thread=None, recipient='123')
 
+    def test_restricted_account_backoff_does_not_open_more_browsers(self):
+        self.patch.stop()
+        from services.lead_funnel.platforms import instagram_web as module
+        from services.lead_funnel.platforms.base import PlatformAccessError
+        with patch.object(module, '_auth_retry_after', float('inf')), patch('playwright.sync_api.sync_playwright') as browser:
+            with self.assertRaisesRegex(PlatformAccessError, 'account verification'):
+                with module.instagram_web():
+                    self.fail('Restricted session must not be used')
+            browser.assert_not_called()
+
     def test_comment_requires_owned_post_and_parent_receipt(self):
         self.web.api.return_value = {'items': [{'user': {'pk': 'another-owner'}}]}
         self.assertEqual(self.handler._reply_web_comment('100', 'follow first', '200'), (False, 'post_owner_mismatch'))
