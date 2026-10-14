@@ -119,6 +119,7 @@ class FunnelTests(unittest.TestCase):
         from playwright.sync_api import Error
         playwright = Mock(); browser = playwright.chromium.launch.return_value
         browser.new_page.return_value.goto.side_effect = Error('Page.goto: Page crashed')
+        browser.close.side_effect = Error('Browser already exited')
         with patch('playwright.sync_api.sync_playwright') as runtime, patch('core.mem_guard.get_oom_kill_count', return_value=3), patch('core.mem_guard.get_free_memory_mb', return_value=500), patch('services.lead_funnel.platforms.facebook.FACEBOOK_STATE_FILE') as state:
             runtime.return_value.__enter__.return_value = playwright
             state.exists.return_value = True

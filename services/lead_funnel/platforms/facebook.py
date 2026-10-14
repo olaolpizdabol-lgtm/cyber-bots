@@ -132,7 +132,10 @@ class FacebookFunnel(BasePlatformFunnel):
                     raise PlatformAccessError(f"Facebook page crashed; container OOM kills={get_oom_kill_count()}, free memory={get_free_memory_mb()} MB") from None
                 raise
             finally:
-                browser.close()
+                try:
+                    browser.close()
+                except Exception:
+                    pass  # Preserve the original scan failure if Chromium has already exited.
 
     @staticmethod
     def _read_post_previews(page):
