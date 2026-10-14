@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services.lead_funnel.platforms.instagram import InstagramFunnel
-from services.lead_funnel.platforms.instagram_web import InstagramWeb
+from services.lead_funnel.platforms.instagram_web import InstagramWeb, auth_restriction_reason, AUTH_RESTRICTION
 from services.lead_funnel.platforms.base import PlatformComment
 
 
@@ -99,6 +99,14 @@ class InstagramWebTests(unittest.TestCase):
                 with module.instagram_web():
                     self.fail('Restricted session must not be used')
             browser.assert_not_called()
+
+    def test_auth_report_identifies_required_action_without_challenge_tokens(self):
+        for path, expected in [('update_risky_contactpoint', 'email update/verification'),
+                               ('suspended', 'human verification'), ('login', 'a new login')]:
+            reason = auth_restriction_reason(f'https://www.instagram.com/accounts/{path}/?challenge_context=private-test-only')
+            self.assertIn(expected, reason)
+            self.assertNotIn('private-test-only', reason)
+        self.assertEqual(auth_restriction_reason('https://www.instagram.com/direct/inbox/?next=/accounts/login/'), AUTH_RESTRICTION)
 
     def test_comment_requires_owned_post_and_parent_receipt(self):
         self.web.api.return_value = {'items': [{'user': {'pk': 'another-owner'}}]}

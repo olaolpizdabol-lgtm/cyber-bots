@@ -6,7 +6,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from config import DATA_DIR, INSTAGRAM_USERNAME
 from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
@@ -18,6 +18,22 @@ QUERIES = json.loads(Path(__file__).with_name("instagram_queries.json").read_tex
 SEND_TEXT = "26911679871773184"
 _auth_retry_after = 0.0
 AUTH_RESTRICTION = "Instagram requires account verification or a new login in Chrome Bohdan; checks paused for 5 minutes"
+_auth_restriction_reason = AUTH_RESTRICTION
+
+
+def auth_restriction_reason(url):
+    path = urlsplit(url).path
+    if path.startswith("/accounts/update_risky_contactpoint/"):
+        reason = "email update/verification"
+    elif path.startswith("/accounts/suspended/"):
+        reason = "human verification"
+    elif path.startswith("/accounts/login/"):
+        reason = "a new login"
+    elif path.startswith("/challenge/") or path.startswith("/checkpoint/"):
+        reason = "a security check"
+    else:
+        return AUTH_RESTRICTION
+    return f"Instagram requires {reason} in Chrome Bohdan; checks paused for 5 minutes"
 
 
 class InstagramWeb:
@@ -175,9 +191,9 @@ class InstagramWeb:
 
 @contextmanager
 def instagram_web():
-    global _auth_retry_after
+    global _auth_retry_after, _auth_restriction_reason
     if time.monotonic() < _auth_retry_after:
-        raise PlatformAccessError(AUTH_RESTRICTION)
+        raise PlatformAccessError(_auth_restriction_reason)
     state = DATA_DIR / "instagram_state.json"
     if not state.exists():
         raise PlatformAccessError("Instagram browser session missing")
@@ -192,9 +208,11 @@ def instagram_web():
                 const response = await fetch('/direct/inbox/', {signal: AbortSignal.timeout(25000)});
                 return {status: response.status, url: response.url, text: await response.text()};
             }""")
-            if response["status"] != 200 or "login" in response["url"] or "suspended" in response["url"]:
+            reason = auth_restriction_reason(response["url"])
+            if response["status"] != 200 or reason != AUTH_RESTRICTION:
                 _auth_retry_after = time.monotonic() + 300
-                raise PlatformAccessError(AUTH_RESTRICTION)
+                _auth_restriction_reason = reason
+                raise PlatformAccessError(reason)
             modules = {}
             for name in ("DTSGInitialData", "LSD", "PolarisViewer"):
                 match = re.search(r'\["' + name + r'",\[\],(\{.*?\}),\d+\]', response["text"])
@@ -206,6 +224,7 @@ def instagram_web():
             if (not viewer.get("id") or str(viewer["id"]) != cookies.get("ds_user_id")
                     or viewer.get("username") != (INSTAGRAM_USERNAME or "bohdan.gpt")):
                 _auth_retry_after = time.monotonic() + 300
+                _auth_restriction_reason = AUTH_RESTRICTION
                 raise PlatformAccessError(AUTH_RESTRICTION)
             fields = {"fb_dtsg": modules.get("DTSGInitialData", {}).get("token"),
                 "lsd": modules.get("LSD", {}).get("token")}
