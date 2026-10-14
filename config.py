@@ -36,12 +36,20 @@ CHANNEL_AUTOMATION_BOT_TOKEN = (
 )
 TELEGRAM_BOT_TOKEN = CHANNEL_AUTOMATION_BOT_TOKEN  # Зворотна сумісність
 
-ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_TELEGRAM_USER_IDS", "").strip()
+ALLOWED_USER_IDS_RAW = (
+    os.getenv("ALLOWED_TELEGRAM_USER_IDS", "").strip()
+    or os.getenv("ALLOWED_USER_IDS", "").strip()
+    or os.getenv("TELEGRAM_USER_ID", "").strip()
+    or os.getenv("ADMIN_USER_ID", "").strip()
+    or "1929970467"
+)
 ALLOWED_USER_IDS = [
     int(uid.strip())
     for uid in ALLOWED_USER_IDS_RAW.split(",")
     if uid.strip().isdigit()
 ]
+if not ALLOWED_USER_IDS:
+    ALLOWED_USER_IDS = [1929970467]
 TELEGRAM_TARGET_CHANNEL_ID = os.getenv("TELEGRAM_TARGET_CHANNEL_ID", "").strip()
 
 # Google Gemini AI

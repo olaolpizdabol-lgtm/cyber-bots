@@ -27,10 +27,14 @@ from services.lead_funnel.platforms.facebook import facebook_funnel
 from services.lead_funnel.platforms.tiktok import tiktok_funnel
 from services.lead_funnel.platforms.youtube import youtube_funnel
 import requests
-from config import CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS
+from config import (
+    CHANNEL_AUTOMATION_BOT_TOKEN,
+    TELEGRAM_BOT_TOKEN,
+    CYBER_RIZHYI_BOT_TOKEN,
+    ALLOWED_USER_IDS
+)
 
 logger = logging.getLogger("funnel_service")
-
 
 import json
 from pathlib import Path
@@ -38,65 +42,110 @@ from pathlib import Path
 
 def notify_telegram_lead(html_text: str, photo_paths: Optional[List[str]] = None):
     """Надсилає Telegram сповіщення власнику бота разом зі скріншотами коментаря та перевірки підписки"""
-    token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
-    if not token or not ALLOWED_USER_IDS:
+    candidate_tokens = []
+    for tok in [CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, CYBER_RIZHYI_BOT_TOKEN]:
+        if tok and not tok.startswith("123456789:") and tok not in candidate_tokens:
+            candidate_tokens.append(tok)
+
+    if not candidate_tokens:
+        logger.warning("⚠️ Не налаштовано жодного валідного Telegram токена для сповіщень!")
         return
 
+    target_uids = [uid for uid in ALLOWED_USER_IDS if uid] or [1929970467]
     valid_photos = [p for p in (photo_paths or []) if p and Path(p).exists()]
 
-    for uid in ALLOWED_USER_IDS:
-        sent_ok = False
-        if valid_photos:
-            try:
-                if len(valid_photos) == 1:
-                    with open(valid_photos[0], "rb") as f:
-                        r = requests.post(
-                            f"https://api.telegram.org/bot{token}/sendPhoto",
-                            data={"chat_id": uid, "caption": html_text, "parse_mode": "HTML"},
-                            files={"photo": f},
-                            timeout=12
-                        )
-                        if r.status_code == 200:
-                            sent_ok = True
-                else:
-                    files = {}
-                    media = []
-                    for idx, p_path in enumerate(valid_photos[:5]):
-                        files[f"photo{idx}"] = open(p_path, "rb")
-                        m_item = {"type": "photo", "media": f"attach://photo{idx}"}
-                        if idx == 0:
-                            m_item["caption"] = html_text
-                            m_item["parse_mode"] = "HTML"
-                        media.append(m_item)
-                    try:
-                        r = requests.post(
-                            f"https://api.telegram.org/bot{token}/sendMediaGroup",
-                            data={"chat_id": uid, "media": json.dumps(media)},
-                            files=files,
-                            timeout=15
-                        )
-                        if r.status_code == 200:
-                            sent_ok = True
-                    finally:
-                        for f in files.values():
-                            f.close()
-            except Exception as photo_err:
-                logger.warning(f"Telegram notification photo error: {photo_err}")
+    for uid in target_uids:
+        delivered = False
+        for token in candidate_tokens:
+            if delivered:
+                break
 
-        if not sent_ok:
-            try:
-                requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={
-                        "chat_id": uid,
-                        "text": html_text,
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": True
-                    },
-                    timeout=8
-                )
-            except Exception as e:
-                logger.error(f"Telegram notification sendMessage error: {e}")
+            # 1. Спроба відправити фото
+            if valid_photos:
+                try:
+                    if len(valid_photos) == 1:
+                        caption = html_text[:1020]
+                        with open(valid_photos[0], "rb") as f:
+                            r = requests.post(
+                                f"https://api.telegram.org/bot{token}/sendPhoto",
+                                data={"chat_id": uid, "caption": caption, "parse_mode": "HTML"},
+                                files={"photo": f},
+                                timeout=12
+                            )
+                            if r.status_code == 200:
+                                delivered = True
+                                logger.info(f"✅ [Telegram Lead Notify] Фото-звіт доставлено до {uid} через бот {token[:10]}...")
+                                break
+                            else:
+                                logger.debug(f"sendPhoto status {r.status_code}: {r.text}")
+                    else:
+                        files = {}
+                        media = []
+                        for idx, p_path in enumerate(valid_photos[:5]):
+                            files[f"photo{idx}"] = open(p_path, "rb")
+                            m_item = {"type": "photo", "media": f"attach://photo{idx}"}
+                            if idx == 0:
+                                m_item["caption"] = html_text[:1020]
+                                m_item["parse_mode"] = "HTML"
+                            media.append(m_item)
+                        try:
+                            r = requests.post(
+                                f"https://api.telegram.org/bot{token}/sendMediaGroup",
+                                data={"chat_id": uid, "media": json.dumps(media)},
+                                files=files,
+                                timeout=15
+                            )
+                            if r.status_code == 200:
+                                delivered = True
+                                logger.info(f"✅ [Telegram Lead Notify] Медіагрупу доставлено до {uid} через бот {token[:10]}...")
+                                break
+                            else:
+                                logger.debug(f"sendMediaGroup status {r.status_code}: {r.text}")
+                        finally:
+                            for f in files.values():
+                                f.close()
+                except Exception as photo_err:
+                    logger.debug(f"Telegram notification photo error: {photo_err}")
+
+            # 2. Спроба текстового повідомлення (HTML)
+            if not delivered:
+                try:
+                    r = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={
+                            "chat_id": uid,
+                            "text": html_text,
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": True
+                        },
+                        timeout=8
+                    )
+                    if r.status_code == 200:
+                        delivered = True
+                        logger.info(f"✅ [Telegram Lead Notify] Повідомлення доставлено до {uid} через бот {token[:10]}...")
+                        break
+                    else:
+                        logger.debug(f"sendMessage HTML error {r.status_code}: {r.text}")
+                        # Фолбек на чистий текст (якщо в html_text був невалідний тег)
+                        clean_plain = re.sub(r"<[^>]+>", "", html_text)
+                        r2 = requests.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={
+                                "chat_id": uid,
+                                "text": clean_plain,
+                                "disable_web_page_preview": True
+                            },
+                            timeout=8
+                        )
+                        if r2.status_code == 200:
+                            delivered = True
+                            logger.info(f"✅ [Telegram Lead Notify] Plain-text повідомлення доставлено до {uid}")
+                            break
+                except Exception as e:
+                    logger.debug(f"Telegram notification sendMessage error: {e}")
+
+        if not delivered:
+            logger.warning(f"⚠️ [Telegram Lead Notify] Не вдалося доставити сповіщення користувачу {uid} через жоден бот.")
 
 
 # Варіанти відповідей у коментарях для підписаних користувачів (Spintax / рандомізація проти спам-фільтрів)

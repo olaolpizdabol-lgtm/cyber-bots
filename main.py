@@ -184,18 +184,21 @@ async def main():
                         logger.warning(f"Не вдалося зберегти slots_file: {se}")
                     # Відправляємо кєнтам (дівчина фільтрується автоматично)
                     res = await tiktok_streak_service.run_streaks_dispatch(force_all=True, friends_only=True)
-                    if ALLOWED_USER_IDS and res.get("sent_count", 0) > 0:
-                        for uid in ALLOWED_USER_IDS:
+                    target_uids = [uid for uid in ALLOWED_USER_IDS if uid] or [1929970467]
+                    sent_cnt = res.get("sent_count", 0)
+                    logger.info(f"Слот {due_slot}: опрацьовано {sent_cnt} контактів друзів.")
+                    if sent_cnt > 0:
+                        for uid in target_uids:
                             try:
                                 await bot.send_message(
                                     uid,
                                     f"🔥 <b>Звіт TikTok вогників та новин Чернівців!</b>\n"
                                     f"Слот: {due_slot} (Київ)\n"
-                                    f"Успішно опрацьовано: {res['sent_count']} контактів.",
+                                    f"Успішно опрацьовано: {sent_cnt} контактів.",
                                     parse_mode="HTML"
                                 )
-                            except Exception:
-                                pass
+                            except Exception as be:
+                                logger.debug(f"Помилка відправки звіту вогника: {be}")
 
                 # Періодична перевірка вхідних TikTok відео кожні 15 хвилин
                 if now_kyiv.minute % 15 == 0 and last_react_check_minute != now_kyiv.minute:

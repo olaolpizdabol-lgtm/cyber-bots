@@ -213,19 +213,41 @@ class TikTokStreakService:
 
     def _notify_admin_telegram(self, text: str):
         """Надсилає оперативне сповіщення адміністраторам у Telegram через Bot API"""
-        token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
-        if not token or token.startswith("123456789:") or not ALLOWED_USER_IDS:
+        from config import CYBER_RIZHYI_BOT_TOKEN
+        candidate_tokens = []
+        for tok in [CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, CYBER_RIZHYI_BOT_TOKEN]:
+            if tok and not tok.startswith("123456789:") and tok not in candidate_tokens:
+                candidate_tokens.append(tok)
+
+        if not candidate_tokens:
             return
+
         import requests
-        for uid in ALLOWED_USER_IDS:
-            try:
-                requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": uid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
-                    timeout=5
-                )
-            except Exception as e:
-                logger.debug(f"Не вдалося надіслати сповіщення вогника в Telegram: {e}")
+        target_uids = [uid for uid in ALLOWED_USER_IDS if uid] or [1929970467]
+
+        for uid in target_uids:
+            for token in candidate_tokens:
+                try:
+                    r = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": uid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+                        timeout=6
+                    )
+                    if r.status_code == 200:
+                        logger.info(f"✅ [TikTok Admin Notify] Доставлено до {uid}")
+                        break
+                    else:
+                        clean_plain = re.sub(r"<[^>]+>", "", text)
+                        r2 = requests.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={"chat_id": uid, "text": clean_plain, "disable_web_page_preview": True},
+                            timeout=6
+                        )
+                        if r2.status_code == 200:
+                            logger.info(f"✅ [TikTok Admin Notify] Plain-text доставлено до {uid}")
+                            break
+                except Exception as e:
+                    logger.debug(f"Не вдалося надіслати сповіщення вогника в Telegram: {e}")
 
     async def _send_via_playwright(self, username: str, message_text: str, session_id: str) -> Tuple[bool, Optional[str]]:
         """

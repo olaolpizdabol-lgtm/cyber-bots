@@ -53,23 +53,48 @@ class InstagramDMMonitor:
             return None
 
     def _notify_telegram(self, html_text: str):
-        token = CHANNEL_AUTOMATION_BOT_TOKEN or TELEGRAM_BOT_TOKEN
-        if not token or not ALLOWED_USER_IDS:
+        from config import CYBER_RIZHYI_BOT_TOKEN
+        candidate_tokens = []
+        for tok in [CHANNEL_AUTOMATION_BOT_TOKEN, TELEGRAM_BOT_TOKEN, CYBER_RIZHYI_BOT_TOKEN]:
+            if tok and not tok.startswith("123456789:") and tok not in candidate_tokens:
+                candidate_tokens.append(tok)
+
+        if not candidate_tokens:
             return
-        for uid in ALLOWED_USER_IDS:
-            try:
-                requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={
-                        "chat_id": uid,
-                        "text": html_text,
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": False
-                    },
-                    timeout=8
-                )
-            except Exception as e:
-                logger.debug(f"Не вдалося відправити Telegram сповіщення Instagram: {e}")
+
+        target_uids = [uid for uid in ALLOWED_USER_IDS if uid] or [1929970467]
+        for uid in target_uids:
+            for token in candidate_tokens:
+                try:
+                    r = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={
+                            "chat_id": uid,
+                            "text": html_text,
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": False
+                        },
+                        timeout=8
+                    )
+                    if r.status_code == 200:
+                        logger.info(f"✅ [Instagram DM Notify] Доставлено до {uid}")
+                        break
+                    else:
+                        clean_plain = re.sub(r"<[^>]+>", "", html_text)
+                        r2 = requests.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={
+                                "chat_id": uid,
+                                "text": clean_plain,
+                                "disable_web_page_preview": False
+                            },
+                            timeout=8
+                        )
+                        if r2.status_code == 200:
+                            logger.info(f"✅ [Instagram DM Notify] Plain-text доставлено до {uid}")
+                            break
+                except Exception as e:
+                    logger.debug(f"Не вдалося відправити Telegram сповіщення Instagram: {e}")
 
     def _get_forwarded_ids(self) -> set:
         if GF_TRACKER_FILE.exists():
