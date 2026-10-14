@@ -225,7 +225,7 @@ class InstagramFunnel(BasePlatformFunnel):
         logger.info("Instagram web inbox: %s incoming messages", len(messages))
         return messages
 
-    def _send_web_message(self, text, user_id, username, thread_key=None):
+    def _send_web_message(self, text, user_id, username, thread_key=None, source_message_id=None):
         from .instagram_web import instagram_web
         if time.monotonic() < self._retry_after:
             return False, "authorization_paused"
@@ -252,8 +252,11 @@ class InstagramFunnel(BasePlatformFunnel):
                     users = thread.get("users") or []
                     if len(users) != 1 or str(users[0].get("pk")) != str(user_id) or users[0].get("username") != username:
                         return False, "recipient_mismatch"
-                    if any(web.is_own_message(m) and m.get("text_body") == text for m in web.messages(thread)):
-                        return True, None
+                    for m in web.messages(thread):
+                        if source_message_id and (m.get("message_id") or m.get("id")) == source_message_id:
+                            break
+                        if web.is_own_message(m) and m.get("text_body") == text:
+                            return True, None
                     if thread.get("system_folder") == "PENDING":
                         if not web.accept_request(thread):
                             return False, "request_not_accepted"
@@ -286,13 +289,16 @@ class InstagramFunnel(BasePlatformFunnel):
     def reply_to_direct_message(self, message, text):
         client = self._get_client()
         if client is None:
-            return self._send_web_message(text, message.user_id, message.username, message.post_id)
+            return self._send_web_message(text, message.user_id, message.username, message.post_id, message.comment_id)
         try:
             thread = client.direct_thread(message.post_id, amount=20)
             if len(thread.users) != 1 or str(thread.users[0].pk) != str(message.user_id):
                 return False, "recipient_mismatch"
-            if any(str(m.user_id) == str(client.user_id) and m.text == text for m in thread.messages):
-                return True, None
+            for m in thread.messages:
+                if str(m.id) == str(message.comment_id):
+                    break
+                if str(m.user_id) == str(client.user_id) and m.text == text:
+                    return True, None
             if message.pending_request or getattr(thread, "pending", False) is True:
                 if client.direct_pending_approve(message.post_id) is not True:
                     return False, "request_not_accepted"

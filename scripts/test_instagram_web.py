@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services.lead_funnel.platforms.instagram import InstagramFunnel
 from services.lead_funnel.platforms.instagram_web import InstagramWeb
+from services.lead_funnel.platforms.base import PlatformComment
 
 
 class InstagramWebTests(unittest.TestCase):
@@ -49,6 +50,27 @@ class InstagramWebTests(unittest.TestCase):
     def test_existing_own_message_is_not_repeated(self):
         self.web.messages.return_value = [{'text_body': 'vault'}]; self.web.is_own_message.return_value = True
         self.assertEqual(self.send(), (True, None))
+        self.web.send_text.assert_not_called()
+
+    def test_old_identical_reply_does_not_answer_a_new_incoming_dm(self):
+        message = PlatformComment('new-incoming', 'key', None, '123', 'visitor', 'hello again')
+        incoming = {'message_id': 'new-incoming', 'text_body': 'hello again'}
+        old = {'message_id': 'old-reply', 'text_body': 'vault', 'own': True}
+        sent = {'message_id': 'new-reply', 'text_body': 'vault', 'own': True}
+        self.web.is_own_message.side_effect = lambda m: m.get('own', False)
+        self.web.messages.side_effect = [[incoming, old], [sent, incoming, old]]
+        self.web.send_text.return_value = 'new-reply'
+        with patch.object(self.handler, '_get_client', return_value=None):
+            self.assertEqual(self.handler.reply_to_direct_message(message, 'vault'), (True, None))
+        self.web.send_text.assert_called_once()
+
+    def test_reply_after_this_incoming_dm_is_not_resent(self):
+        message = PlatformComment('incoming', 'key', None, '123', 'visitor', 'hello')
+        self.web.messages.return_value = [{'message_id': 'reply', 'text_body': 'vault', 'own': True},
+            {'message_id': 'incoming', 'text_body': 'hello'}]
+        self.web.is_own_message.side_effect = lambda m: m.get('own', False)
+        with patch.object(self.handler, '_get_client', return_value=None):
+            self.assertEqual(self.handler.reply_to_direct_message(message, 'vault'), (True, None))
         self.web.send_text.assert_not_called()
 
     def test_send_requires_receipt_and_correct_readback(self):

@@ -362,6 +362,21 @@ class PlatformTests(unittest.TestCase):
             client.direct_send.return_value = SimpleNamespace(id='confirmed')
             self.assertEqual(handler.reply_to_direct_message(message, 'link'), (True, None))
 
+    def test_instagram_sdk_does_not_reuse_reply_before_new_message(self):
+        from services.lead_funnel.platforms.instagram import InstagramFunnel
+        handler = InstagramFunnel(); client = Mock(user_id='owner')
+        incoming = SimpleNamespace(id='incoming', user_id='visitor', text='hello again')
+        old = SimpleNamespace(id='old', user_id='owner', text='link')
+        client.direct_thread.return_value = SimpleNamespace(users=[SimpleNamespace(pk='visitor')], messages=[incoming, old])
+        client.direct_send.return_value = SimpleNamespace(id='new-reply')
+        message = PlatformComment('incoming', 't', None, 'visitor', 'visitor', 'hello again')
+        with patch.object(handler, '_get_client', return_value=client):
+            self.assertEqual(handler.reply_to_direct_message(message, 'link'), (True, None))
+            client.direct_send.assert_called_once()
+            client.direct_thread.return_value.messages = [old, incoming]
+            self.assertEqual(handler.reply_to_direct_message(message, 'link'), (True, None))
+            client.direct_send.assert_called_once()
+
     def test_instagram_inbox_skips_own_messages_and_groups(self):
         from services.lead_funnel.platforms.instagram import InstagramFunnel
         handler = InstagramFunnel(); client = Mock()
