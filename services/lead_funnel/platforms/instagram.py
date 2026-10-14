@@ -9,7 +9,6 @@ Supports:
 """
 import os
 import json
-import re
 import time
 import logging
 from pathlib import Path
@@ -24,7 +23,6 @@ logger = logging.getLogger("instagram_funnel")
 
 class InstagramFunnel(BasePlatformFunnel):
     def __init__(self):
-        self._comment_targets = {}
         self._client = None
         self._retry_after = 0.0
 
@@ -49,6 +47,14 @@ class InstagramFunnel(BasePlatformFunnel):
         if self._client:
             return self._client
 
+        session_path = Path(INSTAGRAM_SESSION_FILE)
+        if session_path.exists():
+            try:
+                if isinstance(json.loads(session_path.read_text()).get("cookies"), list):
+                    return None
+            except (OSError, ValueError):
+                return None
+
         proxy_url = proxy_manager.proxy_url
         if proxy_url and not proxy_manager.is_proxy_alive():
             logger.warning("Instagram proxy unavailable; using the same direct connection as browser fallback")
@@ -65,9 +71,8 @@ class InstagramFunnel(BasePlatformFunnel):
                 try:
                     session = json.loads(session_path.read_text())
                     if isinstance(session.get("cookies"), list):
-                        session_id = next((c["value"] for c in session["cookies"] if c.get("name") == "sessionid" and c.get("domain", "").lstrip(".") in ("instagram.com", "www.instagram.com")), None)
-                        if not session_id or not cl.login_by_sessionid(session_id):
-                            return None
+                        # Chrome cookies belong to the web client; a mobile login can invalidate them.
+                        return None
                     else:
                         cl.load_settings(str(session_path))
                     self._client = cl
@@ -119,118 +124,28 @@ class InstagramFunnel(BasePlatformFunnel):
         return comments
 
     def _fetch_comments_via_browser(self, limit_posts: Optional[int] = None) -> List[PlatformComment]:
-        """Парсинг коментарів через Playwright браузерну сесію для публікацій"""
-        results: List[PlatformComment] = []
-        state_file = DATA_DIR / "instagram_state.json"
-        if not state_file.exists():
-            raise PlatformAccessError("Instagram browser session missing")
-
-        try:
-            from playwright.sync_api import sync_playwright
-            from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
-            with BROWSER_LOCK:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                    context = browser.new_context(
-                        storage_state=str(state_file),
-                        viewport={"width": 1280, "height": 800},
-                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                        locale="en-US"
-                    )
-                    page = context.new_page()
-                    try:
-                        page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=18000)
-                    except Exception as p_goto_err:
-                        logger.debug(f"IG profile goto timeout (proceeding to DOM check): {p_goto_err}")
-
-                    try:
-                        page.locator('a[href*="/p/"], a[href*="/reel/"]').first.wait_for(timeout=12000)
-                    except Exception:
-                        page.wait_for_timeout(3000)
-
-                    # Якщо потрібно просканувати всі пости — скролимо профіль
-                    if limit_posts is None or limit_posts > 12:
-                        for _ in range(8):
-                            page.mouse.wheel(0, 2500)
-                            page.wait_for_timeout(700)
-
-                    raw_links = [a.get_attribute("href") for a in page.locator('a[href*="/p/"], a[href*="/reel/"]').all()]
-                    unique_links = list(dict.fromkeys([l for l in raw_links if l and ('/p/' in l or '/reel/' in l)]))
-                    if not unique_links:
-                        raise PlatformAccessError("Instagram posts unavailable; check session and page layout")
-                    max_posts = limit_posts if limit_posts is not None else len(unique_links)
-                    target_links = unique_links[:max_posts]
-
-                    for href in target_links:
-                        if not href:
-                            continue
-                        shortcode = href.strip("/").split("/")[-1]
-                        href = f"/p/{shortcode}/"
-                        post_url = f"https://www.instagram.com{href}"
-                        try:
-                            try:
-                                page.goto(post_url, wait_until="domcontentloaded", timeout=18000)
-                            except Exception as post_goto_err:
-                                logger.debug(f"IG post goto timeout (proceeding to DOM check): {post_goto_err}")
-
-                            try:
-                                page.locator('main, article, ul, [role="main"]').first.wait_for(timeout=10000)
-                            except Exception:
-                                page.wait_for_timeout(2000)
-
-                            # 1. Розгортаємо приховані коментарі та пагінацію (lazy-load)
-                            try:
-                                # Прокручуємо контейнер коментарів вниз, щоб підвантажити сховані
-                                for _ in range(4):
-                                    page.mouse.wheel(0, 1200)
-                                    page.wait_for_timeout(800)
-
-                                # Клікаємо кнопку 'View hidden comments' якщо Meta приховала коментарі
-                                hidden_btn = page.locator('text="View hidden comments", [aria-label*="hidden comments"]').first
-                                if hidden_btn.is_visible():
-                                    hidden_btn.click()
-                                    page.wait_for_timeout(1000)
-                            except Exception:
-                                pass
-
-                            # Робимо скріншот поста з коментарями для звіту
-                            post_shortcode = href.strip("/").split("/")[-1]
-                            comment_ss_path = TEMP_DIR / f"comment_ss_{post_shortcode}.png"
-                            try:
-                                page.screenshot(path=str(comment_ss_path), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 800})
-                            except Exception:
-                                comment_ss_path = None
-
-                            # Comment permalinks contain stable IDs, independent of UI language.
-                            records = page.locator('a[href*="/c/"]').evaluate_all(r"""links => links.flatMap(link => {
-                                const match = link.getAttribute('href').match(/\/c\/(\d+)\/(?:$|\?)/);
-                                if (!match) return [];
-                                let row = link.parentElement;
-                                while (row && (!row.querySelector('h3 a') || !row.querySelector('[role="button"],button'))) row = row.parentElement;
-                                if (!row || row === document.body) return [];
-                                const author = row.querySelector('h3 a');
-                                const username = (author.getAttribute('href') || '').split('/').filter(Boolean)[0];
-                                if (!username || row.querySelectorAll('h3').length !== 1) return [];
-                                const clone = row.cloneNode(true);
-                                clone.querySelectorAll('h3,button,[role="button"],time,a[href*="/c/"]').forEach(el => el.remove());
-                                return [{id:match[1], username, text:clone.textContent.trim()}];
-                            })""")
-                            for record in {r['id']: r for r in records}.values():
-                                if not record['text'] or record['username'] == (INSTAGRAM_USERNAME or 'bohdan.gpt'):
-                                    continue
-                                self._comment_targets[record['id']] = (record['username'], record['text'])
-                                results.append(PlatformComment(
-                                    comment_id=record['id'], post_id=href, post_url=post_url,
-                                    user_id=record['username'], username=record['username'], text=record['text'],
-                                    screenshot_path=str(comment_ss_path) if comment_ss_path else None))
-                        except Exception as post_err:
-                            logger.debug(f"Помилка парсингу поста {post_url}: {post_err}")
-                            continue
-                    browser.close()
-        except Exception as e:
-            logger.warning("Instagram browser scan failed: %s", type(e).__name__)
-            raise
-        return results
+        from .instagram_web import instagram_web
+        results = {}
+        with instagram_web() as web:
+            for post in web.posts(limit_posts or 50):
+                if str((post.get("user") or {}).get("pk")) != web.owner_id:
+                    continue
+                comments = web.comments(post["pk"])
+                for comment in comments:
+                    user = comment.get("user") or {}
+                    if str(user.get("pk")) == web.owner_id or not user.get("username") or not comment.get("text"):
+                        continue
+                    replies = comment.get("preview_child_comments") or []
+                    replied = any(str((c.get("user") or {}).get("pk")) == web.owner_id for c in replies)
+                    if not replied and comment.get("child_comment_count", 0) > len(replies):
+                        replies = web.child_comments(post["pk"], comment["pk"])
+                        replied = any(str((c.get("user") or {}).get("pk")) == web.owner_id for c in replies)
+                    cid = str(comment["pk"])
+                    results[cid] = PlatformComment(cid, str(post["pk"]),
+                        f"https://www.instagram.com/p/{post['code']}/", str(user["pk"]), user["username"],
+                        comment["text"], has_author_replied=replied, created_time=str(comment.get("created_at", "")))
+        logger.info("Instagram web scan: %s comments", len(results))
+        return list(results.values())
 
     def check_follower_status(self, user_id: str, username: str) -> Tuple[Optional[bool], Optional[str]]:
         client = self._get_client()
@@ -244,39 +159,15 @@ class InstagramFunnel(BasePlatformFunnel):
             except Exception as exc:
                 self._pause_rejected_session(exc)
                 logger.warning("Instagram friendship check unavailable: %s", type(exc).__name__)
-        state_file = DATA_DIR / "instagram_state.json"
-        if state_file.exists() and re.fullmatch(r"[A-Za-z0-9_.]+", username):
-            try:
-                from playwright.sync_api import sync_playwright
-                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
-                with BROWSER_LOCK, sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                    try:
-                        page = browser.new_page(storage_state=str(state_file), locale="en-US")
-                        page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=20000)
-                        back = page.get_by_role("button", name=re.compile(r"^(Follow Back|Стежити у відповідь)$", re.I))
-                        if back.count() and back.first.is_visible():
-                            return True, None
-                        page.goto(f"https://www.instagram.com/{INSTAGRAM_USERNAME or 'bohdan.gpt'}/", wait_until="domcontentloaded", timeout=20000)
-                        page.get_by_role("link", name=re.compile(r"followers|Читачі", re.I)).click(timeout=10000)
-                        dialog = page.get_by_role("dialog")
-                        search = dialog.locator('input')
-                        if search.count() != 1:
-                            return None, None
-                        search.fill(username)
-                        exact = dialog.locator(f'a[href="/{username}/"]')
-                        try:
-                            exact.first.wait_for(timeout=8000)
-                            return True, None
-                        except Exception:
-                            # Absence of a result is never positive evidence of a follow.
-                            if dialog.get_by_text(re.compile(r"^(No results found\.?|Нічого не знайдено\.?)$", re.I)).count():
-                                return False, None
-                    finally:
-                        browser.close()
-            except Exception as exc:
-                logger.warning("Instagram browser friendship check unavailable: %s", type(exc).__name__)
-        return None, None
+        from .instagram_web import instagram_web
+        try:
+            if not (DATA_DIR / "instagram_state.json").exists():
+                return None, None
+            with instagram_web() as web:
+                return web.following(user_id, username), None
+        except Exception as exc:
+            logger.warning("Instagram web friendship check unavailable: %s", type(exc).__name__)
+            return None, None
 
     def is_user_following(self, user_id: str, username: str) -> Optional[bool]:
         return self.check_follower_status(user_id, username)[0]
@@ -284,7 +175,8 @@ class InstagramFunnel(BasePlatformFunnel):
     def fetch_direct_messages(self):
         client = self._get_client()
         if client is None:
-            raise PlatformAccessError("Instagram inbox: session unavailable")
+            yield from self._fetch_web_messages()
+            return
         try:
             threads = [(t, False) for t in client.direct_threads(amount=20, thread_message_limit=10)]
             threads += [(t, True) for t in client.direct_pending_inbox(amount=20)]
@@ -304,10 +196,97 @@ class InstagramFunnel(BasePlatformFunnel):
                     yield PlatformComment(str(message.id), str(thread.id), None, str(user.pk), user.username,
                                           message.text, pending_request=pending)
 
+    def _fetch_web_messages(self):
+        from .instagram_web import instagram_web
+        messages = []
+        with instagram_web() as web:
+            for preview in web.inbox():
+                if preview.get("is_group") or len(preview.get("usersWithoutViewer", [])) != 1:
+                    continue
+                latest = web.messages(preview)[:1]
+                viewer = preview.get("viewer") or {}
+                if not latest or latest[0].get("sender_fbid") == viewer.get("interop_messaging_user_fbid"):
+                    continue
+                thread = web.thread(preview["thread_key"])
+                users = thread.get("users") or []
+                if len(users) != 1:
+                    continue
+                user = users[0]
+                latest = web.messages(thread)[:1]
+                if not latest or web.is_own_message(latest[0]) or not latest[0].get("text_body"):
+                    continue
+                sender = ((latest[0].get("sender") or {}).get("user_dict") or {})
+                if sender.get("username") != user.get("username"):
+                    continue
+                message = latest[0]
+                messages.append(PlatformComment(str(message.get("message_id") or message["id"]),
+                    thread["thread_key"], None, str(user["pk"]), user["username"], message["text_body"],
+                    pending_request=thread.get("system_folder") == "PENDING"))
+        logger.info("Instagram web inbox: %s incoming messages", len(messages))
+        return messages
+
+    def _send_web_message(self, text, user_id, username, thread_key=None):
+        from .instagram_web import instagram_web
+        if time.monotonic() < self._retry_after:
+            return False, "authorization_paused"
+        submitted = False
+        try:
+            with instagram_web() as web:
+                if not str(user_id).isdigit():
+                    user_id = web.follower_id(username)
+                    if not user_id:
+                        return False, "recipient_unresolved"
+                if thread_key and len(str(thread_key)) >= 30:
+                    preview = next((t for t in web.inbox() if t.get("thread_id") == str(thread_key)), None)
+                    if not preview:
+                        return False, "thread_unresolved"
+                    thread_key = preview["thread_key"]
+                thread = web.thread(thread_key) if thread_key else None
+                if thread is None:
+                    preview = next((t for t in web.inbox()
+                        if not t.get("is_group") and len(t.get("usersWithoutViewer", [])) == 1
+                        and str(t["usersWithoutViewer"][0].get("id")) == str(user_id)), None)
+                    if preview:
+                        thread = web.thread(preview["thread_key"])
+                if thread:
+                    users = thread.get("users") or []
+                    if len(users) != 1 or str(users[0].get("pk")) != str(user_id) or users[0].get("username") != username:
+                        return False, "recipient_mismatch"
+                    if any(web.is_own_message(m) and m.get("text_body") == text for m in web.messages(thread)):
+                        return True, None
+                    if thread.get("system_folder") == "PENDING":
+                        if not web.accept_request(thread):
+                            return False, "request_not_accepted"
+                elif not str(user_id).isdigit():
+                    return False, "recipient_unresolved"
+                submitted = True
+                receipt = web.send_text(text, thread=thread, recipient=None if thread else user_id)
+                if not receipt:
+                    return False, "delivery_unknown"
+                if not thread:
+                    preview = next((t for t in web.inbox()
+                        if not t.get("is_group") and len(t.get("usersWithoutViewer", [])) == 1
+                        and str(t["usersWithoutViewer"][0].get("id")) == str(user_id)), None)
+                    if not preview:
+                        return False, "delivery_unknown"
+                    thread = web.thread(preview["thread_key"])
+                verified = web.thread(thread["thread_key"])
+                users = verified.get("users") or []
+                if len(users) != 1 or str(users[0].get("pk")) != str(user_id):
+                    return False, "delivery_unknown"
+                if not any((m.get("message_id") or m.get("id")) == receipt and web.is_own_message(m)
+                           and m.get("text_body") == text for m in web.messages(verified)):
+                    return False, "delivery_unknown"
+                logger.info("Instagram web DM verified: recipient=%s message=%s", user_id, receipt)
+                return True, None
+        except Exception as exc:
+            logger.warning("Instagram web DM failed: %s", type(exc).__name__)
+            return False, "delivery_unknown" if submitted else str(exc) if isinstance(exc, PlatformAccessError) else "session_unavailable"
+
     def reply_to_direct_message(self, message, text):
         client = self._get_client()
         if client is None:
-            return False, "session_unavailable"
+            return self._send_web_message(text, message.user_id, message.username, message.post_id)
         try:
             thread = client.direct_thread(message.post_id, amount=20)
             if len(thread.users) != 1 or str(thread.users[0].pk) != str(message.user_id):
@@ -332,7 +311,7 @@ class InstagramFunnel(BasePlatformFunnel):
     def send_direct_message(self, user_id: str, username: str, text: str, comment_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         client = self._get_client()
         if client is None:
-            return False, "session_unavailable"
+            return self._send_web_message(text, user_id, username)
         try:
             target = int(user_id) if str(user_id).isdigit() else client.user_id_from_username(username)
         except Exception as exc:
@@ -363,74 +342,39 @@ class InstagramFunnel(BasePlatformFunnel):
                 self._retry_after = time.monotonic() + 300
                 return False, "delivery_unknown"
 
-        # 2. Playwright браузерний фолбек
+        return self._reply_web_comment(comment_id, text, post_id)
+
+    def _reply_web_comment(self, comment_id, text, post_id):
+        from .instagram_web import instagram_web
         submitted = False
-        state_file = DATA_DIR / "instagram_state.json"
-        if state_file.exists() and post_id:
-            try:
-                from core.browser_lock import BROWSER_LOCK, CHROME_DOCKER_ARGS
-                from playwright.sync_api import sync_playwright
-                with BROWSER_LOCK:
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True, args=CHROME_DOCKER_ARGS)
-                        ctx = browser.new_context(
-                            storage_state=str(state_file),
-                            locale="en-US",
-                            viewport={"width": 1280, "height": 800}
-                        )
-                        page = ctx.new_page()
-                        target_url = post_id if post_id.startswith("http") else f"https://www.instagram.com{post_id}"
-                        try:
-                            page.goto(target_url, wait_until="domcontentloaded", timeout=18000)
-                        except Exception as rep_goto_err:
-                            logger.debug(f"IG reply goto timeout (proceeding): {rep_goto_err}")
-                        page.wait_for_timeout(2000)
-
-                        permalink = page.locator(f'a[href*="/c/{comment_id}/"]').first
-                        if not permalink.count():
-                            browser.close()
-                            return False, "comment_target_missing"
-                        row = permalink.locator('xpath=ancestor::*[.//h3 and (.//button or .//*[@role="button"])][1]')
-                        if row.count() != 1 or row.locator('h3').count() != 1:
-                            browser.close()
-                            return False, "comment_target_ambiguous"
-                        receipt = page.locator(f'a[href*="/c/{comment_id}/r/"]').locator('xpath=ancestor::*[.//h3][1]').filter(
-                            has=page.locator(f'h3 a[href="/{INSTAGRAM_USERNAME or "bohdan.gpt"}/"]')).get_by_text(text, exact=False)
-                        if receipt.count():
-                            browser.close()
-                            return True, None
-                        reply_btn = row.get_by_text(re.compile(r"^(Reply|Відповісти)$")).first
-                        reply_btn.click(timeout=5000)
-
-                        textarea = page.locator('textarea[aria-label*="comment" i], textarea[placeholder*="comment" i], textarea').first
-                        if textarea.is_visible():
-                            textarea.click()
-                            current_val = textarea.input_value()
-                            if current_val and not text.startswith("@"):
-                                textarea.fill(f"{current_val}{text}")
-                            else:
-                                textarea.fill(text)
-                            page.wait_for_timeout(500)
-
-                            post_btn = page.locator('div[role="button"], button').filter(has_text=re.compile(r"^(Post|Опублікувати)$", re.I)).first
-                            submitted = True
-                            if post_btn.is_visible():
-                                post_btn.click()
-                            else:
-                                page.keyboard.press("Enter")
-                            receipt.last.wait_for(timeout=10000)
-                            page.reload(wait_until="domcontentloaded", timeout=20000)
-                            receipt.last.wait_for(timeout=10000)
-                            browser.close()
-                            logger.info(f"✅ [Instagram Playwright Web] Опубліковано відповідь на коментар: '{text}'")
-                            return True, None
-                        browser.close()
-            except Exception as pe:
-                logger.warning("Instagram browser reply failed: %s", type(pe).__name__)
-                return False, "delivery_unknown" if submitted else "reply_failed"
-
-        logger.warning("Instagram reply delivery failed")
-        return False, "reply_failed"
+        try:
+            if not str(comment_id).isdigit() or not str(post_id).isdigit():
+                return False, "comment_target_missing"
+            with instagram_web() as web:
+                info = web.api(f"media/{post_id}/info/").get("items", [])
+                if len(info) != 1 or str((info[0].get("user") or {}).get("pk")) != web.owner_id:
+                    return False, "post_owner_mismatch"
+                parent = next((c for c in web.comments(post_id) if str(c["pk"]) == str(comment_id)), None)
+                if not parent or str((parent.get("user") or {}).get("pk")) == web.owner_id:
+                    return False, "comment_target_missing"
+                def receipt(comment):
+                    prefix = "@" + parent["user"]["username"] + " "
+                    return (str((comment.get("user") or {}).get("pk")) == web.owner_id
+                        and comment.get("text") in (text, prefix + text)
+                        and str(comment.get("parent_comment_id")) == str(comment_id))
+                if any(receipt(c) for c in web.child_comments(post_id, comment_id)):
+                    return True, None
+                submitted = True
+                response = web.create_comment(post_id, comment_id, text)
+                if not response or not response.get("pk") or str((response.get("user") or {}).get("pk")) != web.owner_id:
+                    return False, "delivery_unknown"
+                if not any(str(c["pk"]) == str(response["pk"]) and receipt(c) for c in web.child_comments(post_id, comment_id)):
+                    return False, "delivery_unknown"
+                logger.info("Instagram web reply verified: parent=%s reply=%s", comment_id, response["pk"])
+                return True, None
+        except Exception as exc:
+            logger.warning("Instagram web comment failed: %s", type(exc).__name__)
+            return False, "delivery_unknown" if submitted else "reply_failed"
 
     def like_comment(self, comment_id: str, post_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """Ставить лайк на коментар у публічній стрічці Instagram (API або Playwright)"""

@@ -148,6 +148,7 @@ class FunnelTests(unittest.TestCase):
     def test_ordinary_inbox_message_gets_vault_once_when_following(self):
         fs.detect_comment_intent.return_value = CommentIntentResult('question_chat', ai_reply_text='Hello')
         self.assertEqual(self.inbox()['dms_sent'], 1)
+        fs.detect_comment_intent.assert_not_called()
         self.assertEqual(self.inbox()['dms_sent'], 0)
         self.handler.reply_to_direct_message.assert_called_once()
         self.assertIn('/vault/', self.handler.reply_to_direct_message.call_args.args[1])
@@ -325,9 +326,8 @@ class PlatformTests(unittest.TestCase):
             session.write_text(json.dumps({'cookies': [{'name': 'sessionid', 'domain': '.instagram.com', 'value': 'test-only-invalid'}]}))
             with patch('services.lead_funnel.platforms.instagram.INSTAGRAM_SESSION_FILE', session), patch('services.lead_funnel.platforms.instagram.proxy_manager') as proxy, patch('instagrapi.Client') as client:
                 proxy.proxy_url = ''
-                self.assertIsNotNone(InstagramFunnel()._get_client())
-                client.return_value.load_settings.assert_not_called()
-                client.return_value.login_by_sessionid.assert_called_once_with('test-only-invalid')
+                self.assertIsNone(InstagramFunnel()._get_client())
+                client.assert_not_called()
 
     def test_instagram_followed_by_direction_and_unknown(self):
         from services.lead_funnel.platforms.instagram import InstagramFunnel

@@ -1,0 +1,73 @@
+{
+  "PolarisProfilePageContentQuery": {
+    "doc_id": "28036671149327607",
+    "variables": {
+      "enable_integrity_filters": true,
+      "__relay_internal__pv__PolarisCannesGuardianExperienceEnabledrelayprovider": true,
+      "__relay_internal__pv__PolarisCASB976ProfileEnabledrelayprovider": false,
+      "__relay_internal__pv__PolarisWebSchoolsEnabledrelayprovider": false,
+      "__relay_internal__pv__PolarisRepostsConsumptionEnabledrelayprovider": true,
+      "__relay_internal__pv__PolarisShortDramaEnabledrelayprovider": true
+    }
+  },
+  "PolarisProfilePostsQuery": {
+    "doc_id": "28542612348729311",
+    "variables": {
+      "data": {
+        "count": 12,
+        "include_reel_media_seen_timestamp": true,
+        "include_relationship_info": true,
+        "latest_besties_reel_media": true,
+        "latest_reel_media": true
+      },
+      "__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider": true,
+      "__relay_internal__pv__PolarisShortDramaEnabledrelayprovider": true,
+      "__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": false
+    }
+  },
+  "PolarisDirectInboxQuery": {
+    "doc_id": "27909866362025854",
+    "variables": {
+      "__relay_internal__pv__IGDIsProfessionalAccountGKrelayprovider": true,
+      "__relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider": true,
+      "__relay_internal__pv__IGDMaxUnreadMessagesCountrelayprovider": 5,
+      "__relay_internal__pv__IGDThreadListActionsEnabledGKrelayprovider": true
+    }
+  },
+  "IGDThreadDetailQuery": {
+    "doc_id": "29613940454875963",
+    "variables": {
+      "min_uq_seq_id": null,
+      "__relay_internal__pv__IGDEnableOffMsysChatThemesQErelayprovider": false,
+      "__relay_internal__pv__IGDInitialMessagePageCountrelayprovider": 20
+    }
+  },
+  "PolarisDirectMessageRequestQuery": {
+    "doc_id": "28878812331756095",
+    "variables": {
+      "__relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider": true,
+      "__relay_internal__pv__IGDMaxUnreadMessagesCountrelayprovider": 5,
+      "__relay_internal__pv__IGDThreadListActionsEnabledGKrelayprovider": true
+    }
+  },
+  "PolarisPostChildCommentsQuery": {
+    "doc_id": "28027289793632076",
+    "variables": {
+      "before": null,
+      "is_chronological": null,
+      "first": null,
+      "last": null,
+      "__relay_internal__pv__PolarisIsLoggedInrelayprovider": true
+    }
+  },
+  "PolarisPostCommentsPaginationQuery": {
+    "doc_id": "28428885330094742",
+    "variables": {
+      "before": null,
+      "first": 10,
+      "last": null,
+      "sort_order": "popular",
+      "__relay_internal__pv__PolarisIsLoggedInrelayprovider": true
+    }
+  }
+}

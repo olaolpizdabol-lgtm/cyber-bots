@@ -379,9 +379,8 @@ class LeadFunnelService:
                 if get_lead_comment(platform_name, message_key):
                     continue
                 try:
-                    intent = CommentIntentResult("lead_magnet") if platform_name == "facebook" else detect_comment_intent(message.text)
-                    if intent.intent == "spam":
-                        continue
+                    # Every ordinary incoming DM uses the same follow/link flow; no LLM round trip is needed.
+                    intent = CommentIntentResult("lead_magnet")
                     stats["processed"] += 1
                     following = None
                     if platform_name == "facebook":

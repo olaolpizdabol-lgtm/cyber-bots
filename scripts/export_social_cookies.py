@@ -99,7 +99,7 @@ def main():
         state = json.dumps({'cookies': cookies, 'origins': []})
         exports.append((env_name, state))
         if platform == 'instagram':
-            # The adapter validates browser cookies through login_by_sessionid.
+            # Both consumers use the same authenticated web session.
             exports.append(('INSTAGRAM_SESSION_B64', state))
     private_write(args.output, ''.join(f'{name}={base64.b64encode(state.encode()).decode()}\n' for name, state in exports))
     print(f'Prepared {len(exports)} session variables in {args.output}; not uploaded or verified by platforms.')

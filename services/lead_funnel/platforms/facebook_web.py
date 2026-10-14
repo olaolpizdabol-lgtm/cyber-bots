@@ -25,6 +25,8 @@ def graphql_chunks(text):
             value, end = decoder.raw_decode(text.lstrip())
         except ValueError:
             raise PlatformAccessError("Facebook returned an invalid query response") from None
+        if not isinstance(value, dict):
+            raise PlatformAccessError("Facebook returned an invalid query response")
         if value.get("error") or value.get("errors"):
             raise PlatformAccessError("Facebook rejected the Business Suite query; check session and Page access")
         chunks.append(value)
