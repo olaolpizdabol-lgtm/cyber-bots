@@ -2,6 +2,7 @@
 import json
 import re
 import uuid
+from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlencode
@@ -49,7 +50,7 @@ def merge_node(target, source):
         if isinstance(value, dict) and isinstance(target.get(key), dict):
             merge_node(target[key], value)
         elif value is not None and (value or key not in target):
-            target[key] = value
+            target[key] = deepcopy(value)  # The source may still be traversed by walk_nodes.
 
 
 def comment_nodes(chunks):

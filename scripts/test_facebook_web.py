@@ -33,7 +33,16 @@ class FacebookWebTests(unittest.TestCase):
         comments = comment_nodes([{'data': {'comment_create': {'feedback_comment_edge': {'node': self.reply}}}}])
         self.assertEqual(own_reply(self.parent, comments, {FACEBOOK_PROFILE_ID}, 'vault link'), '200')
         self.reply['comment_direct_parent']['id'] = 'another-parent'
+        comments = comment_nodes([self.reply])
         self.assertIsNone(own_reply(self.parent, comments, {FACEBOOK_PROFILE_ID}, 'vault link'))
+
+    def test_nested_partial_does_not_mutate_the_response_being_traversed(self):
+        node = {'__typename': 'Comment', 'id': 'parent', 'feedback': {
+            'partial': {'__typename': 'Comment', 'id': 'parent', 'feedback': {'extra': 1}}, 'id': 'feedback'}}
+        before = json.dumps(node)
+        result = comment_nodes([node])
+        self.assertEqual(result['parent']['feedback']['extra'], 1)
+        self.assertEqual(json.dumps(node), before)
 
     def test_errors_are_not_empty_successful_scans(self):
         for raw in ['for (;;);{"error":1357054}', '{"errors":[{"message":"private diagnostic"}]}', '<html>login</html>']:
