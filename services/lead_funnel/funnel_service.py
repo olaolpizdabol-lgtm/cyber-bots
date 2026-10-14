@@ -257,6 +257,7 @@ class LeadFunnelService:
         self.active_scans.add(platform_name)
         try:
             comments = handler.fetch_recent_unanswered_comments(limit_posts=limit_posts)
+            stats["checked"] = len(comments)
             triggers = get_lead_funnel_triggers(only_active=True)
             for comm in comments:
                 if stats["processed"] >= max_replies_batch:

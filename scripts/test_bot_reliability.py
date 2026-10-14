@@ -66,6 +66,12 @@ class FunnelTests(unittest.TestCase):
         self.scan(); self.scan()
         self.handler.reply_to_comment.assert_called_once()
 
+    def test_answered_comment_is_still_counted_as_checked(self):
+        self.comment.has_author_replied = True
+        stats = self.scan()
+        self.assertEqual((stats['checked'], stats['processed']), (1, 0))
+        self.handler.reply_to_comment.assert_not_called()
+
     def test_same_user_can_ask_a_new_question(self):
         self.scan()
         self.comment.comment_id = 'comment-2'

@@ -347,7 +347,8 @@ async def main():
                         rows.append(f"• {platform}: сканування ще не завершене")
                     else:
                         rows.append(
-                            f"• {platform}: перевірено {stats.get('processed', 0)}, "
+                            f"• {platform}: перевірено {stats.get('checked', stats.get('processed', 0))}, "
+                            f"нових {stats.get('processed', 0)}, "
                             f"відповідей {stats.get('replies', 0)}, DM {stats.get('dms_sent', 0)}, "
                             f"помилок {stats.get('errors', 0)} "
                             f"(оновлено {int((time.time() - lead_funnel_service.last_scan_at.get(platform, time.time())) / 60)} хв тому)")
