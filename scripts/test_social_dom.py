@@ -46,6 +46,13 @@ class FacebookDOMTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'identity confirmation'):
             FacebookFunnel._check_restrictions(self.page)
 
+    def test_post_previews_wait_for_async_inbox_list(self):
+        self.page.set_content('<nav>Facebook comments</nav>')
+        self.page.evaluate("""() => setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+            '<div class="_at42"><div class="_4ik4 _4ik5">Post 1</div></div>' +
+            '<div class="_at42"><div class="_4ik4 _4ik5">Post 2</div></div>'), 100)""")
+        self.assertEqual(FacebookFunnel._read_post_previews(self.page), ['Post 1', 'Post 2'])
+
     def test_own_reply_is_not_a_new_customer_comment(self):
         row = self.page.locator('[role="article"]').first
         row.locator('xpath=..').evaluate("el => el.insertAdjacentHTML('beforeend', '<div role=\"article\" aria-label=\"Comment by Bohdan GPT 1 minute ago\"><div role=\"button\">Bohdan GPT</div><a href=\"https://www.facebook.com/reel/123/?comment_id=200\">1m</a>vault link</div>')")

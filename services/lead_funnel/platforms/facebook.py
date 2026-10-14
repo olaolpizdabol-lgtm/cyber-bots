@@ -108,10 +108,7 @@ class FacebookFunnel(BasePlatformFunnel):
                 self._check_restrictions(page)
                 page.get_by_role("link", name="Facebook comments", exact=True).wait_for(timeout=15000)
                 # Business Suite lists both posts and reels in this one inbox.
-                previews = page.locator('div._at42 > div._4ik4._4ik5').all_text_contents()
-                previews = list(dict.fromkeys(t.strip() for t in previews if t.strip()))
-                if not previews:
-                    raise PlatformAccessError("Facebook comment inbox layout unavailable")
+                previews = self._read_post_previews(page)
                 for index, preview in enumerate(previews[:limit_posts or 50]):
                     old_link = page.locator('[role="article"] a[href*="comment_id="]').first
                     previous_href = old_link.get_attribute("href") if old_link.count() else None
@@ -131,6 +128,16 @@ class FacebookFunnel(BasePlatformFunnel):
                 return list(results.values())
             finally:
                 browser.close()
+
+    @staticmethod
+    def _read_post_previews(page):
+        # The navigation renders before the asynchronous post list.
+        previews = page.locator('div._at42 > div._4ik4._4ik5')
+        try:
+            previews.first.wait_for(state="visible", timeout=20000)
+        except Exception:
+            raise PlatformAccessError("Facebook comment inbox list did not load; check page layout and account access") from None
+        return list(dict.fromkeys(text.strip() for text in previews.all_text_contents() if text.strip()))
 
     @staticmethod
     def _read_comment_rows(page):
