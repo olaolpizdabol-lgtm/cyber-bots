@@ -108,6 +108,12 @@ class FunnelTests(unittest.TestCase):
         self.scan('facebook')
         self.assertEqual(self.service.last_error['facebook'], 'RuntimeError')
 
+    def test_browser_error_reports_only_safe_reason(self):
+        from playwright.sync_api import Error
+        exc = Error('Page.goto: net::ERR_CONNECTION_RESET at https://example.test/?private=value')
+        self.assertEqual(fs.platform_error_reason(exc), 'net::ERR_CONNECTION_RESET')
+        self.assertEqual(fs.platform_error_reason(Error('private response body')), 'Error')
+
     def test_manual_reply_is_not_proof_of_dm_delivery(self):
         db.save_lead_comment('instagram', 'old', 'p', 'u', 'visitor', 'Hi', 'question_chat', None, False, 'already_replied_manual')
         self.assertFalse(db.has_user_received_lead('instagram', 'visitor'))

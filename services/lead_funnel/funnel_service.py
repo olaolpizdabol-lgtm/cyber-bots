@@ -36,6 +36,16 @@ from config import (
 
 logger = logging.getLogger("funnel_service")
 
+
+def platform_error_reason(exc):
+    if isinstance(exc, PlatformAccessError):
+        return str(exc)
+    if type(exc).__module__.startswith("playwright."):
+        reason = re.search(r"net::ERR_[A-Z_]+|Page crashed|Target page, context or browser has been closed|signal=SIGKILL", str(exc))
+        if reason:
+            return reason.group(0)
+    return type(exc).__name__
+
 import json
 from pathlib import Path
 
@@ -259,7 +269,7 @@ class LeadFunnelService:
             return stats
         except Exception as exc:
             stats["errors"] += 1
-            self.last_error[platform_name] = str(exc) if isinstance(exc, PlatformAccessError) else type(exc).__name__
+            self.last_error[platform_name] = platform_error_reason(exc)
             logger.warning("[%s] Scan failed: %s", platform_name, self.last_error[platform_name])
             return stats
         finally:
@@ -408,7 +418,7 @@ class LeadFunnelService:
             return stats
         except Exception as exc:
             stats["errors"] += 1
-            self.last_error[key] = str(exc) if isinstance(exc, PlatformAccessError) else type(exc).__name__
+            self.last_error[key] = platform_error_reason(exc)
             return stats
         finally:
             self.last_scan[key] = dict(stats)
