@@ -58,6 +58,14 @@ def get_free_memory_mb() -> Optional[int]:
     return None
 
 
+def get_oom_kill_count() -> Optional[int]:
+    try:
+        events = dict(line.split() for line in Path('/sys/fs/cgroup/memory.events').read_text().splitlines())
+        return int(events['oom_kill'])
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def ensure_memory_for_browser(platform_label: str = "browser") -> bool:
     """
     Повертає True якщо можна запускати Chromium.

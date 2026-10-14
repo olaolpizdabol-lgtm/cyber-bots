@@ -126,6 +126,11 @@ class FacebookFunnel(BasePlatformFunnel):
                         results[record['id']] = PlatformComment(record['id'], page.url, record['url'],
                             record['user_id'], record['username'], record['text'], has_author_replied=record['replied'])
                 return list(results.values())
+            except Exception as exc:
+                if 'Page crashed' in str(exc):
+                    from core.mem_guard import get_free_memory_mb, get_oom_kill_count
+                    raise PlatformAccessError(f"Facebook page crashed; container OOM kills={get_oom_kill_count()}, free memory={get_free_memory_mb()} MB") from None
+                raise
             finally:
                 browser.close()
 

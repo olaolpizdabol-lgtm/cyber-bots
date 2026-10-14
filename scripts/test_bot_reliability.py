@@ -114,6 +114,18 @@ class FunnelTests(unittest.TestCase):
         self.assertEqual(fs.platform_error_reason(exc), 'net::ERR_CONNECTION_RESET')
         self.assertEqual(fs.platform_error_reason(Error('private response body')), 'Error')
 
+    def test_facebook_crash_reports_container_oom_count_and_closes_browser(self):
+        from services.lead_funnel.platforms.facebook import FacebookFunnel
+        from playwright.sync_api import Error
+        playwright = Mock(); browser = playwright.chromium.launch.return_value
+        browser.new_page.return_value.goto.side_effect = Error('Page.goto: Page crashed')
+        with patch('playwright.sync_api.sync_playwright') as runtime, patch('core.mem_guard.get_oom_kill_count', return_value=3), patch('core.mem_guard.get_free_memory_mb', return_value=500), patch('services.lead_funnel.platforms.facebook.FACEBOOK_STATE_FILE') as state:
+            runtime.return_value.__enter__.return_value = playwright
+            state.exists.return_value = True
+            with self.assertRaisesRegex(PlatformAccessError, 'OOM kills=3, free memory=500 MB'):
+                FacebookFunnel()._fetch_comments_via_browser()
+        browser.close.assert_called_once()
+
     def test_manual_reply_is_not_proof_of_dm_delivery(self):
         db.save_lead_comment('instagram', 'old', 'p', 'u', 'visitor', 'Hi', 'question_chat', None, False, 'already_replied_manual')
         self.assertFalse(db.has_user_received_lead('instagram', 'visitor'))
