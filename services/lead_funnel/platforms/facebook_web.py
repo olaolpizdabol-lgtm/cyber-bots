@@ -1,6 +1,7 @@
 """Business Suite requests in Chromium without rendering its memory-heavy SPA."""
 import json
 import re
+import time
 import uuid
 from copy import deepcopy
 from contextlib import contextmanager
@@ -143,8 +144,14 @@ class FacebookWeb:
         return self.query(CREATE_COMMENT, variables)
 
 
+_auth_retry_after = 0.0
+
+
 @contextmanager
 def facebook_web(state_file, page_id):
+    global _auth_retry_after
+    if time.monotonic() < _auth_retry_after:
+        raise PlatformAccessError("Facebook browser session expired; checks paused for 10 minutes")
     if not state_file.exists():
         raise PlatformAccessError("Facebook browser session missing")
     from playwright.sync_api import sync_playwright
@@ -160,7 +167,8 @@ def facebook_web(state_file, page_id):
                 return {status: response.status, text: await response.text(), url: response.url};
             }""", page_id)
             if response["status"] != 200 or "login" in response["url"]:
-                raise PlatformAccessError("Facebook browser session expired")
+                _auth_retry_after = time.monotonic() + 600
+                raise PlatformAccessError("Facebook browser session expired; new login required in Chrome")
             modules = {}
             for name in ("DTSGInitialData", "LSD", "CurrentUserInitialData", "BusinessUnifiedNavigationContext"):
                 match = re.search(r'\["' + name + r'",\[\],(\{.*?\}),\d+\]', response["text"])
@@ -171,6 +179,7 @@ def facebook_web(state_file, page_id):
                 "__user": modules.get("CurrentUserInitialData", {}).get("USER_ID")}
             cookie_owner = next((c["value"] for c in context.cookies() if c["name"] == "c_user"), None)
             if not all(fields.values()) or fields["__user"] != cookie_owner:
+                _auth_retry_after = time.monotonic() + 600
                 raise PlatformAccessError("Facebook session needs a new login in Chrome Bohdan")
             fields["jazoest"] = "2" + str(sum(map(ord, fields["fb_dtsg"])))
             business = modules.get("BusinessUnifiedNavigationContext", {}).get("businessID")
