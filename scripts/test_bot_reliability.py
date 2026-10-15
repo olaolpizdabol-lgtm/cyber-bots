@@ -201,6 +201,44 @@ class FunnelTests(unittest.TestCase):
     def test_facebook_inbox_has_no_follow_gate(self):
         self.assertEqual(self.inbox('facebook')['dms_sent'], 1)
         self.handler.check_follower_status.assert_not_called()
+
+    def test_facebook_collapsed_existing_reply_stops_retries_without_claiming_delivery(self):
+        self.handler.reply_to_comment.return_value = (False, 'already_replied_manual')
+        stats = self.scan('facebook')
+        self.assertEqual((stats['errors'], stats['replies']), (0, 0))
+        self.assertEqual(db.get_lead_comment('facebook', 'comment-1')['status'], 'already_replied_manual')
+        self.scan('facebook')
+        self.handler.reply_to_comment.assert_called_once()
+
+    def test_facebook_unknown_delivery_is_not_retried_and_can_be_reconciled(self):
+        self.handler.reply_to_comment.return_value = (False, 'delivery_unknown')
+        self.scan('facebook'); self.scan('facebook')
+        self.handler.reply_to_comment.assert_called_once()
+        self.assertEqual(self.service.last_scan['facebook']['processed'], 0)
+        self.comment.has_author_replied = True
+        self.scan('facebook')
+        self.assertEqual(db.get_lead_comment('facebook', 'comment-1')['status'], 'already_replied_manual')
+        self.assertEqual(self.service.last_scan['facebook']['replies'], 0)
+
+    def test_facebook_new_comment_precedes_failed_batch_and_reports_reason(self):
+        self.handler.reply_to_comment.return_value = (False, 'page_actor_mismatch')
+        self.scan('facebook')
+        self.assertEqual(self.service.last_error['facebook'], 'page_actor_mismatch')
+        new = PlatformComment('new', 'post-1', None, 'u2', 'visitor2', 'GPT')
+        self.handler.fetch_recent_unanswered_comments.return_value = [self.comment, new]
+        self.handler.reply_to_comment.return_value = (True, None)
+        self.service.process_platform_comments('facebook', max_replies_batch=1)
+        self.assertEqual(self.handler.reply_to_comment.call_args.args[0], 'new')
+
+    def test_facebook_failed_comments_rotate_oldest_attempt_first(self):
+        self.scan('facebook')
+        db.save_lead_comment('facebook', 'older', 'p', 'u', 'v', 'GPT', 'lead_magnet', None, False, 'reply_failed')
+        with db.get_connection() as conn:
+            conn.execute("UPDATE lead_funnel_comments SET status='reply_failed', last_checked_at='2000-01-01' WHERE comment_id='older'")
+            conn.execute("UPDATE lead_funnel_comments SET status='reply_failed' WHERE comment_id='comment-1'")
+        self.handler.fetch_recent_unanswered_comments.return_value = [self.comment, PlatformComment('older', 'p', None, 'u', 'v', 'GPT')]
+        self.service.process_platform_comments('facebook', max_replies_batch=1)
+        self.assertEqual(self.handler.reply_to_comment.call_args.args[0], 'older')
         fs.detect_comment_intent.assert_not_called()
 
     def test_independent_platform_can_scan_while_instagram_is_busy(self):
@@ -422,6 +460,45 @@ class PlatformTests(unittest.TestCase):
         asyncio.run(run())
         calls.assert_any_await(service.process_platform_comments, 'facebook', 6)
         self.assertNotIn(service.process_direct_messages, [call.args[0] for call in calls.await_args_list])
+
+    def test_facebook_keeps_scanning_while_instagram_waits(self):
+        source = ast.parse(Path('main.py').read_text())
+        main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
+        background = next(n for n in main.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'lead_funnel_background_task')
+        async def run():
+            blocked = asyncio.Event()
+            twice = asyncio.Event()
+            calls = []
+            intervals = []
+            async def to_thread(fn, platform, *args):
+                if fn == self.service.process_direct_messages and platform == 'instagram':
+                    blocked.set()
+                    await asyncio.Event().wait()
+                if fn == self.service.process_platform_comments:
+                    calls.append(platform)
+                    if calls.count('facebook') == 2:
+                        twice.set()
+            async def sleep(seconds):
+                intervals.append(seconds)
+                await blocked.wait()
+                await asyncio.sleep(0)
+            namespace = {'asyncio': SimpleNamespace(to_thread=to_thread, sleep=sleep, gather=asyncio.gather, CancelledError=asyncio.CancelledError), 'logger': Mock()}
+            exec(compile(ast.Module(body=[background], type_ignores=[]), '<background>', 'exec'), namespace)
+            with patch('services.lead_funnel.lead_funnel_service', self.service):
+                task = asyncio.create_task(namespace['lead_funnel_background_task']())
+                try:
+                    await asyncio.wait_for(twice.wait(), timeout=1)
+                finally:
+                    task.cancel()
+                    await task
+            self.assertGreaterEqual(calls.count('facebook'), 2)
+            self.assertIn(15, intervals)
+        self.service = fs.LeadFunnelService()
+        asyncio.run(run())
+
+    def test_report_recipients_are_imported_in_main(self):
+        imports = [n for n in ast.parse(Path('main.py').read_text()).body if isinstance(n, ast.ImportFrom) and n.module == 'config']
+        self.assertIn('ALLOWED_USER_IDS', [alias.name for node in imports for alias in node.names])
 
     def test_report_runs_immediately_then_every_600_seconds_independent_of_scan(self):
         source = ast.parse(Path('main.py').read_text())

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from services.lead_funnel.platforms.facebook_web import graphql_chunks, comment_nodes, own_reply
+from services.lead_funnel.platforms.facebook_web import FacebookWeb, COMMENTS_QUERY, graphql_chunks, comment_nodes, own_reply
 from services.lead_funnel.platforms.facebook import FacebookFunnel, FACEBOOK_PROFILE_ID
 from services.lead_funnel.platforms.base import PlatformAccessError
 
@@ -71,6 +71,50 @@ class FacebookWebTests(unittest.TestCase):
         web = Mock(); web.comments.return_value = comment_nodes([self.parent, self.reply])
         self.assertEqual(self.send(web), (True, None))
         web.create_reply.assert_not_called()
+
+    def test_existing_different_reply_is_terminal_without_sending(self):
+        self.reply['body']['text'] = 'An earlier reply'
+        web = Mock(); web.comments.return_value = comment_nodes([self.parent, self.reply])
+        self.assertEqual(self.send(web), (False, 'already_replied_manual'))
+        web.create_reply.assert_not_called()
+
+    def page(self, nodes, cursor=None):
+        return [{'data': {'feedback': {'id': 'post-feedback',
+            'comment_rendering_instance_for_feed_location': {
+                'selected_intent': {'intent_token': 'newest-comments'},
+                'comments': {'edges': [{'node': node} for node in nodes],
+                    'page_info': {'has_next_page': cursor is not None, 'end_cursor': cursor}}}}}}]
+
+    def test_comments_load_every_page_merge_duplicates_and_keep_sort_intent(self):
+        web = FacebookWeb(None, {}, 'page')
+        partial = {'__typename': 'Comment', 'id': 'parent-node', 'extra': 'from next page'}
+        web.query = Mock(side_effect=[self.page([self.parent], 'c1'),
+            self.page([partial, self.reply], 'c2'), self.page([self.reply])])
+        comments = web.comments('post')
+        self.assertEqual(set(comments), {'parent-node', 'reply-node'})
+        self.assertEqual(comments['parent-node']['extra'], 'from next page')
+        self.assertEqual(comments['parent-node']['body']['text'], 'GPT')
+        self.assertTrue(own_reply(self.parent, comments, {FACEBOOK_PROFILE_ID}))
+        for call, cursor in zip(web.query.call_args_list[1:], ['c1', 'c2']):
+            self.assertEqual(call.args[0], COMMENTS_QUERY)
+            self.assertEqual(call.args[1]['commentsAfterCursor'], cursor)
+            self.assertEqual(call.args[1]['commentsIntentToken'], 'newest-comments')
+            self.assertEqual(call.args[1]['id'], 'post-feedback')
+
+    def test_focused_verification_does_not_rescan_all_comments(self):
+        web = FacebookWeb(None, {}, 'page')
+        web.query = Mock(return_value=self.page([self.parent, self.reply], 'more'))
+        self.assertEqual(len(web.comments('post', '200')), 2)
+        web.query.assert_called_once()
+
+    def test_broken_pagination_is_visible_instead_of_a_partial_success(self):
+        for pages in [[self.page([self.parent], 'same'), self.page([], 'same')],
+                      [self.page([self.parent], 'more'), [{'data': {}}]]]:
+            web = FacebookWeb(None, {}, 'page')
+            web.query = Mock(side_effect=pages)
+            with self.assertRaisesRegex(PlatformAccessError, 'pagination'):
+                web.comments('post')
+            self.assertEqual(web.query.call_count, 2)
 
     def test_comments_without_explicit_depth_are_not_dropped(self):
         parent_no_depth = {

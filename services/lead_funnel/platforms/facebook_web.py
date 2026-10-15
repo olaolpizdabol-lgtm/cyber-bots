@@ -14,6 +14,8 @@ from .base import PlatformAccessError
 # shortcut: Business Suite document IDs observed on 2026-10-14; refresh after Meta changes these queries.
 LIST_QUERY = ("BizInboxCommentThreadListContainerQuery", "28655553327402876")
 DETAIL_QUERY = ("BizInboxPostDetailViewWrapperQuery", "28929232363375473")
+# Observed in the Business Suite comments renderer on 2026-10-15.
+COMMENTS_QUERY = ("CommentsListComponentsPaginationQuery", "39047933001517366")
 CREATE_COMMENT = ("useCometUFICreateCommentMutation", "28728724973421052")
 DETAIL_VARIABLES = json.loads(Path(__file__).with_name("facebook_query.json").read_text())
 
@@ -121,8 +123,35 @@ class FacebookWeb:
         return list(dict.fromkeys(posts))[:limit]
 
     def comments(self, post_id, focus=None):
-        return comment_nodes(self.query(DETAIL_QUERY, {**DETAIL_VARIABLES,
-            "commItemID": post_id, "focusCommentID": focus}))
+        response = self.query(DETAIL_QUERY, {**DETAIL_VARIABLES,
+            "commItemID": post_id, "focusCommentID": focus})
+        comments = comment_nodes(response)
+        if focus:
+            return comments
+        feedback = next((n for n in walk_nodes(response)
+            if n.get("id") and n.get("comment_rendering_instance_for_feed_location")), None)
+        if feedback is None:
+            raise PlatformAccessError("Facebook comment pagination schema changed")
+        rendering = feedback["comment_rendering_instance_for_feed_location"]
+        connection = rendering.get("comments") or {}
+        cursors = set()
+        while (connection.get("page_info") or {}).get("has_next_page"):
+            cursor = connection["page_info"].get("end_cursor")
+            if not cursor or cursor in cursors:
+                raise PlatformAccessError("Facebook comment pagination stalled")
+            cursors.add(cursor)
+            response = self.query(COMMENTS_QUERY, {**DETAIL_VARIABLES,
+                "id": feedback["id"], "commentsAfterCount": 50, "commentsAfterCursor": cursor,
+                "commentsBeforeCount": None, "commentsBeforeCursor": None,
+                "commentsIntentToken": (rendering.get("selected_intent") or {}).get("intent_token"),
+                "targetDialect": None})
+            for cid, node in comment_nodes(response).items():
+                merge_node(comments.setdefault(cid, {}), node)
+            connection = next((n["comments"] for n in walk_nodes(response)
+                if isinstance(n.get("comments"), dict) and "page_info" in n["comments"]), None)
+            if connection is None:
+                raise PlatformAccessError("Facebook comment pagination schema changed")
+        return comments
 
     def create_reply(self, parent, text):
         variables = {"feedLocation": "BUSINESS_COMMENT_INBOX_TAB", "feedbackSource": 107,

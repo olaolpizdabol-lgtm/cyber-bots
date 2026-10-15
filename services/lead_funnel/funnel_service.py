@@ -258,6 +258,9 @@ class LeadFunnelService:
         try:
             comments = handler.fetch_recent_unanswered_comments(limit_posts=limit_posts)
             stats["checked"] = len(comments)
+            if platform_name == "facebook":
+                # New comments first; rotate failed attempts so they cannot starve the batch.
+                comments.sort(key=lambda comm: (get_lead_comment(platform_name, comm.comment_id) or {}).get("last_checked_at") or "")
             triggers = get_lead_funnel_triggers(only_active=True)
             for comm in comments:
                 if stats["processed"] >= max_replies_batch:
@@ -281,12 +284,14 @@ class LeadFunnelService:
 
     def _process_comment(self, platform, handler, comm, triggers, stats):
         existing = get_lead_comment(platform, comm.comment_id)
+        if comm.has_author_replied:
+            if platform == "facebook" and existing and existing["status"] in ("reply_failed", "reply_delivery_unknown"):
+                update_lead_status(existing["id"], status="already_replied_manual")
+            return
         retry_statuses = ("reply_failed", "sent_dm_reply_pending")
         if platform == "facebook":
             retry_statuses += ("pending_follow", "pending_verification", "dm_failed", "dm_failed_private")
         if existing and existing["status"] not in retry_statuses:
-            return
-        if comm.has_author_replied:
             return
         intent = (CommentIntentResult("lead_magnet") if platform == "facebook"
                   else detect_comment_intent(comm.text, custom_triggers=triggers))
@@ -350,9 +355,14 @@ class LeadFunnelService:
             save("sent_dm_reply_pending" if dm_sent else "reply_failed")
             raise
         if not ok:
+            if platform == "facebook" and error == "already_replied_manual":
+                save("already_replied_manual")
+                return
             save("reply_delivery_unknown" if error == "delivery_unknown" else "sent_dm_reply_pending" if dm_sent else "reply_failed")
             stats["errors"] += 1
-            logger.warning("[%s] Reply was not confirmed; retained for retry", platform)
+            self.last_error[platform] = error or "reply_failed"
+            logger.warning("[%s] Reply not confirmed: comment=%s reason=%s retry=%s",
+                           platform, comm.comment_id, self.last_error[platform], error != "delivery_unknown")
             return
         save(status)
         stats["replies"] += 1

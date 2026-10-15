@@ -11,7 +11,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import (
     CHANNEL_AUTOMATION_BOT_TOKEN,
     TELEGRAM_BOT_TOKEN,
-    CYBER_RIZHYI_BOT_TOKEN
+    CYBER_RIZHYI_BOT_TOKEN,
+    ALLOWED_USER_IDS
 )
 from bot.handlers import router as bot_router
 from bot.album_middleware import AlbumMiddleware
@@ -137,16 +138,20 @@ async def main():
             except Exception as exc:
                 logger.warning("Lead worker %s failed: %s", platform, type(exc).__name__)
 
-        logger.info("Lead funnel background monitor active (sequential mode)")
-        try:
-            await asyncio.sleep(10)
+        async def monitor(platforms, interval):
             cycle = 0
             while True:
                 cycle += 1
-                for platform in ("facebook", "instagram", "tiktok", "youtube"):
+                for platform in platforms:
                     await platform_worker(platform, cycle)
-                    await asyncio.sleep(3)
-                await asyncio.sleep(120)
+                await asyncio.sleep(interval)
+
+        logger.info("Lead funnel monitor active: Facebook interval=15s, other platforms=120s")
+        try:
+            await asyncio.gather(
+                monitor(("facebook",), 15),
+                monitor(("instagram", "tiktok", "youtube"), 120),
+            )
         except asyncio.CancelledError:
             logger.info("Lead funnel background monitor stopped.")
 
