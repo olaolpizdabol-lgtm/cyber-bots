@@ -117,196 +117,8 @@ async def main():
         except Exception as we:
             logger.warning(f"Не вдалося запустити Web Uploader: {we}")
 
-    logger.info("Запуск Telegram бота (polling) з підтримкою ВСІХ форматів контенту та TikTok вогників...")
-    
-    # Запускаємо фоновий планувальник вогників
-    from datetime import datetime, timezone, timedelta
-    from core.database import get_setting, set_setting
-    from services.automations.automation_2 import tiktok_streak_service
-    from config import ALLOWED_USER_IDS, DATA_DIR, TIKTOK_STREAK_SCHEDULE_TIME
+    logger.info("Запуск Telegram бота (polling) та авто-відповідей (Lead Funnel)...")
 
-    async def streak_scheduler_background_task():
-        logger.info("Фоновий планувальник TikTok вогників, новин Чернівців та Instagram DM активний.")
-        last_react_check_minute = None
-        last_ig_check_minute = None
-        slots_file = DATA_DIR / "daily_news_streak_slots.json"
-        in_memory_sent_slots = set()
-        current_day_cached = ""
-
-        while True:
-            try:
-                await asyncio.sleep(45)
-                try:
-                    from zoneinfo import ZoneInfo
-                    kyiv_tz = ZoneInfo("Europe/Kyiv")
-                    now_kyiv = datetime.now(kyiv_tz)
-                except Exception:
-                    kyiv_tz = timezone(timedelta(hours=3))
-                    now_kyiv = datetime.now(kyiv_tz)
-
-                today_str = now_kyiv.strftime("%Y-%m-%d")
-                current_hm = now_kyiv.strftime("%H:%M")
-
-                if today_str != current_day_cached:
-                    current_day_cached = today_str
-                    in_memory_sent_slots.clear()
-
-                # Розклад 3 рази на день для друзів: 10:00 (ранок), 15:00 (день), 20:00 (вечір)
-                DAILY_NEWS_SLOTS = {
-                    "10:00": 10,
-                    "15:00": 15,
-                    "20:00": 20
-                }
-                sent_slots = {}
-                if slots_file.exists():
-                    try:
-                        sent_slots = json.loads(slots_file.read_text(encoding="utf-8"))
-                    except Exception:
-                        sent_slots = {}
-                if not isinstance(sent_slots, dict):
-                    sent_slots = {}
-
-                today_slots = set(sent_slots.get(today_str, [])) | in_memory_sent_slots
-                due_slot = None
-                for s, target_hour in DAILY_NEWS_SLOTS.items():
-                    # Слот спрацьовує виключно у відповідну годину (target_hour або target_hour + 1)
-                    if s not in today_slots and target_hour <= now_kyiv.hour <= target_hour + 1 and current_hm >= s:
-                        due_slot = s
-                        break
-
-                if due_slot:
-                    logger.info(f"⏰ Настав час слоту {due_slot} (зараз {current_hm} Київ): відправка друзям новини та вогника...")
-                    in_memory_sent_slots.add(due_slot)
-                    today_slots.add(due_slot)
-                    sent_slots[today_str] = list(today_slots)
-                    try:
-                        slots_file.write_text(json.dumps(sent_slots, ensure_ascii=False, indent=2), encoding="utf-8")
-                    except Exception as se:
-                        logger.warning(f"Не вдалося зберегти slots_file: {se}")
-                    # Відправляємо кєнтам (дівчина фільтрується автоматично)
-                    res = await tiktok_streak_service.run_streaks_dispatch(force_all=True, friends_only=True)
-                    target_uids = [uid for uid in ALLOWED_USER_IDS if uid] or [1929970467]
-                    sent_cnt = res.get("sent_count", 0)
-                    logger.info(f"Слот {due_slot}: опрацьовано {sent_cnt} контактів друзів.")
-                    if sent_cnt > 0:
-                        for uid in target_uids:
-                            try:
-                                await bot.send_message(
-                                    uid,
-                                    f"🔥 <b>Звіт TikTok вогників та новин Чернівців!</b>\n"
-                                    f"Слот: {due_slot} (Київ)\n"
-                                    f"Успішно опрацьовано: {sent_cnt} контактів.",
-                                    parse_mode="HTML"
-                                )
-                            except Exception as be:
-                                logger.debug(f"Помилка відправки звіту вогника: {be}")
-
-                # Періодична перевірка вхідних TikTok відео кожні 15 хвилин
-                if now_kyiv.minute % 15 == 0 and last_react_check_minute != now_kyiv.minute:
-                    last_react_check_minute = now_kyiv.minute
-                    try:
-                        logger.info("🔍 Фонова перевірка скинутих TikTok відео у чатах...")
-                        await tiktok_streak_service.check_and_react_to_shared_videos()
-                    except Exception as react_err:
-                        logger.error(f"Помилка фонової перевірки TikTok відео: {react_err}")
-
-                # Періодична перевірка Instagram Direct повідомлень та Reels від дівчини (@lady_valeriii) кожні 5 хвилин
-                if now_kyiv.minute % 5 == 0 and last_ig_check_minute != now_kyiv.minute:
-                    last_ig_check_minute = now_kyiv.minute
-                    try:
-                        from services.instagram_dm_monitor import instagram_dm_monitor
-                        await asyncio.to_thread(instagram_dm_monitor.check_new_messages)
-                    except Exception as ig_err:
-                        logger.error(f"Помилка фонової перевірки Instagram Direct від Валерії: {ig_err}")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Помилка фонового планувальника: {e}")
-
-    async def post_scheduler_background_task():
-        logger.info("Фоновий планувальник публікацій контенту активний (перевірка кожні 20 сек).")
-        from core.database import get_due_scheduled_posts, claim_scheduled_post, update_post_status
-        from services.automations.auto_poster import auto_poster
-        from core.security_guard import security_guard
-        from bot.keyboards import get_publish_result_keyboard
-        import html
-
-        icons = {
-            "tiktok": "⚫️", "instagram": "🟣", "youtube": "🔴",
-            "facebook": "🔵", "snapchat": "🟡", "twitter": "𝕏",
-            "threads": "🧵", "pinterest": "📌", "bluesky": "🦋",
-            "telegram": "💬"
-        }
-
-        while True:
-            try:
-                await asyncio.sleep(20)
-                due_posts = get_due_scheduled_posts()
-                if not due_posts:
-                    continue
-
-                for post in due_posts:
-                    post_id = post["id"]
-                    # Атомарний claim: захист від подвійної публікації (два таски / два інстанси)
-                    if not claim_scheduled_post(post_id):
-                        logger.info(f"⏭️ Пост #{post_id} вже забраний іншим процесом — пропускаємо.")
-                        continue
-
-                    logger.info(f"⏰ Настав час публікації запланованого поста #{post_id}!")
-
-                    # Перевіряємо, що медіафайли поста реально існують (захист від застарілих записів)
-                    media_list = post.get("media_paths_list") or []
-                    missing = [p for p in media_list if not Path(p).exists()]
-                    if media_list and missing:
-                        update_post_status(post_id, "partial")
-                        err_text = f"⚠️ Пост #{post_id} НЕ опубліковано: медіафайли відсутні: {missing}"
-                        logger.warning(err_text)
-                        recipients = [post.get("scheduled_by_chat_id")] if post.get("scheduled_by_chat_id") else ALLOWED_USER_IDS
-                        for uid in recipients:
-                            if uid:
-                                try:
-                                    await bot.send_message(uid, err_text)
-                                except Exception:
-                                    pass
-                        continue
-
-                    target_platforms = post.get("target_platforms_list")
-                    chat_id = post.get("scheduled_by_chat_id")
-
-                    results = await asyncio.to_thread(auto_poster.publish_post, post_id, target_platforms)
-
-                    has_failures = any(not res.success for res in results.values()) if results else False
-                    report_text = f"⏰ <b>Запланований пост #{post_id} опубліковано!</b>\n\n"
-                    for plat, res in results.items():
-                        icon = icons.get(plat, "🌐")
-                        if res.success:
-                            link = f"<a href='{res.url}'>Переглянути</a>" if res.url else "Опубліковано"
-                            report_text += f"{icon} <b>{res.platform}:</b> ✅ Успішно! ({link})\n"
-                        else:
-                            err_msg = security_guard.sanitize_error(str(res.error or "Помилка"))
-                            if len(err_msg) > 160:
-                                err_msg = err_msg[:157] + "..."
-                            report_text += f"{icon} <b>{res.platform}:</b> ❌ <i>{html.escape(err_msg)}</i>\n"
-
-                    recipients = [chat_id] if chat_id else ALLOWED_USER_IDS
-                    for uid in recipients:
-                        if not uid:
-                            continue
-                        try:
-                            await bot.send_message(
-                                uid,
-                                report_text,
-                                reply_markup=get_publish_result_keyboard(post_id, has_failures=has_failures),
-                                parse_mode="HTML",
-                                disable_web_page_preview=True
-                            )
-                        except Exception as send_err:
-                            logger.warning(f"Не вдалося надіслати звіт публікації користувачу {uid}: {send_err}")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Помилка фонового планувальника публікацій: {e}")
 
     async def lead_funnel_background_task():
         from services.lead_funnel import lead_funnel_service
@@ -377,8 +189,6 @@ async def main():
             first_report = False
             await asyncio.sleep(600)
 
-    post_scheduler_task = asyncio.create_task(post_scheduler_background_task())
-    scheduler_task = asyncio.create_task(streak_scheduler_background_task())
     funnel_task = asyncio.create_task(lead_funnel_background_task())
     report_task = asyncio.create_task(lead_report_background_task())
 
@@ -386,11 +196,9 @@ async def main():
         await bot.delete_webhook(drop_pending_updates=False)
         await dp.start_polling(bot)
     finally:
-        scheduler_task.cancel()
-        post_scheduler_task.cancel()
         funnel_task.cancel()
         report_task.cancel()
-        await asyncio.gather(scheduler_task, post_scheduler_task, funnel_task, report_task, return_exceptions=True)
+        await asyncio.gather(funnel_task, report_task, return_exceptions=True)
         if "runner" in locals():
             await runner.cleanup()
         await bot.session.close()

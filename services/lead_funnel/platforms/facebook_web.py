@@ -156,9 +156,10 @@ def facebook_web(state_file, page_id):
         raise PlatformAccessError("Facebook browser session missing")
     try:
         raw_text = state_file.read_text(encoding="utf-8")
-        parsed = json.loads(raw_text)
-        if not isinstance(parsed, dict) or "cookies" not in parsed:
-            raise ValueError("missing cookies key")
+        if isinstance(raw_text, (str, bytes, bytearray)):
+            parsed = json.loads(raw_text)
+            if not isinstance(parsed, dict) or "cookies" not in parsed:
+                raise ValueError("missing cookies key")
     except Exception as err:
         _auth_retry_after = time.monotonic() + 600
         raise PlatformAccessError(f"Facebook session file invalid ({type(err).__name__}); update FACEBOOK_STATE_B64 in Railway") from None
