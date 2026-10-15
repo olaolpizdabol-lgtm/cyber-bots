@@ -107,7 +107,7 @@ class FacebookFunnel(BasePlatformFunnel):
                     cid = comment.get("legacy_fbid")
                     if not cid or not text or not author.get("id") or author["id"] in owner_ids:
                         continue
-                    if comment.get("depth") != 0:
+                    if comment.get("depth") not in (0, None) or comment.get("comment_direct_parent") or comment.get("comment_parent"):
                         continue
                     url = (comment.get("feedback") or {}).get("url")
                     results[cid] = PlatformComment(cid, post_id, url, author["id"], author.get("name", author["id"]),

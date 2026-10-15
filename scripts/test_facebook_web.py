@@ -72,6 +72,22 @@ class FacebookWebTests(unittest.TestCase):
         self.assertEqual(self.send(web), (True, None))
         web.create_reply.assert_not_called()
 
+    def test_comments_without_explicit_depth_are_not_dropped(self):
+        parent_no_depth = {
+            '__typename': 'Comment', 'id': 'parent-no-depth', 'legacy_fbid': '101',
+            'author': {'id': 'visitor2', 'name': 'Visitor 2'}, 'body': {'text': 'GPT'},
+            'feedback': {'id': 'fb-2'}
+        }
+        web = Mock()
+        web.posts.return_value = ['post-1']
+        web.comments.return_value = {'parent-no-depth': parent_no_depth}
+        with patch('services.lead_funnel.platforms.facebook_web.facebook_web') as connection:
+            connection.return_value.__enter__.return_value = web
+            results = FacebookFunnel()._fetch_comments_via_browser()
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].comment_id, '101')
+            self.assertEqual(results[0].text, 'GPT')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
