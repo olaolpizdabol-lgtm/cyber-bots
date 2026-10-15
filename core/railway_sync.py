@@ -24,16 +24,33 @@ ENV_FILES_MAP = [
 def restore_sessions_from_env():
     """Перевіряє наявність B64 змінних і записує файли сесій на диск"""
     restored = 0
+    import json
     for env_name, target_path in ENV_FILES_MAP:
         val = os.getenv(env_name)
         if val:
             try:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                raw_bytes = base64.b64decode(val.strip())
-                target_path.write_bytes(raw_bytes)
+                val_clean = val.strip().strip("\"'")
+                # Якщо користувач вставив рядок вигляду ENV_NAME=value
+                if "=" in val_clean and val_clean.split("=", 1)[0].strip() == env_name:
+                    val_clean = val_clean.split("=", 1)[1].strip().strip("\"'")
+
+                if val_clean.startswith("{") and val_clean.endswith("}"):
+                    # Сирий JSON напряму
+                    raw_bytes = val_clean.encode("utf-8")
+                else:
+                    raw_bytes = base64.b64decode(val_clean)
+
+                if target_path.suffix == ".json":
+                    decoded_text = raw_bytes.decode("utf-8")
+                    json.loads(decoded_text)
+                    target_path.write_text(decoded_text, encoding="utf-8")
+                else:
+                    target_path.write_bytes(raw_bytes)
+
                 logger.info(f"✅ Відновлено сесію з {env_name} -> {target_path}")
                 restored += 1
             except Exception as e:
-                logger.error(f"❌ Помилка відновлення {env_name}: {e}")
+                logger.error(f"❌ Помилка відновлення {env_name}: {type(e).__name__} ({e})")
     if restored > 0:
         logger.info(f"🎉 Успішно відновлено {restored} сесійних файлів у хмарі!")
