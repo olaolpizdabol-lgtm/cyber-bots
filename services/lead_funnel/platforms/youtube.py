@@ -8,6 +8,7 @@ and replies with direct link / access instructions in English.
 """
 import os
 import re
+import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -18,12 +19,17 @@ logger = logging.getLogger("youtube_funnel")
 
 
 class YouTubeFunnel(BasePlatformFunnel):
+    def __init__(self):
+        self._auth_retry_after = 0.0
+
     @property
     def platform_name(self) -> str:
         return "youtube"
 
     def fetch_recent_unanswered_comments(self, limit_posts: int = 5) -> List[PlatformComment]:
         """Отримує коментарі під останніми YouTube Shorts/відео через API або браузер"""
+        if time.monotonic() < self._auth_retry_after:
+            return []
         results: List[PlatformComment] = []
         # Якщо підключено YouTube Data API
         try:
@@ -67,8 +73,11 @@ class YouTubeFunnel(BasePlatformFunnel):
                     if limit_posts is not None or not page_token:
                         break
             else:
-                raise PlatformAccessError("YouTube authorization required")
+                self._auth_retry_after = time.monotonic() + 3600
+                raise PlatformAccessError("YouTube authorization required; checks paused for 1 hour")
         except Exception as e:
+            if isinstance(e, PlatformAccessError):
+                self._auth_retry_after = time.monotonic() + 3600
             logger.warning("YouTube comment fetch failed: %s", type(e).__name__)
             raise
 

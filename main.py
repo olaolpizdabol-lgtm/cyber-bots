@@ -310,28 +310,33 @@ async def main():
 
     async def lead_funnel_background_task():
         from services.lead_funnel import lead_funnel_service
-        async def platform_worker(platform):
+        async def platform_worker(platform, cycle=1):
+            try:
+                if platform in ("instagram", "tiktok"):
+                    await asyncio.to_thread(lead_funnel_service.process_direct_messages, platform)
+                await asyncio.to_thread(
+                    lead_funnel_service.process_platform_comments,
+                    platform,
+                    None if cycle % 12 == 0 else 6
+                )
+                await asyncio.to_thread(lead_funnel_service.recheck_pending_leads, platform)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Lead worker %s failed: %s", platform, type(exc).__name__)
+
+        logger.info("Lead funnel background monitor active (sequential mode)")
+        try:
             await asyncio.sleep(10)
             cycle = 0
             while True:
                 cycle += 1
-                try:
-                    if platform in ("instagram", "tiktok"):
-                        await asyncio.to_thread(lead_funnel_service.process_direct_messages, platform)
-                    await asyncio.to_thread(lead_funnel_service.process_platform_comments,
-                                            platform, None if cycle % 12 == 0 else 6)
-                    await asyncio.to_thread(lead_funnel_service.recheck_pending_leads, platform)
-                except Exception as exc:
-                    logger.warning("Lead worker %s failed: %s", platform, type(exc).__name__)
-                await asyncio.sleep(30)
-        workers = [asyncio.create_task(platform_worker(platform))
-                   for platform in ("instagram", "facebook", "tiktok", "youtube")]
-        try:
-            await asyncio.gather(*workers)
-        finally:
-            for worker in workers:
-                worker.cancel()
-            await asyncio.gather(*workers, return_exceptions=True)
+                for platform in ("facebook", "instagram", "tiktok", "youtube"):
+                    await platform_worker(platform, cycle)
+                    await asyncio.sleep(3)
+                await asyncio.sleep(120)
+        except asyncio.CancelledError:
+            logger.info("Lead funnel background monitor stopped.")
 
     async def lead_report_background_task():
         from services.lead_funnel import lead_funnel_service

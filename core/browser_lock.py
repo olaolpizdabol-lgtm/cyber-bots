@@ -69,4 +69,4 @@ class TimeoutLock:
         self.release()
 
 
-BROWSER_LOCK = TimeoutLock(capacity=max(1, min(4, int(os.getenv("BROWSER_MAX_CONCURRENCY", "2")))))
+BROWSER_LOCK = TimeoutLock(capacity=max(1, min(4, int(os.getenv("BROWSER_MAX_CONCURRENCY", "1")))))

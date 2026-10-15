@@ -419,6 +419,7 @@ class LeadFunnelService:
         except Exception as exc:
             stats["errors"] += 1
             self.last_error[key] = platform_error_reason(exc)
+            logger.warning("[%s] DM scan failed: %s", key, self.last_error[key])
             return stats
         finally:
             self.last_scan[key] = dict(stats)
@@ -443,7 +444,9 @@ class LeadFunnelService:
             return 0
         pending = get_pending_follow_leads(platform=platform_name, limit=25)
         converted = 0
-        logger.info(f"Перевірка підписок для {len(pending)} очікуючих лідів...")
+        if not pending:
+            return 0
+        logger.info(f"Перевірка підписок для {len(pending)} очікуючих лідів ({platform_name})...")
 
         for lead in pending:
             try:

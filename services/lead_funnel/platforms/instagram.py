@@ -32,7 +32,7 @@ class InstagramFunnel(BasePlatformFunnel):
 
     def _pause_rejected_session(self, exc):
         status = getattr(exc, "code", None) or getattr(getattr(exc, "response", None), "status_code", None)
-        if status in (401, 403):
+        if status in (401, 403, 400, 429, 467):
             self._client = None
             self._retry_after = time.monotonic() + 300
             return f"Instagram API authorization rejected (HTTP {status}); paused for 5 minutes"
@@ -48,12 +48,15 @@ class InstagramFunnel(BasePlatformFunnel):
             return self._client
 
         session_path = Path(INSTAGRAM_SESSION_FILE)
-        if session_path.exists():
-            try:
-                if isinstance(json.loads(session_path.read_text()).get("cookies"), list):
-                    return None
-            except (OSError, ValueError):
+        if not session_path.exists():
+            return None
+        try:
+            session = json.loads(session_path.read_text())
+            if isinstance(session.get("cookies"), list):
+                # Chrome cookies belong to the web client; a mobile login can invalidate them.
                 return None
+        except (OSError, ValueError):
+            return None
 
         proxy_url = proxy_manager.proxy_url
         if proxy_url and not proxy_manager.is_proxy_alive():
@@ -63,28 +66,14 @@ class InstagramFunnel(BasePlatformFunnel):
         try:
             from instagrapi import Client
             cl = Client()
+            cl.request_timeout = 15
             if proxy_url and proxy_manager.is_proxy_alive():
                 cl.set_proxy(proxy_url)
-
-            session_path = Path(INSTAGRAM_SESSION_FILE)
-            if session_path.exists():
-                try:
-                    session = json.loads(session_path.read_text())
-                    if isinstance(session.get("cookies"), list):
-                        # Chrome cookies belong to the web client; a mobile login can invalidate them.
-                        return None
-                    else:
-                        cl.load_settings(str(session_path))
-                    self._client = cl
-                    return cl
-                except Exception as e:
-                    logger.warning(f"Не вдалося завантажити instagrapi сесію: {e}")
-                    self._retry_after = time.monotonic() + 300
-                    return None
-
-            return None
+            cl.load_settings(str(session_path))
+            self._client = cl
+            return cl
         except Exception as e:
-            logger.debug(f"instagrapi unavailable: {e}")
+            logger.warning(f"Не вдалося завантажити instagrapi сесію: {e}")
             self._retry_after = time.monotonic() + 300
             return None
 

@@ -414,15 +414,11 @@ class PlatformTests(unittest.TestCase):
         main = next(n for n in source.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'main')
         background = next(n for n in main.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'lead_funnel_background_task')
         worker = next(n for n in background.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'platform_worker')
-        async def sleep(seconds):
-            if seconds == 30:
-                raise asyncio.CancelledError
         service = Mock(); calls = AsyncMock()
-        namespace = {'asyncio': SimpleNamespace(sleep=sleep, to_thread=calls), 'lead_funnel_service': service, 'logger': Mock()}
+        namespace = {'asyncio': SimpleNamespace(sleep=AsyncMock(), to_thread=calls), 'lead_funnel_service': service, 'logger': Mock()}
         exec(compile(ast.Module(body=[worker], type_ignores=[]), '<worker>', 'exec'), namespace)
         async def run():
-            with self.assertRaises(asyncio.CancelledError):
-                await namespace['platform_worker']('facebook')
+            await namespace['platform_worker']('facebook')
         asyncio.run(run())
         calls.assert_any_await(service.process_platform_comments, 'facebook', 6)
         self.assertNotIn(service.process_direct_messages, [call.args[0] for call in calls.await_args_list])
